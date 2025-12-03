@@ -1,0 +1,222 @@
+DATABASE SCHEMA - VISTA
+================================================================================
+
+LEGEND:
+  [PK] = Primary Key
+  [FK] = Foreign Key
+  [UK] = Unique Key
+  [IX] = Index
+
+Relationships shown with arrows: --> (one-to-many), --< (many-to-one)
+
+
++------------------+                    +----------------------+
+|     users        |                    |     projects         |
++------------------+                    +----------------------+
+| id [PK] UUID     |<----------------+  | id [PK] UUID         |
+| email [UK][IX]   |                 |  | name [IX]            |
+| username         |                 |  | description          |
+| is_active        |                 |  | meta_group_id [IX]   |
+| created_at       |                 |  | created_at           |
+| updated_at       |                 |  | updated_at           |
++------------------+                 |  +----------------------+
+        |                            |           |
+        | uploaded_images            |           | images
+        |                            |           |
+        v                            |           v
++--------------------------------------+  +-------------------------+
+|         data_instances               |  |   project_metadata      |
++--------------------------------------+  +-------------------------+
+| id [PK] UUID                         |  | id [PK] UUID            |
+| project_id [FK] --> projects.id      |  | project_id [FK] ------->|
+| filename                             |  | key                     |
+| object_storage_key [UK]              |  | value (JSON)            |
+| content_type                         |  | created_at              |
+| size_bytes                           |  | updated_at              |
+| metadata_json (JSON)                 |  +-------------------------+
+| uploaded_by_user_id                  |  [UK: project_id + key]
+| uploader_id [FK] --> users.id        |
+| created_at                           |
+| updated_at                           |
+|                                      |  +----------------------+
+| --- Deletion/Retention Fields ---    |  |   image_classes      |
+| deleted_at [IX]                      |  +----------------------+
+| deleted_by_user_id [FK] --> users.id |  | id [PK] UUID         |
+| deletion_reason                      |  | project_id [FK] ---->|
+| pending_hard_delete_at [IX]          |  | name                 |
+| hard_deleted_at                      |  | description          |
+| hard_deleted_by_user_id [FK] ------->|  | created_at           |
+| storage_deleted                      |  | updated_at           |
++--------------------------------------+  +----------------------+
+        |                   |                       |
+        | comments          | classifications       | classifications
+        |                   |                       |
+        v                   v                       v
++---------------------+    +------------------------------------+
+|  image_comments     |    |    image_classifications           |
++---------------------+    +------------------------------------+
+| id [PK] UUID        |    | id [PK] UUID                       |
+| image_id [FK] ----->|    | image_id [FK] --> data_instances  |
+| author_id [FK]      |    | class_id [FK] --> image_classes   |
+|   --> users.id      |    | created_by_id [FK] --> users.id   |
+| text                |    | created_at                         |
+| created_at          |    | updated_at                         |
+| updated_at          |    +------------------------------------+
++---------------------+
+
+
++---------------------------------+
+|   image_deletion_events         |
++---------------------------------+
+| id [PK] UUID                    |
+| image_id [FK][IX]               |
+|   --> data_instances.id         |
+| project_id [FK][IX]             |
+|   --> projects.id               |
+| actor_user_id [FK]              |
+|   --> users.id                  |
+| action                          |
+| reason                          |
+| storage_deleted                 |
+| previous_state (JSON)           |
+| at [IX]                         |
++---------------------------------+
+
+
++---------------------+
+|     api_keys        |
++---------------------+
+| id [PK] UUID        |
+| user_id [FK] ------>|
+|   --> users.id      |
+| key_hash [UK][IX]   |
+| name                |
+| is_active           |
+| last_used_at        |
+| created_at          |
+| updated_at          |
++---------------------+
+
+
+MACHINE LEARNING SUBSYSTEM
+================================================================================
+
++--------------------------------+
+|        ml_analyses             |
++--------------------------------+
+| id [PK] UUID                   |
+| image_id [FK][IX]              |
+|   --> data_instances.id        |
+| model_name [IX]                |
+| model_version                  |
+| status [IX]                    |
+|   (queued/processing/          |
+|    completed/failed)           |
+| error_message                  |
+| parameters (JSON)              |
+| provenance (JSON)              |
+| requested_by_id [FK]           |
+|   --> users.id                 |
+| external_job_id [UK]           |
+| priority                       |
+| created_at                     |
+| started_at                     |
+| completed_at                   |
+| updated_at                     |
++--------------------------------+
+        |
+        | annotations
+        |
+        v
++--------------------------------+
+|      ml_annotations            |
++--------------------------------+
+| id [PK] UUID                   |
+| analysis_id [FK][IX]           |
+|   --> ml_analyses.id           |
+| annotation_type [IX]           |
+|   (classification/             |
+|    bounding_box/heatmap/       |
+|    segmentation)               |
+| class_name                     |
+| confidence (0.0-1.0)           |
+| data (JSON)                    |
+| storage_path                   |
+|   (S3 artifact reference)      |
+| ordering                       |
+| created_at                     |
++--------------------------------+
+
+
+KEY RELATIONSHIPS SUMMARY
+================================================================================
+
+1. CORE HIERARCHY
+   projects (1) ---> (*) data_instances
+   projects (1) ---> (*) project_metadata
+   projects (1) ---> (*) image_classes
+
+2. USER ASSOCIATIONS
+   users (1) ---> (*) data_instances (as uploader)
+   users (1) ---> (*) image_comments (as author)
+   users (1) ---> (*) image_classifications (as creator)
+   users (1) ---> (*) api_keys (authentication)
+   users (1) ---> (*) ml_analyses (as requester)
+
+3. IMAGE INTERACTIONS
+   data_instances (1) ---> (*) image_comments
+   data_instances (1) ---> (*) image_classifications
+   data_instances (1) ---> (*) ml_analyses
+   data_instances (1) ---> (*) image_deletion_events
+
+4. CLASSIFICATION SYSTEM
+   image_classes (1) ---> (*) image_classifications
+   (many-to-many between data_instances and image_classes)
+
+5. ML ANALYSIS PIPELINE
+   data_instances (1) ---> (*) ml_analyses
+   ml_analyses (1) ---> (*) ml_annotations
+
+6. DELETION TRACKING
+   data_instances (1) ---> (*) image_deletion_events
+   (audit trail for soft/hard deletions)
+
+
+STORAGE ARCHITECTURE
+================================================================================
+
+PostgreSQL Tables:
+  - All structured data (metadata, relationships, audit logs)
+  - Foreign key constraints enforce referential integrity
+  - Indexes optimize common queries (user lookups, project filtering)
+
+S3/MinIO Object Storage:
+  - Original images: projects/{project_id}/{filename}
+  - ML artifacts: ml_outputs/{analysis_id}/{artifact_name}
+  - Referenced via object_storage_key and storage_path columns
+
+CASCADE BEHAVIORS:
+  - Project deletion -> cascades to images, classes, metadata
+  - Image deletion -> cascades to comments, classifications, ML analyses
+  - ML analysis deletion -> cascades to annotations
+  - Soft delete (deleted_at) prevents data loss with 60-day retention
+  - Hard delete tracked via image_deletion_events audit log
+
+
+SECURITY & ACCESS CONTROL
+================================================================================
+
+Group-Based Authorization:
+  - projects.meta_group_id determines access
+  - User group membership checked via reverse proxy headers
+  - No cross-project data leakage
+
+Authentication Methods:
+  1. Header-based (X-User-Email + X-Proxy-Secret)
+  2. API keys (hashed in api_keys table)
+  3. ML pipeline HMAC (for callback endpoints)
+
+Audit Trail:
+  - image_deletion_events tracks all deletion operations
+  - created_at/updated_at timestamps on all entities
+  - user associations preserve accountability

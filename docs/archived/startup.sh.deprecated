@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+# Orchestrates starting backend and/or frontend dev servers.
+# Usage: ./startup.sh [-f] [-b]
+#   -f: Start frontend only
+#   -b: Start backend only
+# If no flags are provided, both are started (backend in background, frontend in foreground).
+
+set -euo pipefail
+
+say() { echo "[startup] $*"; }
+
+# Ensure Node.js from devcontainer feature is available when needed
+ensure_node() {
+    if command -v node >/dev/null 2>&1; then
+        return 0
+    fi
+    local NVM_NODE_BIN="/usr/local/share/nvm/current/bin"
+    if [[ -d "$NVM_NODE_BIN" ]]; then
+        export PATH="$NVM_NODE_BIN:$PATH"
+        command -v node >/dev/null 2>&1 && return 0
+    fi
+    say "WARNING: Node.js not found; frontend may fail to start."
+}
+
+START_BACKEND=false
+START_FRONTEND=false
+
+while getopts "fb" opt; do
+  case $opt in
+    f) START_FRONTEND=true ;;
+    b) START_BACKEND=true ;;
+    *) echo "Usage: $0 [-f] [-b]" >&2; exit 1 ;;
+  esac
+done
+
+# Default: both if no flags
+if [[ "$START_BACKEND" == false && "$START_FRONTEND" == false ]]; then
+  START_BACKEND=true
+  START_FRONTEND=true
+fi
+
+BACKEND_PID=""
+cleanup() {
+  if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+    say "Stopping backend (pid=$BACKEND_PID)"
+    kill "$BACKEND_PID" || true
+    wait "$BACKEND_PID" || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if [[ "$START_BACKEND" == true ]]; then
+  if [[ -x backend/run.sh ]]; then
+    say "Starting backend..."
+    ( cd backend && bash ./run.sh ) &
+    BACKEND_PID=$!
+    say "Backend started in background (pid=$BACKEND_PID)"
+  else
+    say "ERROR: backend/run.sh not found or not executable"
+    exit 1
+  fi
+fi
+
+if [[ "$START_FRONTEND" == true ]]; then
+  ensure_node
+  if [[ -x frontend/run.sh ]]; then
+    say "Starting frontend..."
+    ( cd frontend && bash ./run.sh )
+  else
+    say "ERROR: frontend/run.sh not found or not executable"
+    exit 1
+  fi
+fi
+
+# If only backend was started, wait on it so the script doesn't exit immediately
+if [[ "$START_BACKEND" == true && "$START_FRONTEND" == false ]]; then
+  say "Backend running (pid=$BACKEND_PID). Press Ctrl+C to stop."
+  wait "$BACKEND_PID"
+fi

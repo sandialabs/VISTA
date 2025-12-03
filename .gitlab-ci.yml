@@ -1,0 +1,27 @@
+# GitLab CI/CD configuration for building and pushing Docker images to Quay.io
+
+# Define variables at the top
+variables:
+  QUAY_USERNAME: ${QUAY_USERNAME}
+  QUAY_IMAGE_NAME: vista
+  QUAY_REGISTRY: quay.io
+
+# Define stages
+stages:
+  - build
+
+# Build and push Docker image
+build:
+  stage: build
+  image: podman:latest
+  services:
+    - podman:dind
+  before_script:
+    - echo "$QUAY_PASSWORD" | podman login quay.io -u "$QUAY_USERNAME" --password-stdin
+  script:
+    - podman build -t $QUAY_REGISTRY/$QUAY_USERNAME/$QUAY_IMAGE_NAME:latest -t $QUAY_REGISTRY/$QUAY_USERNAME/$QUAY_IMAGE_NAME:$CI_COMMIT_SHA .
+    - podman push $QUAY_REGISTRY/$QUAY_USERNAME/$QUAY_IMAGE_NAME:latest
+    - podman push $QUAY_REGISTRY/$QUAY_USERNAME/$QUAY_IMAGE_NAME:$CI_COMMIT_SHA
+  only:
+    - main
+    - merge_requests

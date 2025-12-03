@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_NAME: "Data Management API"
+  DEBUG: "false"
+  FAST_TEST_MODE: "false"
+  SKIP_HEADER_CHECK: "true"
+  MOCK_USER_EMAIL: "user@example.com"
+  MOCK_USER_GROUPS_JSON: '["admin-group", "data-scientists", "project-alpha-group"]'
+  POSTGRES_USER: "postgres"
+  POSTGRES_DB: "datamanagement"
+  POSTGRES_SERVER: "postgres"
+  POSTGRES_PORT: "5432"
+  DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/datamanagement"
+  S3_ENDPOINT: "minio:9000"
+  S3_BUCKET: "data-storage"
+  S3_USE_SSL: "false"
+  FRONTEND_BUILD_PATH: "/app/ui2"
+  CORS_ORIGINS: "http://localhost:3000,http://localhost:8000"

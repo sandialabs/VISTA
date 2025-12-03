@@ -1,0 +1,144 @@
+name: "Security Scanning"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Mondays at 2 AM
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: podman/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: podman/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: security-scan:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'security-scan:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  dependency-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install safety bandit semgrep
+
+      - name: Run Safety (Python dependency vulnerability scanner)
+        working-directory: ./backend
+        run: |
+          safety check -r ../requirements.txt --json --output safety-results.json || true
+
+      - name: Run Bandit (Python security linter)
+        working-directory: ./backend
+        run: |
+          bandit -r . -f json -o bandit-results.json || true
+
+      - name: Run Semgrep (Static analysis for security bugs)
+        run: |
+          semgrep --config=auto --json --output=semgrep-results.json . || true
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results
+          path: |
+            backend/safety-results.json
+            backend/bandit-results.json
+            semgrep-results.json
+
+  graphql-scan:
+    name: GraphQL Security Scan
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.message, 'graphql') || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '18'
+
+      - name: Install GraphQL security tools
+        run: |
+          npm install -g @escape.tech/graphql-armor-cli
+          npm install -g graphql-query-complexity
+
+      - name: Scan for GraphQL endpoints
+        run: |
+          # Look for GraphQL schemas and endpoints in the codebase
+          find . -name "*.graphql" -o -name "*schema*" -o -name "*gql*" | head -10 > graphql-files.txt || echo "No GraphQL files found"
+          
+          # Search for GraphQL-related imports and usage
+          grep -r "graphql\|GraphQL\|gql" --include="*.py" --include="*.js" --include="*.ts" . | head -20 > graphql-usage.txt || echo "No GraphQL usage found"
+
+      - name: Report GraphQL findings
+        run: |
+          echo "=== GraphQL Files Found ==="
+          cat graphql-files.txt
+          echo ""
+          echo "=== GraphQL Usage Found ==="
+          cat graphql-usage.txt
+          
+          # If GraphQL is found, warn about security considerations
+          if [ -s graphql-files.txt ] || [ -s graphql-usage.txt ]; then
+            echo "⚠️ GraphQL usage detected. Ensure proper security measures:"
+            echo "- Query depth limiting"
+            echo "- Query complexity analysis" 
+            echo "- Rate limiting"
+            echo "- Authentication and authorization"
+            echo "- Input validation"
+          else
+            echo "✅ No GraphQL usage detected"
+          fi
+
+      - name: Upload GraphQL scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: graphql-scan-results
+          path: |
+            graphql-files.txt
+            graphql-usage.txt

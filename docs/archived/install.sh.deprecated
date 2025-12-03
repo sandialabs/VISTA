@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+
+# Install backend dependencies (Python via uv). Optionally manage Node.js.
+# By default in this devcontainer, Node is provided by the devcontainer feature via nvm.
+# To avoid apt-based Node management, set SKIP_NODE_APT=1 (start.sh does this).
+# Set CONTAINER_ENGINE=podman or CONTAINER_ENGINE=podman (defaults to podman)
+
+set -euo pipefail
+
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
+
+say() { echo "[install] $*"; }
+
+install_dependencies() {
+    ensure_node() {
+        # Try existing PATH first
+        if command -v node >/dev/null 2>&1; then
+            say "Node detected: $(node --version)"
+            command -v npm >/dev/null 2>&1 && say "npm detected: $(npm --version)" || say "WARNING: npm not found"
+            return 0
+        fi
+        # Try devcontainer feature path (nvm current)
+        local NVM_NODE_BIN="/usr/local/share/nvm/current/bin"
+        if [[ -d "$NVM_NODE_BIN" ]]; then
+            export PATH="$NVM_NODE_BIN:$PATH"
+            if command -v node >/dev/null 2>&1; then
+                say "Node made available via devcontainer feature path: $(node --version)"
+                command -v npm >/dev/null 2>&1 && say "npm detected: $(npm --version)" || say "WARNING: npm not found"
+                return 0
+            fi
+        fi
+        say "WARNING: Node.js not found on PATH. Frontend tasks may fail."
+        return 1
+    }
+
+    if [[ "${SKIP_NODE_APT:-}" == "1" ]]; then
+        say "SKIP_NODE_APT=1 set; skipping apt-based Node.js management"
+        ensure_node || true
+    else
+        say "Managing Node.js via apt/NodeSource (override by setting SKIP_NODE_APT=1)"
+        # Best-effort removal; ignore errors for packages that don't exist
+        sudo apt-get update -y || true
+        sudo apt remove -y nodejs npm || true
+        # Add NodeSource repository for Node.js 22 and install
+        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+        # Verify Node.js installation
+        if command -v node >/dev/null 2>&1; then
+            say "Node.js version installed: $(node --version)"
+        else
+            say "ERROR: Node.js installation failed"
+            exit 1
+        fi
+        if command -v npm >/dev/null 2>&1; then
+            say "npm version installed: $(npm --version)"
+        else
+            say "ERROR: npm installation failed"
+            exit 1
+        fi
+    fi
+    
+    # Install uv
+    if ! command -v uv >/dev/null 2>&1; then
+        say "Installing uv"
+        python3 -m pip install uv
+    else
+        say "uv already installed: $(uv --version)"
+    fi
+    
+    # Create and activate virtual environment in backend directory
+    if [[ ! -d backend/.venv ]]; then
+        say "Creating Python virtual environment with uv in backend/"
+        cd backend
+        uv venv .venv
+        cd ..
+    fi
+    
+    # Activate virtual environment
+    say "Activating Python virtual environment"
+    source backend/.venv/bin/activate
+    
+    # Install Python dependencies
+    if [[ -f backend/requirements.txt ]]; then
+        say "Installing Python dependencies"
+        uv pip install -r backend/requirements.txt
+    else
+        say "backend/requirements.txt not found; skipping pip install"
+    fi
+}
+
+# Run the installation
+install_dependencies

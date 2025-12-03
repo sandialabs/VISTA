@@ -1,0 +1,191 @@
+name: CI/CD Pipeline
+
+# Define variables at the top
+env:
+  DOCKER_USERNAME: garland3
+  DOCKER_IMAGE_NAME: vista
+  PYTHON_VERSION: "3.11"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  security-events: write
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v5
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpq-dev which
+    
+    - name: Build frontend
+      run: |
+        cd frontend
+        npm ci
+        npm run build
+    
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        
+    - name: Install Python dependencies with uv
+      working-directory: ./backend
+      run: |
+        uv venv .venv
+        source .venv/bin/activate
+        uv pip install -r ../requirements.txt
+        
+    - name: Set up test environment
+      working-directory: ./backend
+      run: |
+        cp ../.env.example .env || echo "No .env.example found, using defaults"
+        
+    - name: Run tests
+      working-directory: ./backend
+      run: |
+        source .venv/bin/activate
+        
+        bash ../test/run_tests.sh
+      env:
+        DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: postgres
+        POSTGRES_SERVER: localhost
+        POSTGRES_PORT: 5432
+        DEBUG: true
+        SKIP_HEADER_CHECK: true
+        MOCK_USER_EMAIL: test@example.com
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: podman/setup-buildx-action@v3
+    
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: podman/login-action@v3
+      with:
+        username: ${{ env.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build Docker image
+      uses: podman/build-push-action@v5
+      with:
+        context: .
+        load: true
+        tags: |
+          ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+          ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test container
+      run: |
+        # Start the container
+        podman run -d --name test-container \
+          -e DATABASE_URL="sqlite+aiosqlite:///./test.db" \
+          -e FAST_TEST_MODE=true \
+          -e DEBUG=true \
+          -e SKIP_HEADER_CHECK=true \
+          -e POSTGRES_USER=postgres \
+          -e POSTGRES_PASSWORD=postgres \
+          -e POSTGRES_DB=postgres \
+          -e POSTGRES_SERVER=localhost \
+          -p 8000:8000 \
+          ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+        
+        # Wait for container to start and implement health checking with retry
+        echo "Waiting for container to become healthy..."
+        for i in {1..30}; do
+          if curl -f http://localhost:8000/api/health > /dev/null 2>&1; then
+            echo "Container is healthy after ${i} attempts"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "Container failed to become healthy after 30 attempts"
+            podman logs test-container
+            exit 1
+          fi
+          echo "Attempt $i failed, waiting 2 seconds..."
+          sleep 2
+        done
+        
+        # Test health endpoint one more time to be sure
+        curl -f http://localhost:8000/api/health || exit 1
+        
+        # Stop container
+        podman stop test-container
+        podman rm test-container
+
+    - name: Run tests in container
+      run: |
+        podman run --rm \
+          -e DATABASE_URL="sqlite+aiosqlite:///./test.db" \
+          -e FAST_TEST_MODE=true \
+          -e DEBUG=true \
+          -e SKIP_HEADER_CHECK=true \
+          -e POSTGRES_USER=postgres \
+          -e POSTGRES_PASSWORD=postgres \
+          -e POSTGRES_DB=postgres \
+          -e POSTGRES_SERVER=localhost \
+          ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest \
+          bash -c "bash ../test/run_tests.sh --backend"
+
+    - name: Push Docker image
+      if: github.event_name != 'pull_request'
+      uses: podman/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+          ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+        cache-from: type=gha
+
+        cache-to: type=gha,mode=max
+

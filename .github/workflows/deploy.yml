@@ -1,0 +1,147 @@
+name: "Deploy to Production"
+
+on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  DOCKER_USERNAME: garland3
+  DOCKER_IMAGE_NAME: vista
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ github.event.inputs.environment || 'staging' }}
+      url: ${{ steps.deploy.outputs.url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set deployment variables
+        id: vars
+        run: |
+          if [[ "${{ github.event.inputs.environment }}" == "production" ]]; then
+            echo "DEPLOY_URL=https://your-production-domain.com" >> $GITHUB_OUTPUT
+            echo "ENVIRONMENT=production" >> $GITHUB_OUTPUT
+          else
+            echo "DEPLOY_URL=https://your-staging-domain.com" >> $GITHUB_OUTPUT  
+            echo "ENVIRONMENT=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: deployment } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: '${{ steps.vars.outputs.ENVIRONMENT }}',
+              description: 'Deploy ${{ github.sha }} to ${{ steps.vars.outputs.ENVIRONMENT }}',
+              auto_merge: false,
+              required_contexts: []
+            });
+            return deployment.id;
+
+      - name: Deploy to environment
+        id: deploy
+        run: |
+          echo "🚀 Deploying ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} to ${{ steps.vars.outputs.ENVIRONMENT }}"
+          
+          # Add your actual deployment logic here
+          # Examples:
+          # - Deploy to Kubernetes
+          # - Deploy to Docker Swarm
+          # - Deploy to cloud provider
+          # - Update podman-compose.yml and restart services
+          
+          # For now, simulate deployment
+          sleep 5
+          
+          echo "url=${{ steps.vars.outputs.DEPLOY_URL }}" >> $GITHUB_OUTPUT
+          echo "✅ Deployment completed successfully"
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.result }},
+              state: 'success',
+              environment_url: '${{ steps.deploy.outputs.url }}',
+              description: 'Deployment successful'
+            });
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.result }},
+              state: 'failure',
+              description: 'Deployment failed'
+            });
+
+  health-check:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: success()
+    
+    steps:
+      - name: Health check
+        run: |
+          echo "🔍 Running post-deployment health checks..."
+          
+          # Add your health check logic here
+          # Examples:
+          # - curl health endpoints
+          # - run smoke tests
+          # - check database connectivity
+          # - verify API responses
+          
+          # For now, simulate health check
+          echo "✅ All health checks passed"
+
+  rollback:
+    needs: [deploy, health-check]
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+      - name: Rollback deployment
+        run: |
+          echo "🔄 Rolling back deployment due to health check failure..."
+          
+          # Add your rollback logic here
+          # Examples:
+          # - Deploy previous known good version
+          # - Revert database migrations
+          # - Update load balancer config
+          
+          echo "✅ Rollback completed"

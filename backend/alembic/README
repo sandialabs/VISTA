@@ -1,0 +1,8 @@
+Alembic migration environment for the backend service.
+
+Commands (run from backend/ directory):
+  alembic revision --autogenerate -m "message"
+  alembic upgrade head
+  alembic downgrade -1
+
+The metadata is imported from core.models.Base.
