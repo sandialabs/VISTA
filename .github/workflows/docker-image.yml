@@ -73,14 +73,14 @@ jobs:
         uv venv .venv
         source .venv/bin/activate
         uv pip install -r ../requirements.txt
-        
+
     - name: Set up test environment
       run: |
         cp .env.example backend/.env || echo "No .env.example found, using defaults"
 
     - name: Run tests
       run: |
-        source backend/.venv/bin/activate
+        export PATH="${PWD}/backend/.venv/bin:$PATH"
         bash test/run_tests.sh
       env:
         DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
