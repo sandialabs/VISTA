@@ -47,7 +47,7 @@ COPY ./frontend/package.json ./frontend/package-lock.json ./frontend/
 # Copy frontend source and config files
 COPY ./frontend/public ./frontend/public
 COPY ./frontend/src ./frontend/src
-COPY ./frontend/config-overrides.js ./frontend/.env.local ./frontend/
+COPY ./frontend/config-overrides.js ./frontend/
 
 # copy the test folder over as well. 
 COPY test ./test
