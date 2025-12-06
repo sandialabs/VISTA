@@ -108,6 +108,8 @@ async def mcp_get_projects(
     )
     
     # Get all projects
+    # Note: Using limit=1000 as a reasonable upper bound. For installations with more projects,
+    # consider implementing database-level filtering by group_id for better performance.
     all_projects = await crud.get_all_projects(db=db, skip=0, limit=1000)
     
     # Filter projects by user's group membership

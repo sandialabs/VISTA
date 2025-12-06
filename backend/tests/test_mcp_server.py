@@ -135,9 +135,10 @@ class TestMCPGetProjects:
             'MCP_ENABLED': True,
             'MCP_SECRET_KEY': 'test-secret',
             'CHECK_MOCK_MEMBERSHIP': True,
-            'MOCK_USER_GROUPS': ['admin-group']
+            'MOCK_USER_GROUPS_JSON': '["admin-group"]'
         })
         monkeypatch.setattr('routers.mcp_server.settings', patched_settings)
+        monkeypatch.setattr('core.config.settings', patched_settings)
         
         response = client.post(
             "/mcp/tools/invoke",

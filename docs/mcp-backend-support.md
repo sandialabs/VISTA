@@ -329,7 +329,7 @@ All 15 tests should pass, covering:
 1. **Secret Key Management**: Store `MCP_SECRET_KEY` securely (environment variables, secrets manager)
 2. **Trusted Username**: The username in `X-Username` is trusted - ensure only authorized clients can provide this header
 3. **Transport Security**: Use HTTPS in production to protect the secret key in transit
-4. **OAuth 2.1**: Future enhancement - current implementation uses shared secret, OAuth 2.1 support planned
+4. **OAuth 2.0 with PKCE**: Future enhancement - current implementation uses shared secret, OAuth 2.0 authentication planned
 5. **Rate Limiting**: Consider adding rate limiting for MCP endpoints in production
 6. **Logging**: All MCP requests are logged with username for audit purposes
 
@@ -346,7 +346,7 @@ Key integration points:
 
 ## Future Enhancements
 
-- [ ] OAuth 2.1 authentication support
+- [ ] OAuth 2.0 with PKCE authentication support
 - [ ] Additional tools (create project, upload image, add metadata)
 - [ ] Batch operations support
 - [ ] WebSocket support for real-time updates
