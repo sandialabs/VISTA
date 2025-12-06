@@ -14,14 +14,11 @@ A full-stack web application for managing, classifying, and collaborating on vis
 
 ## Screenshots
 
-### Projects Overview
-![Projects](docs/readme_imgs/projects.png)
+### Image Gallery View
+![Image Gallery](docs/readme_imgs/gallary-snl.png)
 
-### Project Dashboard
-![Project Dashboard](docs/readme_imgs/project-dashboard.png)
-
-### Image View
-![Individual Image View](docs/readme_imgs/individual_img-view.png)
+### Individual Image View
+![Individual Image View](docs/readme_imgs/individual-snl.png)
 
 ## Requirements
 
