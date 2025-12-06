@@ -69,11 +69,15 @@ class Settings(BaseSettings):
     # Alembic migrations
     USE_ALEMBIC_MIGRATIONS: bool = True  # Use Alembic for database migrations
 
+    # MCP (Model Context Protocol) server settings
+    MCP_ENABLED: bool = True
+    MCP_SECRET_KEY: Optional[str] = None
+
     @field_validator(
         'DEBUG', 'FAST_TEST_MODE', 'SKIP_HEADER_CHECK', 'S3_USE_SSL',
         'SECURITY_NOSNIFF_ENABLED', 'SECURITY_XFO_ENABLED',
         'SECURITY_REFERRER_POLICY_ENABLED', 'SECURITY_CSP_ENABLED',
-        'ENABLE_IMAGE_PURGE', 'USE_ALEMBIC_MIGRATIONS',
+        'ENABLE_IMAGE_PURGE', 'USE_ALEMBIC_MIGRATIONS', 'MCP_ENABLED',
         mode='before'
     )
     @classmethod

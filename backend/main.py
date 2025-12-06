@@ -20,7 +20,7 @@ from middleware.cors_debug import add_cors_middleware, debug_exception_middlewar
 from middleware.auth import auth_middleware
 from middleware.security_headers import SecurityHeadersMiddleware
 from middleware.body_cache import BodyCacheMiddleware
-from routers import projects, images, users, image_classes, comments, project_metadata, api_keys, ml_analyses
+from routers import projects, images, users, image_classes, comments, project_metadata, api_keys, ml_analyses, mcp_server
 
 
 """
@@ -236,6 +236,9 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(api_key_router)
     app.include_router(api_ml_router)
+
+    # Include MCP router (no auth prefix - handles its own auth)
+    app.include_router(mcp_server.router)
 
     # Setup static file serving
     setup_static_files(app)
