@@ -26,8 +26,15 @@ class TestMCPAuthentication:
         assert data["status"] == "healthy"
         assert "mcp_enabled" in data
     
-    def test_list_tools_missing_secret(self, client):
+    def test_list_tools_missing_secret(self, client, monkeypatch):
         """Should reject request without MCP secret."""
+        # Ensure MCP is enabled and has a secret
+        patched_settings = settings.patch({
+            'MCP_ENABLED': True,
+            'MCP_SECRET_KEY': 'test-secret'
+        })
+        monkeypatch.setattr('routers.mcp_server.settings', patched_settings)
+        
         response = client.get(
             "/mcp/tools",
             headers={"X-Username": "testuser"}
@@ -35,8 +42,15 @@ class TestMCPAuthentication:
         assert response.status_code == 401
         assert "X-MCP-Secret" in response.json()["detail"]
     
-    def test_list_tools_missing_username(self, client):
+    def test_list_tools_missing_username(self, client, monkeypatch):
         """Should reject request without username."""
+        # Ensure MCP is enabled and has a secret
+        patched_settings = settings.patch({
+            'MCP_ENABLED': True,
+            'MCP_SECRET_KEY': 'test-secret'
+        })
+        monkeypatch.setattr('routers.mcp_server.settings', patched_settings)
+        
         response = client.get(
             "/mcp/tools",
             headers={"X-MCP-Secret": "test-secret"}
@@ -92,9 +106,12 @@ class TestMCPGetProjects:
         """Should return empty list when no projects exist."""
         patched_settings = settings.patch({
             'MCP_ENABLED': True,
-            'MCP_SECRET_KEY': 'test-secret'
+            'MCP_SECRET_KEY': 'test-secret',
+            'CHECK_MOCK_MEMBERSHIP': True,
+            'MOCK_USER_GROUPS_JSON': '[]'
         })
         monkeypatch.setattr('routers.mcp_server.settings', patched_settings)
+        monkeypatch.setattr('core.config.settings', patched_settings)
         
         response = client.post(
             "/mcp/tools/invoke",
@@ -111,9 +128,8 @@ class TestMCPGetProjects:
         data = response.json()
         assert data["success"] is True
         assert data["tool"] == "get_projects"
-        # Result might be nested depending on MCP implementation
     
-    async def test_get_projects_with_data(self, client, db_session, test_project, monkeypatch):
+    async def test_get_projects_with_data(self, client, db_session, sample_project, monkeypatch):
         """Should return projects that user has access to."""
         patched_settings = settings.patch({
             'MCP_ENABLED': True,
@@ -142,9 +158,12 @@ class TestMCPGetProjects:
         """Should respect pagination parameters."""
         patched_settings = settings.patch({
             'MCP_ENABLED': True,
-            'MCP_SECRET_KEY': 'test-secret'
+            'MCP_SECRET_KEY': 'test-secret',
+            'CHECK_MOCK_MEMBERSHIP': True,
+            'MOCK_USER_GROUPS_JSON': '[]'
         })
         monkeypatch.setattr('routers.mcp_server.settings', patched_settings)
+        monkeypatch.setattr('core.config.settings', patched_settings)
         
         response = client.post(
             "/mcp/tools/invoke",
@@ -186,8 +205,9 @@ class TestMCPGetImages:
                 "X-Username": "testuser@example.com"
             }
         )
-        assert response.status_code == 500  # Tool execution error
-        assert "Invalid" in response.json()["detail"] or "error" in response.json()["detail"].lower()
+        # HTTPException is re-raised, so we get 400 directly
+        assert response.status_code == 400
+        assert "Invalid" in response.json()["detail"]
     
     async def test_get_images_nonexistent_project(self, client, monkeypatch):
         """Should return 404 for nonexistent project."""
@@ -213,7 +233,8 @@ class TestMCPGetImages:
                 "X-Username": "testuser@example.com"
             }
         )
-        assert response.status_code == 500  # Tool execution error wraps the 404
+        # HTTPException is re-raised, so we get 404 directly
+        assert response.status_code == 404
 
 
 class TestMCPGetImageInfo:
@@ -238,8 +259,9 @@ class TestMCPGetImageInfo:
                 "X-Username": "testuser@example.com"
             }
         )
-        assert response.status_code == 500
-        assert "Invalid" in response.json()["detail"] or "error" in response.json()["detail"].lower()
+        # HTTPException is re-raised, so we get 400 directly
+        assert response.status_code == 400
+        assert "Invalid" in response.json()["detail"]
 
 
 class TestMCPGetImageURL:
@@ -267,8 +289,9 @@ class TestMCPGetImageURL:
                 "X-Username": "testuser@example.com"
             }
         )
-        assert response.status_code == 500
-        assert "Invalid" in response.json()["detail"] or "error" in response.json()["detail"].lower()
+        # HTTPException is re-raised, so we get 400 directly
+        assert response.status_code == 400
+        assert "Invalid" in response.json()["detail"]
     
     async def test_get_image_url_expiry_validation(self, client, monkeypatch):
         """Should validate expiry_seconds parameter."""
@@ -294,8 +317,8 @@ class TestMCPGetImageURL:
                 "X-Username": "testuser@example.com"
             }
         )
-        # Will fail because image doesn't exist, but that's expected
-        assert response.status_code == 500
+        # Will fail because image doesn't exist with 404
+        assert response.status_code == 404
 
 
 class TestMCPToolInvocation:
@@ -339,5 +362,6 @@ class TestMCPToolInvocation:
                 "X-Username": "testuser@example.com"
             }
         )
-        assert response.status_code == 500
-        assert "error" in response.json()["detail"].lower() or "Error" in response.json()["detail"]
+        # Should get 404 for nonexistent tool
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()

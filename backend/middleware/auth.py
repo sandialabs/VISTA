@@ -56,13 +56,13 @@ async def auth_middleware(request: Request, call_next):
         path = raw_path if isinstance(raw_path, str) else ''
 
         # Allow health check and schema/docs without auth but still ensure state has a flag
-        if path in {"/api/health", "/openapi.json"} or path.startswith("/docs") or path.startswith("/redoc"):
+        if path in {"/api/health", "/openapi.json", "/mcp/health"} or path.startswith("/docs") or path.startswith("/redoc"):
             if not hasattr(request.state, 'is_authenticated'):
                 request.state.is_authenticated = False  # type: ignore
             return await call_next(request)
 
-        # Skip middleware auth for /api-key and /api-ml routes - dependencies will handle authentication
-        if path.startswith("/api-key") or path.startswith("/api-ml"):
+        # Skip middleware auth for /api-key, /api-ml, and /mcp routes - dependencies will handle authentication
+        if path.startswith("/api-key") or path.startswith("/api-ml") or path.startswith("/mcp"):
             if not hasattr(request.state, 'is_authenticated'):
                 request.state.is_authenticated = False  # type: ignore
             return await call_next(request)

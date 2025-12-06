@@ -50,7 +50,8 @@ async def verify_mcp_auth(
             detail="Missing X-MCP-Secret header"
         )
     
-    if x_mcp_secret != expected_secret:
+    # Handle case sensitivity and allow None comparison
+    if str(x_mcp_secret) != str(expected_secret):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid MCP secret key"
@@ -107,7 +108,7 @@ async def mcp_get_projects(
     )
     
     # Get all projects
-    all_projects = await crud.get_projects(db=db, skip=0, limit=1000)
+    all_projects = await crud.get_all_projects(db=db, skip=0, limit=1000)
     
     # Filter projects by user's group membership
     accessible_projects = []
@@ -254,7 +255,7 @@ async def mcp_get_image_info(
         )
     
     # Get image
-    db_image = await crud.get_data_instance(db=db, data_instance_id=img_uuid)
+    db_image = await crud.get_data_instance(db=db, image_id=img_uuid)
     if db_image is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -336,7 +337,7 @@ async def mcp_get_image_url(
         expiry_seconds = 86400
     
     # Get image
-    db_image = await crud.get_data_instance(db=db, data_instance_id=img_uuid)
+    db_image = await crud.get_data_instance(db=db, image_id=img_uuid)
     if db_image is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
