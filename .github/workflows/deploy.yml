@@ -17,8 +17,8 @@ on:
           - production
 
 env:
-  DOCKER_USERNAME: garland3
-  DOCKER_IMAGE_NAME: vista
+  REGISTRY: ghcr.io
+  IMAGE_NAME: sandialabs/vista
 
 permissions:
   contents: read
@@ -66,7 +66,7 @@ jobs:
       - name: Deploy to environment
         id: deploy
         run: |
-          echo "🚀 Deploying ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} to ${{ steps.vars.outputs.ENVIRONMENT }}"
+          echo "Deploying ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} to ${{ steps.vars.outputs.ENVIRONMENT }}"
           
           # Add your actual deployment logic here
           # Examples:
