@@ -59,9 +59,11 @@ jobs:
         npm ci
 
     - name: Autobuild
+      if: matrix.language == 'python'
       uses: github/codeql-action/autobuild@v4
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
+        upload: true

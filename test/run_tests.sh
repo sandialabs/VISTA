@@ -5,9 +5,10 @@
 set -euo pipefail
 
 # Parse arguments
-VERBOSE_MODE=true
+VERBOSE_MODE=false
 RUN_BACKEND=false
 RUN_FRONTEND=false
+VERBOSE_FLAG=""
 
 if [ $# -eq 0 ]; then
   # No arguments = run both
@@ -24,6 +25,7 @@ else
         ;;
       --verbose|-v)
         VERBOSE_MODE=true
+        VERBOSE_FLAG="--verbose"
         ;;
       *)
         echo "Unknown argument: $arg"
@@ -36,7 +38,8 @@ else
   done
 fi
 
-cd "$(dirname "$0")/.."
+# Get the directory where this script is located
+SCRIPT_DIR="$(dirname "$0")"
 
 BACKEND_EXIT_CODE=0
 FRONTEND_EXIT_CODE=0
@@ -45,129 +48,25 @@ FRONTEND_EXIT_CODE=0
 # BACKEND TESTS
 # ========================================
 if [ "$RUN_BACKEND" = true ]; then
-  if [ ! -d "backend" ]; then
-    echo "Error: backend directory not found."
-    exit 1
-  fi
-
-  PY_BIN="$(command -v python3 || command -v python || true)"
-  export PATH="$HOME/.local/bin:$PATH"
-
-  if ! command -v uv >/dev/null 2>&1; then
-    echo "Error: uv not found. Install with:"
-    echo " curl -LsSf https://astral.sh/uv/install.sh | sh"
-    exit 1
-  fi
-
-  # Find and activate virtual environment
-  if [ -f "/opt/venv/bin/activate" ]; then
-    [ "$VERBOSE_MODE" = true ] && echo "Activating Docker virtual environment..."
-    # shellcheck disable=SC1091
-    source /opt/venv/bin/activate
-    uv pip install pytest pytest-asyncio pytest-xdist >/dev/null 2>&1
-  elif [ -f "backend/.venv/bin/activate" ]; then
-    [ "$VERBOSE_MODE" = true ] && echo "Activating backend virtual environment..."
-    # shellcheck disable=SC1091
-    source backend/.venv/bin/activate
-    uv pip install pytest pytest-asyncio pytest-xdist >/dev/null 2>&1
-  elif [ -f ".venv/bin/activate" ]; then
-    [ "$VERBOSE_MODE" = true ] && echo "Activating local virtual environment..."
-    # shellcheck disable=SC1091
-    source .venv/bin/activate
-    uv pip install pytest pytest-asyncio pytest-xdist >/dev/null 2>&1
+  if [ -f "$SCRIPT_DIR/backend_tests.sh" ]; then
+    bash "$SCRIPT_DIR/backend_tests.sh" $VERBOSE_FLAG || BACKEND_EXIT_CODE=$?
   else
-    echo "Error: Virtual environment not found"
-    echo "Expected: /opt/venv or backend/.venv or .venv"
+    echo "Error: backend_tests.sh not found in $SCRIPT_DIR"
     exit 1
   fi
-
-  # Ensure we have a python executable post-activate
-  PY_BIN="$(command -v python3 || command -v python || true)"
-  if [ -z "${PY_BIN}" ]; then
-    echo "Error: python not found in the active environment."
-    exit 1
-  fi
-
-  cd backend
-  echo -n "Backend tests... "
-
-  # Suppress SQLAlchemy logging to reduce noise
-  export SQLALCHEMY_WARN_20=0
-
-  set +e
-  if [ "$VERBOSE_MODE" = true ]; then
-    echo ""
-    "${PY_BIN}" -m pytest -n auto --tb=short --no-header -p no:logging tests/
-  else
-    "${PY_BIN}" -m pytest -n auto --tb=no -q tests/ >/dev/null 2>&1
-  fi
-  BACKEND_EXIT_CODE=$?
-  set -e
-
-  if [ $BACKEND_EXIT_CODE -eq 0 ]; then
-    echo "PASSED"
-  else
-    echo "FAILED"
-    [ "$VERBOSE_MODE" = false ] && echo "  Run with --verbose for details"
-  fi
-
-  cd ..
 fi
 
 # ========================================
 # FRONTEND TESTS
 # ========================================
 if [ "$RUN_FRONTEND" = true ]; then
-  if [ ! -d "frontend" ]; then
-    echo "Error: frontend directory not found."
+  if [ -f "$SCRIPT_DIR/frontend_tests.sh" ]; then
+    echo ""
+    bash "$SCRIPT_DIR/frontend_tests.sh" $VERBOSE_FLAG || FRONTEND_EXIT_CODE=$?
+  else
+    echo "Error: frontend_tests.sh not found in $SCRIPT_DIR"
     exit 1
   fi
-
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "Error: npm not found. Please install Node.js and npm."
-    exit 1
-  fi
-
-  cd frontend
-  echo -n "Frontend tests... "
-
-  set +e
-  # Run Jest tests, excluding the custom test-runner script
-  if [ "$VERBOSE_MODE" = true ]; then
-    echo ""
-    echo "Jest tests:"
-    npx react-scripts test --testPathIgnorePatterns=test-runner.cjs --watchAll=false --passWithNoTests
-  else
-    npx react-scripts test --testPathIgnorePatterns=test-runner.cjs --watchAll=false --passWithNoTests --silent >/dev/null 2>&1
-  fi
-  JEST_EXIT_CODE=$?
-
-  # Run the custom test runner separately
-  if [ "$VERBOSE_MODE" = true ]; then
-    echo ""
-    echo "Custom test runner:"
-    node src/__tests__/test-runner.cjs
-  else
-    node src/__tests__/test-runner.cjs >/dev/null 2>&1
-  fi
-  CUSTOM_TEST_EXIT_CODE=$?
-
-  # Frontend passes if both Jest tests and custom tests pass
-  if [ $JEST_EXIT_CODE -eq 0 ] && [ $CUSTOM_TEST_EXIT_CODE -eq 0 ]; then
-    FRONTEND_EXIT_CODE=0
-  else
-    FRONTEND_EXIT_CODE=1
-  fi
-  set -e
-
-  if [ $FRONTEND_EXIT_CODE -eq 0 ]; then
-    echo "PASSED"
-  else
-    echo "FAILED"
-    [ "$VERBOSE_MODE" = false ] && echo "  Run with --verbose for details"
-  fi
-
-  cd ..
 fi
 
 # ========================================
@@ -184,10 +83,12 @@ if [ "$RUN_FRONTEND" = true ] && [ $FRONTEND_EXIT_CODE -ne 0 ]; then
 fi
 
 echo ""
+echo "============================================="
 if [ $OVERALL_EXIT_CODE -eq 0 ]; then
-  echo "Overall: PASSED"
+  echo "OVERALL RESULT: PASSED"
 else
-  echo "Overall: FAILED"
+  echo "OVERALL RESULT: FAILED"
 fi
+echo "============================================="
 
 exit $OVERALL_EXIT_CODE

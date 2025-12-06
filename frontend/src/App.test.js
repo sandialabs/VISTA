@@ -8,6 +8,6 @@ test('renders image management platform header', () => {
       <App />
     </BrowserRouter>
   );
-  const headerElement = screen.getByText('Image Management Platform');
+  const headerElement = screen.getByText('VISTA an Image Management System');
   expect(headerElement).toBeInTheDocument();
 });

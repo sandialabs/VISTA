@@ -272,7 +272,17 @@ def setup_static_files(app: FastAPI):
             name="static_files"
         )
     else:
-        logger.warning(f"Static directory not found at {static_dir}; skipping static mount")
+        logger.warning(f"\n{'='*80}\n"
+                      f"DEVELOPMENT MODE - Frontend build not found\n"
+                      f"{'='*80}\n"
+                      f"Static directory not found at: {static_dir}\n"
+                      f"\n"
+                      f"To run the frontend in development mode:\n"
+                      f"  cd /workspaces/VISTA/frontend\n"
+                      f"  npm run dev\n"
+                      f"\n"
+                      f"The frontend dev server will run on http://localhost:3000\n"
+                      f"{'='*80}\n")
 
     # Mount individual files using separate handlers
     @app.get("/favicon.ico")

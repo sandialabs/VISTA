@@ -3,11 +3,20 @@
 {
 	"name": "Python 3",
 	// Or use a Podmanfile or Podman Compose file. More info: https://containers.dev/guide/podmanfile
-	"image": "mcr.microsoft.com/devcontainers/python:2-3.14-trixie",
-	// "features": {
-	// 	"ghcr.io/devcontainers/features/github-cli:1": {},
-	// 	"ghcr.io/devcontainer-community/devcontainer-features/astral.sh-uv:1": {}
-	// }
+	"image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+	"features": {
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainer-community/devcontainer-features/astral.sh-uv:1": {},
+		"ghcr.io/devcontainers/features/node:1": {
+			"nodeGypDependencies": true,
+			"version": "lts"
+		},
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {
+			"version": "latest",
+			"moby": false,
+			"dockerDashComposeVersion": "v2"
+		}
+	}
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {

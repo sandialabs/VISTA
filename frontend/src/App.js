@@ -286,7 +286,7 @@ function App() {
       <header className="App-header">
         <div className="header-content">
           <div className="header-title">
-            <h1>Image Management Platform</h1>
+            <h1>VISTA an Image Management System</h1>
             {currentUser && (
               <div className="user-info">
                 <span>Welcome back, {currentUser.email}</span>
