@@ -12,6 +12,17 @@ A full-stack web application for managing, classifying, and collaborating on vis
 - **Safe Deletion** - Two-stage deletion with 60-day recovery period
 - **API Access** - RESTful API with comprehensive documentation and API key authentication
 
+## Screenshots
+
+### Projects Overview
+![Projects](docs/readme_imgs/projects.png)
+
+### Project Dashboard
+![Project Dashboard](docs/readme_imgs/project-dashboard.png)
+
+### Image View
+![Individual Image View](docs/readme_imgs/individual_img-view.png)
+
 ## Requirements
 
 - **Node.js** 22+
@@ -21,49 +32,63 @@ A full-stack web application for managing, classifying, and collaborating on vis
 
 ## Quick Start
 
-### 1. Start Infrastructure
+### Prerequisites
+
+This assumes you're using the dev container which has all required tools (Node.js, Python, Podman, etc.) pre-installed.
+
+### 1. Configure Environment
+
+```bash
+# Copy example environment file
+cp .env.example .env
+```
+
+Edit `.env` and set these for development:
+```bash
+DEBUG=true
+SKIP_HEADER_CHECK=true
+```
+
+### 2. Start Infrastructure
 
 ```bash
 # Start PostgreSQL and MinIO containers
-podman compose up -d postgres minio
+bash short-cut-launch-postgres-minio.sh
 ```
 
-### 2. Setup Backend
+### 3. Setup Python Environment
 
 ```bash
-# Install uv package manager
-pip install uv
-
-# Create virtual environment and install dependencies
+# Create virtual environment
 uv venv .venv
+
+# Activate the virtual environment
 source .venv/bin/activate
-uv pip install -r requirements.txt
-
-# Run database migrations (REQUIRED)
-cd backend
-alembic upgrade head
-
-# Start backend server
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Alternative:** Use the backend helper script:
-```bash
-cd backend
-./run.sh
-```
+### 4. Split Terminal and Start Services
 
-### 3. Setup Frontend
-
-In a separate terminal:
-
+**Terminal 1 - Frontend:**
 ```bash
 cd frontend
-npm install
+npm install  # First time only
 npm run dev
 ```
 
-### 4. Access the Application
+**Terminal 2 - Backend:**
+```bash
+cd backend
+
+# Run database migrations (first time or after model changes)
+alembic upgrade head
+
+# Start backend server
+bash run.sh
+```
+
+### 5. Access the Application
+
+Open http://localhost:3000 in your browser to see the app.
 
 - **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:8000
@@ -72,22 +97,31 @@ npm run dev
 
 ## Configuration
 
-### Environment Setup
+### Environment Variables
 
-1. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
+All configuration is managed through the `.env` file in the repository root. This file is **required** for the application to run properly.
 
-2. Configure the following settings in `.env`:
+**Setup:**
+```bash
+# Copy the example file (contains all default settings)
+cp .env.example .env
 
-**Database:**
+# Source it before running backend commands
+set -a && source .env && set +a
+```
+
+**Key Configuration Sections:**
+
+**Database (PostgreSQL):**
 ```bash
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/postgres
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_DB=postgres
+POSTGRES_SERVER=localhost
+POSTGRES_PORT=5433
 ```
+> **Important:** `DATABASE_URL` must be set or Alembic migrations will fail. The default uses PostgreSQL on port 5433.
 
 **S3/MinIO Storage:**
 ```bash
@@ -101,12 +135,16 @@ S3_USE_SSL=false
 **Authentication:**
 ```bash
 # Development (uses mock user)
-MOCK_USER_EMAIL=user@example.com
-MOCK_USER_GROUPS_JSON='["admin-group", "data-scientists"]'
+SKIP_HEADER_CHECK=false
+CHECK_MOCK_MEMBERSHIP=true
+MOCK_USER_EMAIL=test@example.com
+MOCK_USER_GROUPS_JSON='["admin-group", "data-scientists", "project-alpha-group"]'
 
 # Production (reverse proxy authentication)
 PROXY_SHARED_SECRET=your-secure-secret-here
 AUTH_SERVER_URL=https://your-auth-server.com
+X_USER_ID_HEADER=X-User-Email
+X_PROXY_SECRET_HEADER=X-Proxy-Secret
 ```
 
 **ML Analysis (Optional):**
@@ -116,6 +154,14 @@ ML_CALLBACK_HMAC_SECRET=your-hmac-secret
 ML_ALLOWED_MODELS=yolo_v8,resnet50_classifier
 ```
 
+**Application Settings:**
+```bash
+APP_NAME="Data Management API"
+DEBUG=false
+CACHE_SIZE_MB=1000
+FRONTEND_BUILD_PATH=frontend/build
+```
+
 ## Database Migrations (Alembic)
 
 **Important:** Migrations are **NOT** run automatically. This is intentional to prevent accidental schema changes in production.
@@ -123,10 +169,16 @@ ML_ALLOWED_MODELS=yolo_v8,resnet50_classifier
 ### Running Migrations
 
 ```bash
-cd backend
+# Activate virtual environment and load environment variables
 source .venv/bin/activate
+set -a && source .env && set +a
+
+# Run migrations
+cd backend
 alembic upgrade head
 ```
+
+> **Common Issue:** If you get "table already exists" errors, check that `DATABASE_URL` in `.env` points to PostgreSQL, not SQLite.
 
 ### Creating New Migrations
 
@@ -151,13 +203,16 @@ alembic stamp head                # Mark DB as up-to-date (use cautiously)
 
 ### Why Manual Migrations?
 
-Manual migrations prevent:
-- Accidental schema changes in production
-- Race conditions with multiple application instances
-- Unexpected downtime during deployments
-- Loss of control over when schema changes occur
-
 ### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "table already exists" error | Verify `DATABASE_URL` in `.env` is set to PostgreSQL, not SQLite |
+| "alembic: command not found" | Activate virtual environment: `source .venv/bin/activate` |
+| Autogenerate misses table | Verify model is imported in `core/models.py` |
+| Dialect errors | Ensure `.env` is sourced and `DATABASE_URL` uses PostgreSQL |
+| Schema drift | Run `alembic upgrade head` then regenerate migration |
+| Connection refused | Check PostgreSQL is running: `podman ps` |
 
 | Issue | Solution |
 |-------|----------|
