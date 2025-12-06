@@ -17,6 +17,7 @@ A full-stack web application for managing, classifying, and collaborating on vis
 - **ML Analysis Integration** - Visualize machine learning results with interactive overlays (bounding boxes, heatmaps)
 - **Safe Deletion** - Two-stage deletion with 60-day recovery period
 - **API Access** - RESTful API with comprehensive documentation and API key authentication
+- **MCP Integration** - Model Context Protocol support for AI assistant integration (e.g., atlas-ui-3)
 
 ## Screenshots
 
@@ -425,6 +426,14 @@ Comprehensive guides for different user roles:
   - API endpoints and data formats
   - Example implementations
   - Testing and best practices
+
+### For AI Integration
+
+- **[MCP Backend Support](docs/mcp-backend-support.md)** - Model Context Protocol integration
+  - Authentication and configuration
+  - Available tools and endpoints
+  - Example usage
+  - Integration with atlas-ui-3
 
 ### Additional Resources
 
