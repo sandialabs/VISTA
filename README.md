@@ -1,5 +1,11 @@
 # VISTA
 
+[![CI/CD](https://github.com/sandialabs/VISTA/actions/workflows/docker-image.yml/badge.svg)](https://github.com/sandialabs/VISTA/actions/workflows/docker-image.yml)
+[![Deploy](https://github.com/sandialabs/VISTA/actions/workflows/deploy.yml/badge.svg)](https://github.com/sandialabs/VISTA/actions/workflows/deploy.yml)
+[![CodeQL](https://github.com/sandialabs/VISTA/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/sandialabs/VISTA/actions/workflows/codeql-analysis.yml)
+[![Container Scan](https://github.com/sandialabs/VISTA/actions/workflows/container-scan-trivy.yml/badge.svg)](https://github.com/sandialabs/VISTA/actions/workflows/container-scan-trivy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A full-stack web application for managing, classifying, and collaborating on visual content. Built for teams that need to organize image datasets, apply custom labels, and integrate machine learning analysis results.
 
 ## Features
