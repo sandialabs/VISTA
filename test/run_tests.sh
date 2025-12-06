@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Parse arguments
-VERBOSE_MODE=true
+VERBOSE_MODE=false
 RUN_BACKEND=false
 RUN_FRONTEND=false
 

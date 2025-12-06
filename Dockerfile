@@ -1,26 +1,20 @@
-# Use Fedora latest as the base image
+# Use Debian-based Python image to match devcontainer environment
 # Multi-stage build for optimized production image
-FROM fedora:latest AS base
+FROM python:3.11-bookworm AS base
 
 # Install system dependencies and development tools in a single layer
-RUN dnf update -y && dnf install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    gcc-c++ \
-    postgresql-devel \
+    g++ \
+    libpq-dev \
     git \
     curl \
     wget \
     ca-certificates \
-    python3.11 \
-    python3.11-devel \
-    python3-pip \
     nodejs \
     npm \
-    && dnf clean all
-
-# Create symbolic links for python and pip
-RUN ln -sf /usr/bin/python3.11 /usr/bin/python && \
-    ln -sf /usr/bin/pip3 /usr/bin/pip
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a Python virtual environment
 RUN python -m venv /opt/venv

@@ -75,16 +75,13 @@ jobs:
         uv pip install -r ../requirements.txt
         
     - name: Set up test environment
-      working-directory: ./backend
       run: |
-        cp ../.env.example .env || echo "No .env.example found, using defaults"
-        
+        cp .env.example backend/.env || echo "No .env.example found, using defaults"
+
     - name: Run tests
-      working-directory: ./backend
       run: |
-        source .venv/bin/activate
-        
-        bash ../test/run_tests.sh
+        source backend/.venv/bin/activate
+        bash test/run_tests.sh
       env:
         DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
         POSTGRES_USER: postgres
@@ -173,8 +170,9 @@ jobs:
           -e POSTGRES_PASSWORD=postgres \
           -e POSTGRES_DB=postgres \
           -e POSTGRES_SERVER=localhost \
+          --workdir /app \
           ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest \
-          bash -c "bash ../test/run_tests.sh --backend"
+          bash -c "bash test/run_tests.sh --backend"
 
     - name: Push Docker image
       if: github.event_name != 'pull_request'

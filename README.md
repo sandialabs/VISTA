@@ -64,6 +64,9 @@ uv venv .venv
 
 # Activate the virtual environment
 source .venv/bin/activate
+
+# Install dependencies
+uv pip install -r requirements.txt
 ```
 
 ### 4. Split Terminal and Start Services
