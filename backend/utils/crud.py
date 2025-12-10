@@ -9,7 +9,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 def log_db_operation(operation: str, table: str, record_id: uuid.UUID, user_email: str, additional_info: Optional[Dict] = None):
-    """Log database operations with user information"""
+    """
+    Log database operations with user information.
+
+    SECURITY: Never include sensitive or user-supplied data (such as API key values
+    or names/labels provided by users) in additional_info.
+    Only pass pre-reviewed, non-sensitive information for audit logging.
+    """
     # Sanitize user input to prevent log injection
     safe_user_domain = 'unknown'
     if user_email and '@' in user_email:
@@ -700,7 +706,8 @@ async def create_api_key(db: AsyncSession, api_key: schemas.ApiKeyCreate, user_i
     await db.commit()
     await db.refresh(db_api_key)
     
-    log_db_operation("CREATE", "api_keys", db_api_key.id, created_by or "system", {"name": api_key.name, "user_id": str(user_id)})
+    # For security, do not log API key name or other user-supplied details.
+    log_db_operation("CREATE", "api_keys", db_api_key.id, created_by or "system", {"user_id": str(user_id)})
     return db_api_key
 
 async def update_api_key_last_used(db: AsyncSession, api_key_id: uuid.UUID) -> None:
