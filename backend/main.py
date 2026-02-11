@@ -206,28 +206,35 @@ def create_app() -> FastAPI:
         dependencies=[Depends(require_hmac_auth)]
     )
 
-    # Standardized router registration: define once, register across all prefixes
-    routers_config = [
+    # Register routers on their intended auth tiers only.
+    # /api: proxy auth (web UI). /api-key: API key auth (scripts/automation).
+    # /api-ml: HMAC auth (ML pipelines only).
+
+    # User-facing routers: available via proxy auth and API key auth
+    user_facing_routers = [
         {"router": projects.router, "prefix": "/projects"},
-        {"router": images.router, "prefix": None},  # full paths include /projects
-        {"router": users.router, "prefix": "/users"},
+        {"router": images.router, "prefix": None},
         {"router": image_classes.router, "prefix": None},
         {"router": comments.router, "prefix": None},
         {"router": project_metadata.router, "prefix": None},
-        {"router": api_keys.router, "prefix": None},
         {"router": ml_analyses.router, "prefix": None},
     ]
 
-    for cfg in routers_config:
+    for cfg in user_facing_routers:
         prefix = cfg["prefix"]
         if prefix:
             api_router.include_router(cfg["router"], prefix=prefix)
             api_key_router.include_router(cfg["router"], prefix=prefix)
-            api_ml_router.include_router(cfg["router"], prefix=prefix)
         else:
             api_router.include_router(cfg["router"])
             api_key_router.include_router(cfg["router"])
-            api_ml_router.include_router(cfg["router"])
+
+    # Admin/management routers: proxy auth only (not accessible via API key)
+    api_router.include_router(users.router, prefix="/users")
+    api_router.include_router(api_keys.router)
+
+    # ML pipeline mutation routers: HMAC auth only (not accessible via proxy or API key)
+    api_ml_router.include_router(ml_analyses.ml_pipeline_router)
 
     # Add health check endpoint (no auth required)
     @app.get("/api/health")

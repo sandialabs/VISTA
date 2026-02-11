@@ -11,6 +11,20 @@ import pytest
 from unittest.mock import patch
 
 
+@pytest.fixture(autouse=True)
+def _restore_real_hmac_auth():
+    """Restore real HMAC auth for security tests (conftest overrides it globally)."""
+    from main import app
+    from utils.dependencies import require_hmac_auth, get_current_user
+
+    # Remove the test override so real HMAC auth is used
+    saved = app.dependency_overrides.pop(require_hmac_auth, None)
+    yield
+    # Restore the override after each test
+    if saved is not None:
+        app.dependency_overrides[require_hmac_auth] = saved
+
+
 def _generate_hmac_signature(body: bytes, secret: str, timestamp: str = None) -> tuple[dict, str]:
     """
     Generate HMAC signature headers for testing.

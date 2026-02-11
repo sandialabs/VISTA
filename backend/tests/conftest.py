@@ -22,6 +22,7 @@ os.environ["ML_CALLBACK_HMAC_SECRET"] = "test-hmac-secret-12345"  # Set explicit
 from main import app
 from core.database import Base, get_db
 from core.schemas import User
+from utils.dependencies import require_hmac_auth, get_current_user
 
 # Test database setup
 SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -44,6 +45,12 @@ async def override_get_db():
         yield session
 
 app.dependency_overrides[get_db] = override_get_db
+
+
+# Override HMAC+API-key auth for tests: use standard header-based auth instead.
+# The auth middleware now sets mock user email for /api-ml paths in debug mode,
+# so get_current_user will resolve the user from request.state.user_email.
+app.dependency_overrides[require_hmac_auth] = get_current_user
 
 @pytest.fixture
 def client():

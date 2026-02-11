@@ -61,10 +61,16 @@ async def auth_middleware(request: Request, call_next):
                 request.state.is_authenticated = False  # type: ignore
             return await call_next(request)
 
-        # Skip middleware auth for /api-key and /api-ml routes - dependencies will handle authentication
+        # Skip middleware auth for /api-key and /api-ml routes - dependencies will handle authentication.
+        # In debug/test mode, still set mock user email so get_current_user works.
         if path.startswith("/api-key") or path.startswith("/api-ml"):
-            if not hasattr(request.state, 'is_authenticated'):
-                request.state.is_authenticated = False  # type: ignore
+            debug_mode = settings.DEBUG or settings.SKIP_HEADER_CHECK
+            if debug_mode:
+                request.state.user_email = settings.MOCK_USER_EMAIL
+                request.state.is_authenticated = True
+            else:
+                if not hasattr(request.state, 'is_authenticated'):
+                    request.state.is_authenticated = False  # type: ignore
             return await call_next(request)
         # Case-insensitive headers
         headers = {k.lower(): v for k, v in request.headers.items()}

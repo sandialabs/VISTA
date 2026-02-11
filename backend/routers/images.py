@@ -100,18 +100,10 @@ async def list_images_in_project(
 ):
     """
     Retrieves a list of images for a given project.
-    It checks the cache first for performance and then fetches from the database.
-    Handles project existence and user permissions.
+    It checks authorization first, then the cache for performance,
+    and finally fetches from the database.
     """
-    # Check cache first
-    cache = get_cache()
-    cache_key = f"project_images:{project_id}:skip:{skip}:limit:{limit}:include_deleted:{include_deleted}:deleted_only:{deleted_only}:search_field:{search_field}:search_value:{search_value}"
-    cached_images = cache.get(cache_key)
-    
-    if cached_images is not None:
-        return cached_images
-    
-    # First check if the project exists and user has access
+    # Authorization check BEFORE cache lookup to prevent cross-project data leaks
     try:
         await get_project_or_403(project_id, db, current_user)
     except HTTPException as e:
@@ -120,6 +112,14 @@ async def list_images_in_project(
             return []
         # Re-raise other exceptions (like permission issues)
         raise
+
+    # Check cache after authorization
+    cache = get_cache()
+    cache_key = f"project_images:{project_id}:skip:{skip}:limit:{limit}:include_deleted:{include_deleted}:deleted_only:{deleted_only}:search_field:{search_field}:search_value:{search_value}"
+    cached_images = cache.get(cache_key)
+
+    if cached_images is not None:
+        return cached_images
         
     # Get images for the project
     if deleted_only:
@@ -177,17 +177,10 @@ async def get_image_metadata(
 ):
     """
     Fetches metadata for a specific image using its ID.
-    It checks the cache for existing metadata before querying the database.
-    Access is restricted based on user group membership.
+    Authorization is checked before any cache lookup to prevent
+    cross-project data leaks.
     """
-    # Check cache first
-    cache = get_cache()
-    cache_key = f"image:{image_id}:metadata"
-    cached_metadata = cache.get(cache_key)
-    
-    if cached_metadata is not None:
-        return cached_metadata
-    
+    # Always verify access before returning any data (cached or not)
     db_image = await crud.get_data_instance(db=db, image_id=image_id)
     if db_image is None or (db_image.deleted_at and not include_deleted):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
@@ -197,13 +190,21 @@ async def get_image_metadata(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{current_user.email}' does not have access to image '{image_id}'",
         )
-    
+
+    # Check cache after authorization
+    cache = get_cache()
+    cache_key = f"image:{image_id}:metadata"
+    cached_metadata = cache.get(cache_key)
+
+    if cached_metadata is not None:
+        return cached_metadata
+
     # Use utility function for consistent metadata serialization
     result = to_data_instance_schema(db_image)
-    
+
     # Cache the result (1 hour)
     cache.set(cache_key, result, expire=60*60)
-    
+
     return result
 
 import httpx
@@ -384,12 +385,24 @@ async def get_image_thumbnail(
     """
     if width <= 0 or height <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Width and height must be positive integers")
-    
-    # Check cache first
+
+    # Authorization check BEFORE cache lookup to prevent cross-project data leaks
+    db_image = await crud.get_data_instance(db=db, image_id=image_id)
+    if db_image is None or (db_image.deleted_at and not include_deleted):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    is_member = is_user_in_group(current_user.email, db_image.project.meta_group_id)
+    if not is_member:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"User '{current_user.email}' does not have access to image '{image_id}'",
+        )
+
+    # Check cache after authorization
     cache = get_cache()
     cache_key = f"thumbnail:{image_id}:w:{width}:h:{height}"
     cached_thumbnail = cache.get(cache_key)
-    
+
     if cached_thumbnail:
         thumbnail_data, content_type, filename = cached_thumbnail
         return StreamingResponse(
@@ -398,18 +411,6 @@ async def get_image_thumbnail(
             headers={
                 "Content-Disposition": get_content_disposition_header(filename, "inline")
             }
-        )
-    
-    db_image = await crud.get_data_instance(db=db, image_id=image_id)
-    if db_image is None or (db_image.deleted_at and not include_deleted):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    
-    # Check access permissions
-    is_member = is_user_in_group(current_user.email, db_image.project.meta_group_id)
-    if not is_member:
-         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{current_user.email}' does not have access to image '{image_id}'",
         )
     
     # Get the presigned URL for internal use

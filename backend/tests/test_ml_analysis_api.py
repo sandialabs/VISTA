@@ -90,13 +90,14 @@ def test_annotations_list_and_limit_and_status_flow(client):
     analysis_id = data_list['analyses'][0]['id']
 
     # Status transitions: queued -> processing -> completed
-    proc_resp = client.patch(f"/api/analyses/{analysis_id}/status", json={"status": "processing"})
+    # Pipeline mutation endpoints are only on /api-ml
+    proc_resp = client.patch(f"/api-ml/analyses/{analysis_id}/status", json={"status": "processing"})
     assert proc_resp.status_code == 200, proc_resp.text
-    comp_resp = client.patch(f"/api/analyses/{analysis_id}/status", json={"status": "completed"})
+    comp_resp = client.patch(f"/api-ml/analyses/{analysis_id}/status", json={"status": "completed"})
     assert comp_resp.status_code == 200, comp_resp.text
 
     # Illegal transition (completed -> queued) should 409
-    bad_resp = client.patch(f"/api/analyses/{analysis_id}/status", json={"status": "queued"})
+    bad_resp = client.patch(f"/api-ml/analyses/{analysis_id}/status", json={"status": "queued"})
     assert bad_resp.status_code == 409
 
     # Annotations list (empty)
@@ -140,13 +141,14 @@ def test_phase2_bulk_and_finalize_flow(client, monkeypatch):
     img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
     analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
 
+    # Pipeline mutation endpoints are only on /api-ml
     # Presign artifact
     presign_body = {"artifact_type":"heatmap","filename":"heat.png"}
     import json as _json
     presign_body_bytes = _json.dumps(presign_body).encode('utf-8')
     headers = _hmac_headers(presign_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    pre = client.post(f"/api/analyses/{analysis['id']}/artifacts/presign", data=presign_body_bytes, headers=headers)
+    pre = client.post(f"/api-ml/analyses/{analysis['id']}/artifacts/presign", data=presign_body_bytes, headers=headers)
     assert pre.status_code == 200, pre.text
 
     # Bulk annotations
@@ -154,7 +156,7 @@ def test_phase2_bulk_and_finalize_flow(client, monkeypatch):
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    bulk = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    bulk = client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
     assert bulk.status_code == 200, bulk.text
     assert bulk.json()['total'] == 1
 
@@ -163,14 +165,14 @@ def test_phase2_bulk_and_finalize_flow(client, monkeypatch):
     fin_body_bytes = _json.dumps(fin_body).encode('utf-8')
     headers = _hmac_headers(fin_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    fin = client.post(f"/api/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
+    fin = client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
     assert fin.status_code == 200, fin.text
     assert fin.json()['status'] == 'completed'
 
-    # Bad HMAC
+    # Bad HMAC -- pipeline endpoints no longer exist on /api, so this should 404
     bad_body_bytes = _json.dumps(ann_body).encode('utf-8')
     bad = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=bad_body_bytes, headers={'X-ML-Timestamp':'0','X-ML-Signature':'sha256=deadbeef','Content-Type':'application/json'})
-    assert bad.status_code in (401, 404)  # 404 if feature disabled, else 401
+    assert bad.status_code == 404  # Not found on /api (only exists on /api-ml)
 
 
 def test_model_allow_list_validation(client):
@@ -261,10 +263,10 @@ def test_pagination_annotations(client, monkeypatch):
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    bulk = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    bulk = client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
     assert bulk.status_code == 200, bulk.text
 
-    # Test pagination
+    # Test pagination (read endpoints remain on /api)
     resp = client.get(f"/api/analyses/{analysis['id']}/annotations?skip=0&limit=5")
     assert resp.status_code == 200
     data = resp.json()
@@ -321,17 +323,17 @@ def test_export_json_format(client, monkeypatch):
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    bulk = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    bulk = client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
     assert bulk.status_code == 200
 
-    # Finalize
+    # Finalize (pipeline mutation, /api-ml only)
     fin_body = {"status": "completed"}
     fin_body_bytes = _json.dumps(fin_body).encode('utf-8')
     headers = _hmac_headers(fin_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    client.post(f"/api/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
+    client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
 
-    # Export as JSON
+    # Export as JSON (read endpoint, /api)
     resp = client.get(f"/api/analyses/{analysis['id']}/export?format=json")
     assert resp.status_code == 200
     export_data = resp.json()
@@ -374,9 +376,9 @@ def test_export_csv_format(client, monkeypatch):
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
 
-    # Export as CSV
+    # Export as CSV (read endpoint, /api)
     resp = client.get(f"/api/analyses/{analysis['id']}/export?format=csv")
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'text/csv; charset=utf-8'
@@ -398,37 +400,38 @@ def test_status_state_machine_transitions(client):
     proj = client.post('/api/projects/', json={"name":"StateTest","description":"d","meta_group_id":"data-scientists"}).json()
     img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
 
+    # Status updates are pipeline operations, only available on /api-ml
     # Test queued -> processing -> completed
     a1 = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
     assert a1['status'] == 'queued'
 
-    resp = client.patch(f"/api/analyses/{a1['id']}/status", json={"status": "processing"})
+    resp = client.patch(f"/api-ml/analyses/{a1['id']}/status", json={"status": "processing"})
     assert resp.status_code == 200
     assert resp.json()['status'] == 'processing'
 
-    resp = client.patch(f"/api/analyses/{a1['id']}/status", json={"status": "completed"})
+    resp = client.patch(f"/api-ml/analyses/{a1['id']}/status", json={"status": "completed"})
     assert resp.status_code == 200
     assert resp.json()['status'] == 'completed'
 
     # Test queued -> processing -> failed
     a2 = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"2","parameters":{}}).json()
-    client.patch(f"/api/analyses/{a2['id']}/status", json={"status": "processing"})
-    resp = client.patch(f"/api/analyses/{a2['id']}/status", json={"status": "failed", "error_message": "Out of memory"})
+    client.patch(f"/api-ml/analyses/{a2['id']}/status", json={"status": "processing"})
+    resp = client.patch(f"/api-ml/analyses/{a2['id']}/status", json={"status": "failed", "error_message": "Out of memory"})
     assert resp.status_code == 200
     assert resp.json()['status'] == 'failed'
     assert resp.json()['error_message'] == 'Out of memory'
 
     # Test queued -> canceled
     a3 = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"3","parameters":{}}).json()
-    resp = client.patch(f"/api/analyses/{a3['id']}/status", json={"status": "canceled"})
+    resp = client.patch(f"/api-ml/analyses/{a3['id']}/status", json={"status": "canceled"})
     assert resp.status_code == 200
     assert resp.json()['status'] == 'canceled'
 
     # Test invalid transition: completed -> queued (should fail with 409)
     a4 = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"4","parameters":{}}).json()
-    client.patch(f"/api/analyses/{a4['id']}/status", json={"status": "processing"})
-    client.patch(f"/api/analyses/{a4['id']}/status", json={"status": "completed"})
-    resp = client.patch(f"/api/analyses/{a4['id']}/status", json={"status": "queued"})
+    client.patch(f"/api-ml/analyses/{a4['id']}/status", json={"status": "processing"})
+    client.patch(f"/api-ml/analyses/{a4['id']}/status", json={"status": "completed"})
+    resp = client.patch(f"/api-ml/analyses/{a4['id']}/status", json={"status": "queued"})
     assert resp.status_code == 409
 
 

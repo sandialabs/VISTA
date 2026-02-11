@@ -21,6 +21,10 @@ def sanitize_for_log(value: str) -> str:
 
 router = APIRouter(tags=["ML Analyses"])
 
+# Separate router for ML pipeline mutation endpoints that require HMAC auth.
+# These should ONLY be mounted on the /api-ml prefix, not on /api or /api-key.
+ml_pipeline_router = APIRouter(tags=["ML Pipeline"])
+
 
 # Dependency to get cached request body
 async def get_raw_body(request: Request) -> bytes:
@@ -343,7 +347,7 @@ VALID_STATUS_TRANSITIONS = {
 }
 
 
-@router.patch("/analyses/{analysis_id}/status", response_model=schemas.MLAnalysis)
+@ml_pipeline_router.patch("/analyses/{analysis_id}/status", response_model=schemas.MLAnalysis)
 async def update_ml_analysis_status(
     analysis_id: uuid.UUID,
     payload: StatusUpdatePayload,
@@ -437,7 +441,7 @@ def _verify_pipeline_hmac(request: Request, body_bytes: bytes):
         raise HTTPException(status_code=401, detail="Invalid HMAC signature")
 
 
-@router.post("/analyses/{analysis_id}/annotations:bulk", response_model=schemas.MLAnnotationList)
+@ml_pipeline_router.post("/analyses/{analysis_id}/annotations:bulk", response_model=schemas.MLAnnotationList)
 async def bulk_upload_annotations(
     analysis_id: uuid.UUID,
     payload: BulkAnnotationsPayload,
@@ -496,7 +500,7 @@ class PresignResponse(schemas.BaseModel):  # type: ignore[attr-defined]
     storage_path: str
 
 
-@router.post("/analyses/{analysis_id}/artifacts/presign", response_model=PresignResponse)
+@ml_pipeline_router.post("/analyses/{analysis_id}/artifacts/presign", response_model=PresignResponse)
 async def presign_artifact_upload(
     analysis_id: uuid.UUID,
     req: PresignRequest,
@@ -564,7 +568,7 @@ class FinalizeRequest(schemas.BaseModel):  # type: ignore[attr-defined]
     status: Optional[str] = None  # typically completed
     error_message: Optional[str] = None
 
-@router.post("/analyses/{analysis_id}/finalize", response_model=schemas.MLAnalysis)
+@ml_pipeline_router.post("/analyses/{analysis_id}/finalize", response_model=schemas.MLAnalysis)
 async def finalize_analysis(
     analysis_id: uuid.UUID,
     req: FinalizeRequest,

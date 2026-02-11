@@ -197,13 +197,15 @@ async def delete_classification(
     # Check if the user has access to the image
     await get_image_or_403(db_classification.image_id, db, current_user)
     
-    # Only allow the user who created the classification or admin users to delete it
+    # Only allow the user who created the classification or admin users to delete it.
+    # Fail-closed: if current_user.id is None, deny unless admin.
     is_admin = is_user_in_group(current_user.email, "admin")
-    if (current_user.id and str(db_classification.created_by_id) != str(current_user.id)) and not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this classification",
-        )
+    if not is_admin:
+        if not current_user.id or str(db_classification.created_by_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to delete this classification",
+            )
     
     # Delete the classification
     success = await crud.delete_image_classification(db=db, classification_id=classification_id)

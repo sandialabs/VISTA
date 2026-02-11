@@ -80,8 +80,9 @@ async def update_comment(
     # Check if the user has access to the image
     await get_image_or_403(db_comment.image_id, db, current_user)
     
-    # Only allow the author of the comment to update it (admin check removed since groups field is gone)
-    if current_user.id and str(db_comment.author_id) != str(current_user.id):
+    # Only allow the author of the comment to update it.
+    # Fail-closed: if current_user.id is None, deny the operation.
+    if not current_user.id or str(db_comment.author_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this comment",
@@ -111,8 +112,9 @@ async def delete_comment(
     # Check if the user has access to the image
     await get_image_or_403(db_comment.image_id, db, user_context.user)
     
-    # Only allow the author of the comment to delete it (admin check removed since groups field is gone)
-    if user_context.id and str(db_comment.author_id) != str(user_context.id):
+    # Only allow the author of the comment to delete it.
+    # Fail-closed: if user_context.id is None, deny the operation.
+    if not user_context.id or str(db_comment.author_id) != str(user_context.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this comment",
