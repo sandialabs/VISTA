@@ -170,7 +170,7 @@ function ImageComments({ imageId, setError }) {
       </div>
       <div className="card-content">
         <div id="comments-container">
-          {loading && !comments.length ? (
+          {localLoading && !comments.length ? (
             <p>Loading comments...</p>
           ) : comments.length > 0 ? (
             <ul className="comments-list">
@@ -199,9 +199,9 @@ function ImageComments({ imageId, setError }) {
                           <button
                             className="btn btn-small btn-primary"
                             onClick={handleUpdateComment}
-                            disabled={loading}
+                            disabled={localLoading}
                           >
-                            {loading ? 'Saving...' : 'Save'}
+                            {localLoading ? 'Saving...' : 'Save'}
                           </button>
                           <button
                             className="btn btn-small btn-secondary"
@@ -259,7 +259,7 @@ function ImageComments({ imageId, setError }) {
           <button 
             type="submit" 
             className="btn btn-primary"
-            disabled={loading}
+            disabled={localLoading}
           >
             Add Comment
           </button>
