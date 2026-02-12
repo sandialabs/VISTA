@@ -67,32 +67,30 @@ function ProjectReport() {
 
         // Load detailed data for each image (comments, full metadata)
         // Use throttling to avoid overwhelming the server with concurrent requests
-        const imageTasks = imagesData.map(image => () => 
-          (async () => {
-            try {
-              // Get comments
-              const commentsResponse = await fetch(`/api/images/${image.id}/comments`);
-              const comments = commentsResponse.ok ? await commentsResponse.json() : [];
+        const imageTasks = imagesData.map(image => async () => {
+          try {
+            // Get comments
+            const commentsResponse = await fetch(`/api/images/${image.id}/comments`);
+            const comments = commentsResponse.ok ? await commentsResponse.json() : [];
 
-              // Get classifications
-              const classificationsResponse = await fetch(`/api/images/${image.id}/classifications`);
-              const classifications = classificationsResponse.ok ? await classificationsResponse.json() : [];
+            // Get classifications
+            const classificationsResponse = await fetch(`/api/images/${image.id}/classifications`);
+            const classifications = classificationsResponse.ok ? await classificationsResponse.json() : [];
 
-              return {
-                ...image,
-                comments,
-                classifications
-              };
-            } catch (error) {
-              console.error(`Failed to load details for image ${image.id}:`, error);
-              return {
-                ...image,
-                comments: [],
-                classifications: []
-              };
-            }
-          })()
-        );
+            return {
+              ...image,
+              comments,
+              classifications
+            };
+          } catch (error) {
+            console.error(`Failed to load details for image ${image.id}:`, error);
+            return {
+              ...image,
+              comments: [],
+              classifications: []
+            };
+          }
+        });
 
         // Process images in batches of 10 concurrent requests with progress updates
         const detailedImages = await throttlePromises(
