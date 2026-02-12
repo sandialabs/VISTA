@@ -328,58 +328,47 @@ async def get_image_content(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not generate download URL")
 
     # Use httpx to fetch the image from s3
-    # Create client outside context manager to keep it alive during streaming
-    client = httpx.AsyncClient()
-    try:
-        response = await client.get(internal_url)
-        response.raise_for_status()
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(internal_url)
+            response.raise_for_status()
 
-        content_type = db_image.content_type or "application/octet-stream"
+            content_type = db_image.content_type or "application/octet-stream"
 
-        # Check if conversion is needed and requested
-        if convert and content_type not in WEB_FRIENDLY_CONTENT_TYPES:
-            # Need to read full content for conversion
+            # Check if conversion is needed and requested
+            if convert and content_type not in WEB_FRIENDLY_CONTENT_TYPES:
+                # Need to read full content for conversion
+                image_data = await response.aread()
+                converted_data, converted_type = convert_to_web_format(image_data, content_type)
+                return StreamingResponse(
+                    content=io.BytesIO(converted_data),
+                    media_type=converted_type,
+                    headers={
+                        "Content-Disposition": get_content_disposition_header(db_image.filename, "inline")
+                    }
+                )
+
+            # For web-friendly formats, read content fully before exiting context
+            # This ensures the connection is closed properly while still allowing streaming
             image_data = await response.aread()
-            await client.aclose()  # Close client after reading full content
-            converted_data, converted_type = convert_to_web_format(image_data, content_type)
             return StreamingResponse(
-                content=io.BytesIO(converted_data),
-                media_type=converted_type,
+                content=io.BytesIO(image_data),
+                media_type=content_type,
                 headers={
                     "Content-Disposition": get_content_disposition_header(db_image.filename, "inline")
                 }
             )
-
-        # For streaming, we need to keep client alive
-        # Create an async generator that closes the client after streaming
-        async def stream_with_cleanup():
-            try:
-                async for chunk in response.aiter_bytes():
-                    yield chunk
-            finally:
-                await client.aclose()
-
-        # Return original content for web-friendly formats or when convert=false
-        return StreamingResponse(
-            content=stream_with_cleanup(),
-            media_type=content_type,
-            headers={
-                "Content-Disposition": get_content_disposition_header(db_image.filename, "inline")
-            }
-        )
-    except httpx.HTTPError as e:
-        await client.aclose()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching image from storage: {str(e)}"
-        )
-    except Exception as e:
-        # Ensure any unexpected exception is returned as 500 per tests
-        await client.aclose()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error fetching image: {str(e)}"
-        )
+        except httpx.HTTPError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error fetching image from storage: {str(e)}"
+            )
+        except Exception as e:
+            # Ensure any unexpected exception is returned as 500 per tests
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Unexpected error fetching image: {str(e)}"
+            )
 
 @router.get("/images/{image_id}/thumbnail", response_class=StreamingResponse)
 async def get_image_thumbnail(
