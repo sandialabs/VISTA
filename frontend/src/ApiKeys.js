@@ -3,6 +3,90 @@ import { Link } from 'react-router-dom';
 import './App.css';
 import Toast from './components/Toast';
 
+// CreateApiKeyModal component - extracted to prevent remounting
+const CreateApiKeyModal = ({ onClose, onSubmit, nameInputRef }) => (
+  <div className="modal">
+    <div className="modal-content">
+      <div className="modal-header">
+        <h3>Create New API Key</h3>
+        <span className="close" onClick={onClose}>&times;</span>
+      </div>
+      <div className="modal-body">
+        <form onSubmit={onSubmit}>
+          <div className="form-group">
+            <label htmlFor="api-key-name">API Key Name *</label>
+            <input 
+              type="text" 
+              id="api-key-name" 
+              ref={nameInputRef}
+              required
+              placeholder="Enter a descriptive name for this API key"
+              className="form-control"
+              autoFocus
+            />
+            <small className="form-text">
+              Choose a descriptive name to help you identify this API key
+            </small>
+          </div>
+          <div className="modal-footer">
+            <button 
+              type="button" 
+              className="btn btn-secondary"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              className="btn btn-success btn-large"
+            >
+              Create API Key
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+);
+
+// NewKeyDisplayModal component - extracted to prevent remounting
+const NewKeyDisplayModal = ({ newlyCreatedKey, onClose, copyToClipboard }) => (
+  <div className="modal">
+    <div className="modal-content">
+      <div className="modal-header">
+        <h3>API Key Created Successfully</h3>
+      </div>
+      <div className="modal-body">
+        <div className="alert alert-warning">
+          <strong>Important:</strong> This is the only time you will see this API key. 
+          Please copy it now and store it in a secure location.
+        </div>
+        <div className="form-group">
+          <label>Your new API Key:</label>
+          <div className="api-key-display">
+            <code className="api-key-value">{newlyCreatedKey}</code>
+            <button 
+              className="btn btn-primary btn-small"
+              onClick={() => copyToClipboard(newlyCreatedKey)}
+              style={{ marginLeft: '10px' }}
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="modal-footer">
+        <button 
+          className="btn btn-primary btn-large"
+          onClick={onClose}
+        >
+          I've Copied the Key
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 function ApiKeys() {
   const [apiKeys, setApiKeys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -158,87 +242,6 @@ function ApiKeys() {
     });
   };
 
-  const CreateApiKeyModal = () => (
-    <div className="modal">
-      <div className="modal-content">
-        <div className="modal-header">
-          <h3>Create New API Key</h3>
-          <span className="close" onClick={() => setShowCreateModal(false)}>&times;</span>
-        </div>
-        <div className="modal-body">
-          <form onSubmit={handleCreateApiKey}>
-            <div className="form-group">
-              <label htmlFor="api-key-name">API Key Name *</label>
-              <input 
-                type="text" 
-                id="api-key-name" 
-                ref={nameInputRef}
-                required
-                placeholder="Enter a descriptive name for this API key"
-                className="form-control"
-                autoFocus
-              />
-              <small className="form-text">
-                Choose a descriptive name to help you identify this API key
-              </small>
-            </div>
-            <div className="modal-footer">
-              <button 
-                type="button" 
-                className="btn btn-secondary"
-                onClick={() => setShowCreateModal(false)}
-              >
-                Cancel
-              </button>
-              <button 
-                type="submit" 
-                className="btn btn-success btn-large"
-              >
-                Create API Key
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-
-  const NewKeyDisplayModal = () => (
-    <div className="modal">
-      <div className="modal-content">
-        <div className="modal-header">
-          <h3>API Key Created Successfully</h3>
-        </div>
-        <div className="modal-body">
-          <div className="alert alert-warning">
-            <strong>Important:</strong> This is the only time you will see this API key. 
-            Please copy it now and store it in a secure location.
-          </div>
-          <div className="form-group">
-            <label>Your new API Key:</label>
-            <div className="api-key-display">
-              <code className="api-key-value">{newlyCreatedKey}</code>
-              <button 
-                className="btn btn-primary btn-small"
-                onClick={() => copyToClipboard(newlyCreatedKey)}
-                style={{ marginLeft: '10px' }}
-              >
-                Copy
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button 
-            className="btn btn-primary btn-large"
-            onClick={() => setNewlyCreatedKey(null)}
-          >
-            I've Copied the Key
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div className="App">
@@ -373,8 +376,20 @@ function ApiKeys() {
       </div>
 
       {/* Modals */}
-      {showCreateModal && <CreateApiKeyModal />}
-      {newlyCreatedKey && <NewKeyDisplayModal />}
+      {showCreateModal && (
+        <CreateApiKeyModal 
+          onClose={() => setShowCreateModal(false)}
+          onSubmit={handleCreateApiKey}
+          nameInputRef={nameInputRef}
+        />
+      )}
+      {newlyCreatedKey && (
+        <NewKeyDisplayModal 
+          newlyCreatedKey={newlyCreatedKey}
+          onClose={() => setNewlyCreatedKey(null)}
+          copyToClipboard={copyToClipboard}
+        />
+      )}
     </div>
   );
 }

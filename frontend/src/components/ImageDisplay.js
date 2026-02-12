@@ -197,6 +197,11 @@ function ImageDisplay({
   // Keyboard navigation for zoom
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Ignore if user is typing in an input field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      
       if (e.key === '+' || e.key === '=') {
         handleZoomIn();
       } else if (e.key === '-') {

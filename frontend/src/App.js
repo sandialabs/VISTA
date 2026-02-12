@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense, memo, useRef, useCallback }
 import { Route, Routes, Link } from 'react-router-dom';
 import './App.css';
 import Toast from './components/Toast';
+import NotFound from './components/NotFound';
 
 // Lazy load components
 const Project = lazy(() => import('./Project'));
@@ -171,6 +172,125 @@ const ProjectItem = memo(function ProjectItem({ project }) {
   );
 });
 
+// HomePage component - extracted to prevent remounting
+const HomePage = ({ 
+  projects, 
+  loading, 
+  currentUser, 
+  toast, 
+  hideToast, 
+  showModal, 
+  setShowModal, 
+  handleCreateProject 
+}) => (
+  <div className="App">
+    <header className="App-header">
+      <div className="header-content">
+        <div className="header-title">
+          <h1>VISTA an Image Management System</h1>
+          {currentUser && (
+            <div className="user-info">
+              <span>Welcome back, {currentUser.email}</span>
+            </div>
+          )}
+        </div>
+        <div className="header-actions">
+          <Link to="/api-keys" className="btn btn-secondary">
+            API Keys
+          </Link>
+          <button 
+            className="btn btn-primary btn-large" 
+            onClick={() => setShowModal(true)}
+          >
+            New Project
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div className="container">
+      {/* Toast notification */}
+      {toast && (
+        <Toast 
+          message={toast.message}
+          type={toast.type}
+          onClose={hideToast}
+          duration={5000}
+        />
+      )}
+      
+      {/* Projects Section */}
+      <div className="nav-breadcrumb">
+        <div className="breadcrumb">
+          <div className="breadcrumb-item">
+            <span>Dashboard</span>
+          </div>
+          <span className="breadcrumb-separator">/</span>
+          <div className="breadcrumb-item">
+            <span>Projects</span>
+          </div>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="loading-container">
+          <div className="spinner"></div>
+          <div className="loading-text">Loading your projects...</div>
+        </div>
+      )}
+      
+      {!loading && projects.length === 0 && (
+        <div className="card text-center">
+          <div className="card-content">
+            <div style={{ fontSize: '4rem', marginBottom: 'var(--space-4)' }}>+</div>
+            <h3 style={{ marginBottom: 'var(--space-4)', color: 'var(--gray-600)' }}>
+              No projects yet
+            </h3>
+            <p style={{ color: 'var(--gray-500)', marginBottom: 'var(--space-6)' }}>
+              Get started by creating your first image management project
+            </p>
+            <button 
+              className="btn btn-primary btn-large"
+              onClick={() => setShowModal(true)}
+            >
+              Create Your First Project
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {!loading && projects.length > 0 && (
+        <>
+          <div className="flex justify-between items-center mb-6">
+            <h2 style={{ margin: 0, color: 'var(--gray-900)', fontSize: '1.5rem', fontWeight: '600' }}>
+              Your Projects ({projects.length})
+            </h2>
+            <div className="flex gap-4">
+              <span style={{ fontSize: '0.875rem', color: 'var(--gray-500)' }}>
+                {projects.length} {projects.length === 1 ? 'project' : 'projects'} total
+              </span>
+            </div>
+          </div>
+          <div className="projects-grid">
+            {projects.map(project => (
+              <ProjectItem key={project.id} project={project} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+
+    {/* Create Project Modal - Now using a separate component */}
+    {showModal && (
+      <CreateProjectModal 
+        onClose={() => setShowModal(false)} 
+        onSubmit={handleCreateProject}
+        currentUser={currentUser}
+      />
+    )}
+  </div>
+);
+
 function App() {
   // const navigate = useNavigate(); // Commented out - not currently used
   const [projects, setProjects] = useState([]);
@@ -281,118 +401,20 @@ function App() {
   }, []);
 
 
-  const HomePage = () => (
-    <div className="App">
-      <header className="App-header">
-        <div className="header-content">
-          <div className="header-title">
-            <h1>VISTA an Image Management System</h1>
-            {currentUser && (
-              <div className="user-info">
-                <span>Welcome back, {currentUser.email}</span>
-              </div>
-            )}
-          </div>
-          <div className="header-actions">
-            <Link to="/api-keys" className="btn btn-secondary">
-              API Keys
-            </Link>
-            <button 
-              className="btn btn-primary btn-large" 
-              onClick={() => setShowModal(true)}
-            >
-              New Project
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="container">
-        {/* Toast notification */}
-        {toast && (
-          <Toast 
-            message={toast.message}
-            type={toast.type}
-            onClose={hideToast}
-            duration={5000}
-          />
-        )}
-        
-        {/* Projects Section */}
-        <div className="nav-breadcrumb">
-          <div className="breadcrumb">
-            <div className="breadcrumb-item">
-              <span>Dashboard</span>
-            </div>
-            <span className="breadcrumb-separator">/</span>
-            <div className="breadcrumb-item">
-              <span>Projects</span>
-            </div>
-          </div>
-        </div>
-
-        {loading && (
-          <div className="loading-container">
-            <div className="spinner"></div>
-            <div className="loading-text">Loading your projects...</div>
-          </div>
-        )}
-        
-        {!loading && projects.length === 0 && (
-          <div className="card text-center">
-            <div className="card-content">
-              <div style={{ fontSize: '4rem', marginBottom: 'var(--space-4)' }}>+</div>
-              <h3 style={{ marginBottom: 'var(--space-4)', color: 'var(--gray-600)' }}>
-                No projects yet
-              </h3>
-              <p style={{ color: 'var(--gray-500)', marginBottom: 'var(--space-6)' }}>
-                Get started by creating your first image management project
-              </p>
-              <button 
-                className="btn btn-primary btn-large"
-                onClick={() => setShowModal(true)}
-              >
-                Create Your First Project
-              </button>
-            </div>
-          </div>
-        )}
-        
-        {!loading && projects.length > 0 && (
-          <>
-            <div className="flex justify-between items-center mb-6">
-              <h2 style={{ margin: 0, color: 'var(--gray-900)', fontSize: '1.5rem', fontWeight: '600' }}>
-                Your Projects ({projects.length})
-              </h2>
-              <div className="flex gap-4">
-                <span style={{ fontSize: '0.875rem', color: 'var(--gray-500)' }}>
-                  {projects.length} {projects.length === 1 ? 'project' : 'projects'} total
-                </span>
-              </div>
-            </div>
-            <div className="projects-grid">
-              {projects.map(project => (
-                <ProjectItem key={project.id} project={project} />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Create Project Modal - Now using a separate component */}
-      {showModal && (
-        <CreateProjectModal 
-          onClose={() => setShowModal(false)} 
-          onSubmit={handleCreateProject}
-          currentUser={currentUser}
-        />
-      )}
-    </div>
-  );
-
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
+      <Route path="/" element={
+        <HomePage 
+          projects={projects}
+          loading={loading}
+          currentUser={currentUser}
+          toast={toast}
+          hideToast={hideToast}
+          showModal={showModal}
+          setShowModal={setShowModal}
+          handleCreateProject={handleCreateProject}
+        />
+      } />
       <Route
         path="/project/:id"
         element={
@@ -425,6 +447,7 @@ function App() {
           </Suspense>
         } 
       />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

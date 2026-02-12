@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 
-function ImageComments({ imageId, loading, setLoading, setError }) {
+function ImageComments({ imageId, setError }) {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [editingComment, setEditingComment] = useState(null);
+  const [localLoading, setLocalLoading] = useState(false);
 
   // Helper function to format date
   const formatDate = (dateString) => {
@@ -47,7 +48,7 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
     }
     
     try {
-      setLoading(true);
+      setLocalLoading(true);
       
       console.log("Adding comment for image ID:", imageId);
       
@@ -87,7 +88,7 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
       console.error('Error creating comment:', error);
       setError('Failed to add comment. Please try again later.');
     } finally {
-      setLoading(false);
+      setLocalLoading(false);
     }
   };
 
@@ -96,7 +97,7 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
     if (!editingComment) return;
 
     try {
-      setLoading(true);
+      setLocalLoading(true);
 
       const response = await fetch(`/api/comments/${editingComment.id}`, {
         method: 'PATCH',
@@ -129,7 +130,7 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
       console.error('Error updating comment:', error);
       setError('Failed to update comment. Please try again later.');
     } finally {
-      setLoading(false);
+      setLocalLoading(false);
     }
   };
 
@@ -140,7 +141,7 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
     }
     
     try {
-      setLoading(true);
+      setLocalLoading(true);
       
       const response = await fetch(`/api/comments/${id}`, {
         method: 'DELETE',
@@ -158,7 +159,7 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
       console.error('Error deleting comment:', error);
       setError('Failed to delete comment. Please try again later.');
     } finally {
-      setLoading(false);
+      setLocalLoading(false);
     }
   };
 

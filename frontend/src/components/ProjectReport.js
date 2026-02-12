@@ -1,6 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
+// Helper function to throttle concurrent promises
+const throttlePromises = async (tasks, limit, onProgress) => {
+  const results = [];
+  let completed = 0;
+  
+  for (let i = 0; i < tasks.length; i += limit) {
+    const batch = tasks.slice(i, i + limit);
+    const batchResults = await Promise.all(batch.map(task => task()));
+    results.push(...batchResults);
+    completed += batch.length;
+    if (onProgress) {
+      onProgress(completed, tasks.length);
+    }
+  }
+  
+  return results;
+};
+
 function ProjectReport() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -12,6 +30,7 @@ function ProjectReport() {
   const [currentUser, setCurrentUser] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [fullWidthImages, setFullWidthImages] = useState(false);
+  const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
 
   const getClassLabels = (classifications, classes) => {
     if (!classifications || classifications.length === 0) return 'None';
@@ -47,8 +66,9 @@ function ProjectReport() {
         const imagesData = await imagesResponse.json();
 
         // Load detailed data for each image (comments, full metadata)
-        const detailedImages = await Promise.all(
-          imagesData.map(async (image) => {
+        // Use throttling to avoid overwhelming the server with concurrent requests
+        const imageTasks = imagesData.map(image => () => 
+          (async () => {
             try {
               // Get comments
               const commentsResponse = await fetch(`/api/images/${image.id}/comments`);
@@ -71,10 +91,18 @@ function ProjectReport() {
                 classifications: []
               };
             }
-          })
+          })()
+        );
+
+        // Process images in batches of 10 concurrent requests with progress updates
+        const detailedImages = await throttlePromises(
+          imageTasks, 
+          10, 
+          (current, total) => setLoadProgress({ current, total })
         );
 
         setImages(detailedImages);
+        setLoadProgress({ current: 0, total: 0 }); // Reset progress
 
         // Load classes
         const classesResponse = await fetch(`/api/projects/${id}/classes`);
@@ -249,7 +277,14 @@ function ProjectReport() {
       <div className="App">
         <div className="loading-container">
           <div className="spinner"></div>
-          <div className="loading-text">Loading project data...</div>
+          <div className="loading-text">
+            Loading project data...
+            {loadProgress.total > 0 && (
+              <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--gray-600)' }}>
+                Loading image details: {loadProgress.current} / {loadProgress.total}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );

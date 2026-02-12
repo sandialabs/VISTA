@@ -345,6 +345,11 @@ function ImageView() {
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Ignore if user is typing in an input field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      
       if (e.key === 'ArrowLeft') {
         navigateToPreviousImage();
       } else if (e.key === 'ArrowRight') {
@@ -529,8 +534,6 @@ function ImageView() {
 
               <ImageComments
                 imageId={imageId}
-                loading={loading}
-                setLoading={setLoading}
                 setError={setError}
               />
 
