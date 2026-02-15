@@ -48,14 +48,17 @@ def test_api_key_prefix_accepts_valid_key(client, api_user_with_key):
 def test_api_ml_prefix_requires_both_api_key_and_hmac(client, api_user_with_key):
     """Test that /api-ml endpoints require BOTH API key AND HMAC"""
     user, api_key = api_user_with_key
+    fake_id = "00000000-0000-0000-0000-000000000000"
 
     # Test 1: No auth at all - should fail (missing API key + HMAC)
-    response = client.get("/api-ml/projects")
+    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
+                            json={"status": "processing"})
     assert response.status_code == 401
 
     # Test 2: API key but no HMAC - should fail
     headers = {"Authorization": f"Bearer {api_key}"}
-    response = client.get("/api-ml/projects", headers=headers)
+    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
+                            json={"status": "processing"}, headers=headers)
     assert response.status_code == 401
     # Body may vary; we only require a 401 for missing HMAC
 
@@ -63,14 +66,15 @@ def test_api_ml_prefix_requires_both_api_key_and_hmac(client, api_user_with_key)
 def test_api_ml_prefix_accepts_valid_api_key_and_hmac(client, api_user_with_key, monkeypatch):
     """Test that /api-ml endpoints accept valid API key + HMAC"""
     user, api_key = api_user_with_key
+    fake_id = "00000000-0000-0000-0000-000000000000"
 
     # Set HMAC secret for this test
     test_secret = "test-hmac-secret-12345"
     monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
 
-    # Generate valid HMAC signature for GET request (empty body)
+    # Generate valid HMAC signature for the request body
+    body = b'{"status":"processing"}'
     timestamp = str(int(time.time()))
-    body = b""
     message = timestamp.encode('utf-8') + b'.' + body
     signature_hex = hmac.new(test_secret.encode('utf-8'), message, hashlib.sha256).hexdigest()
     signature = f"sha256={signature_hex}"
@@ -78,27 +82,44 @@ def test_api_ml_prefix_accepts_valid_api_key_and_hmac(client, api_user_with_key,
     headers = {
         "Authorization": f"Bearer {api_key}",
         "X-ML-Signature": signature,
-        "X-ML-Timestamp": timestamp
+        "X-ML-Timestamp": timestamp,
+        "Content-Type": "application/json"
     }
 
-    response = client.get("/api-ml/projects", headers=headers)
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    # Auth passes, but fake analysis_id means 404 from handler (not 401 from auth)
+    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
+                            content=body, headers=headers)
+    assert response.status_code == 404, (
+        f"Expected 404 (auth passed, analysis not found), got {response.status_code}"
+    )
 
 
-def test_all_prefixes_expose_same_endpoints(client):
-    """Test that all three prefixes expose the same endpoints"""
-    # All should expose /projects endpoint
-    # (even if auth fails, we should get 401, not 404)
+def test_auth_tier_segregation(client):
+    """Test that auth tiers are properly segregated to prevent privilege escalation.
 
-    response1 = client.get("/api/projects")
-    response2 = client.get("/api-key/projects")
-    response3 = client.get("/api-ml/projects")
+    /api (proxy auth): all routers including users + api_keys
+    /api-key (API key auth): data-access routers ONLY (no users, no api_keys)
+    /api-ml (HMAC auth): ML pipeline callbacks ONLY (no general endpoints)
+    """
+    # /api should expose projects (all routers)
+    response = client.get("/api/projects")
+    assert response.status_code != 404, "/api/projects should exist"
 
-    # None should be 404 (endpoint exists on all prefixes)
-    assert response1.status_code != 404, "/api/projects should exist"
-    assert response2.status_code != 404, "/api-key/projects should exist"
-    assert response3.status_code != 404, "/api-ml/projects should exist"
+    # /api-key should expose projects (data-access router)
+    response = client.get("/api-key/projects")
+    assert response.status_code != 404, "/api-key/projects should exist"
+
+    # /api-key must NOT expose user admin endpoints (privilege escalation risk)
+    response = client.get("/api-key/users/me")
+    assert response.status_code == 404, "/api-key/users/me should NOT exist"
+
+    # /api-key must NOT expose API key management (prevents key self-creation)
+    response = client.get("/api-key/api-keys")
+    assert response.status_code == 404, "/api-key/api-keys should NOT exist"
+
+    # /api-ml should NOT expose general endpoints (HMAC prefix is pipeline-only)
+    response = client.get("/api-ml/projects")
+    assert response.status_code == 404, "/api-ml/projects should NOT exist"
 
 
 def test_api_key_prefix_project_operations(client, api_user_with_key):
@@ -140,26 +161,29 @@ def test_api_prefix_still_works_for_oauth(client):
 def test_invalid_api_key_rejected(client):
     """Test that invalid API keys are properly rejected"""
     headers = {"Authorization": "Bearer invalid-key-12345"}
+    fake_id = "00000000-0000-0000-0000-000000000000"
 
     # Try on /api-key prefix
     response = client.get("/api-key/projects", headers=headers)
     assert response.status_code == 401
 
-    # Try on /api-ml prefix
-    response = client.get("/api-ml/projects", headers=headers)
+    # Try on /api-ml prefix (pipeline endpoint)
+    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
+                            json={"status": "processing"}, headers=headers)
     assert response.status_code == 401
 
 
 def test_api_ml_rejects_expired_timestamp(client, api_user_with_key, monkeypatch):
     """Test that /api-ml endpoints reject old timestamps (replay protection)"""
     user, api_key = api_user_with_key
+    fake_id = "00000000-0000-0000-0000-000000000000"
 
     test_secret = "test-hmac-secret-12345"
     monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
 
     # Use old timestamp (1 hour ago)
     old_timestamp = str(int(time.time()) - 3600)
-    body = b""
+    body = b'{"status":"processing"}'
     message = old_timestamp.encode('utf-8') + b'.' + body
     signature_hex = hmac.new(test_secret.encode('utf-8'), message, hashlib.sha256).hexdigest()
     signature = f"sha256={signature_hex}"
@@ -167,10 +191,12 @@ def test_api_ml_rejects_expired_timestamp(client, api_user_with_key, monkeypatch
     headers = {
         "Authorization": f"Bearer {api_key}",
         "X-ML-Signature": signature,
-        "X-ML-Timestamp": old_timestamp
+        "X-ML-Timestamp": old_timestamp,
+        "Content-Type": "application/json"
     }
 
-    response = client.get("/api-ml/projects", headers=headers)
+    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
+                            content=body, headers=headers)
     # Should be rejected due to old timestamp
     assert response.status_code == 401
 
@@ -178,21 +204,25 @@ def test_api_ml_rejects_expired_timestamp(client, api_user_with_key, monkeypatch
 def test_api_ml_rejects_invalid_hmac_signature(client, api_user_with_key, monkeypatch):
     """Test that /api-ml endpoints reject invalid HMAC signatures"""
     user, api_key = api_user_with_key
+    fake_id = "00000000-0000-0000-0000-000000000000"
 
     test_secret = "test-hmac-secret-12345"
     monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
 
     timestamp = str(int(time.time()))
+    body = b'{"status":"processing"}'
     # Use wrong signature
     signature = "sha256=0000000000000000000000000000000000000000000000000000000000000000"
 
     headers = {
         "Authorization": f"Bearer {api_key}",
         "X-ML-Signature": signature,
-        "X-ML-Timestamp": timestamp
+        "X-ML-Timestamp": timestamp,
+        "Content-Type": "application/json"
     }
 
-    response = client.get("/api-ml/projects", headers=headers)
+    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
+                            content=body, headers=headers)
     assert response.status_code == 401
     # Error message wording is not enforced; 401 status is sufficient
 
