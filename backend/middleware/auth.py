@@ -3,6 +3,7 @@ Unified authentication middleware.
 Single middleware for auth that extracts user info from headers and sets request state.
 """
 
+import hmac
 import logging
 import re
 from fastapi import Request
@@ -107,7 +108,7 @@ async def auth_middleware(request: Request, call_next):
             if settings.PROXY_SHARED_SECRET:
                 # Proxy secret configured -> enforce validation first
                 proxy_secret = headers.get(settings.X_PROXY_SECRET_HEADER.lower())
-                if proxy_secret != settings.PROXY_SHARED_SECRET:
+                if not proxy_secret or not hmac.compare_digest(proxy_secret, settings.PROXY_SHARED_SECRET):
                     logger.warning("Invalid or missing proxy secret")
                     return JSONResponse(
                         status_code=401,

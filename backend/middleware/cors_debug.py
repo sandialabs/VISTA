@@ -10,13 +10,37 @@ from core.config import settings
 
 
 def add_cors_middleware(app, cors_origins: list[str]):
-    """Add CORS middleware to the FastAPI app."""
+    """Add CORS middleware to the FastAPI app.
+
+    In production (DEBUG=False), restrict allowed methods and headers to only
+    those the application actually uses. Wildcards combined with
+    allow_credentials=True is insecure because it lets any origin make
+    credentialed requests with arbitrary methods/headers.
+    """
+    origins = [o.strip() for o in cors_origins if o.strip()]
+
+    if settings.DEBUG:
+        allow_methods = ["*"]
+        allow_headers = ["*"]
+    else:
+        allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+        allow_headers = [
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "X-User-Email",
+            "X-User-Id",
+            "X-Proxy-Secret",
+            "X-ML-Signature",
+            "X-ML-Timestamp",
+        ]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in cors_origins if o.strip()],
+        allow_origins=origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=allow_methods,
+        allow_headers=allow_headers,
     )
 
 

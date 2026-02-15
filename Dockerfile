@@ -20,8 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install uv package installer and debugging tools
-RUN pip install --no-cache-dir --upgrade pip uv debugpy
+# Install uv package installer
+RUN pip install --no-cache-dir --upgrade pip uv
 
 WORKDIR /app
 
@@ -49,9 +49,6 @@ COPY ./frontend/public ./frontend/public
 COPY ./frontend/src ./frontend/src
 COPY ./frontend/config-overrides.js ./frontend/
 
-# copy the test folder over as well. 
-COPY test ./test
-
 # Install frontend dependencies and build
 WORKDIR /app/frontend
 RUN npm install
@@ -68,23 +65,24 @@ FROM base AS final
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install uv in the final stage for testing
-RUN pip install --no-cache-dir uv
-
 # Copy backend code
 COPY --from=builder /app/backend /app/backend
 # Copy frontend build files
 COPY --from=builder /app/frontend/build /app/ui2
-# Copy test folder
-COPY test ./test
 
 # Set frontend build path environment variable
 ENV FRONTEND_BUILD_PATH=/app/ui2
 
+# Create non-root user for running the application
+RUN groupadd --gid 1000 vista && \
+    useradd --uid 1000 --gid vista --create-home vista && \
+    chown -R vista:vista /app
+
+USER vista
+
 WORKDIR /app
 EXPOSE 8000
 
-# Use uvicorn to run the FastAPI app (remove --reload for production)
-# Change to backend directory so imports work correctly
+# Use uvicorn to run the FastAPI app
 WORKDIR /app/backend
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -5,7 +5,7 @@ from typing import List
 import utils.crud as crud
 from core import schemas
 from core.database import get_db
-from utils.dependencies import get_current_user, generate_api_key, hash_api_key
+from utils.dependencies import get_current_user, generate_api_key, hash_api_key, get_api_key_prefix
 
 router = APIRouter(
     tags=["API Keys"],
@@ -21,13 +21,15 @@ async def create_api_key(
     # Generate a new API key
     raw_key = generate_api_key()
     key_hash = hash_api_key(raw_key)
-    
+    key_prefix = get_api_key_prefix(raw_key)
+
     # Create the API key in the database
     db_api_key = await crud.create_api_key(
-        db=db, 
-        api_key=api_key, 
-        user_id=current_user.id, 
+        db=db,
+        api_key=api_key,
+        user_id=current_user.id,
         key_hash=key_hash,
+        key_prefix=key_prefix,
         created_by=current_user.email
     )
     

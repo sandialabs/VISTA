@@ -135,16 +135,22 @@ async def get_image_or_403(image_id: uuid.UUID, db: AsyncSession, current_user: 
     
     return db_image
 
+API_KEY_PREFIX_LENGTH = 8
+
 def generate_api_key() -> str:
     """Generate a secure API key"""
     return secrets.token_urlsafe(32)
+
+def get_api_key_prefix(api_key: str) -> str:
+    """Return the first N characters of an API key for fast DB lookup."""
+    return api_key[:API_KEY_PREFIX_LENGTH]
 
 def hash_api_key(api_key: str) -> str:
     """Hash an API key for storage using secure PBKDF2"""
     # Use PBKDF2 with SHA-256 for secure hashing
     salt = secrets.token_bytes(32)  # 256-bit salt
     key = hashlib.pbkdf2_hmac('sha256', api_key.encode('utf-8'), salt, 100000)
-    
+
     # Return salt + hash encoded as hex
     return salt.hex() + key.hex()
 
@@ -174,21 +180,22 @@ async def get_user_from_api_key(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db)
 ) -> Optional[User]:
-    """Get user from API key if provided"""
+    """Get user from API key if provided.
+
+    Uses a stored key_prefix column for O(1) lookup when available, falling back
+    to scanning all active keys for legacy rows that predate the prefix column.
+    """
     if not credentials:
         return None
-    
-    # Get all active API keys and verify against each one
-    # Note: This is less efficient but necessary with salted hashes
-    # In production, consider adding an index or prefix to optimize
-    all_api_keys = await crud.get_all_active_api_keys(db)
-    
-    for api_key_record in all_api_keys:
-        if verify_api_key(credentials.credentials, api_key_record.key_hash):
-            # Update last used timestamp
+
+    raw_key = credentials.credentials
+    prefix = get_api_key_prefix(raw_key)
+
+    # Try prefix-based lookup first (fast path)
+    candidates = await crud.get_active_api_keys_by_prefix(db, prefix)
+    for api_key_record in candidates:
+        if verify_api_key(raw_key, api_key_record.key_hash):
             await crud.update_api_key_last_used(db, api_key_record.id)
-            
-            # Return the user associated with this API key
             return User(
                 id=api_key_record.user.id,
                 email=api_key_record.user.email,
@@ -196,9 +203,26 @@ async def get_user_from_api_key(
                 is_active=api_key_record.user.is_active,
                 created_at=api_key_record.user.created_at,
                 updated_at=api_key_record.user.updated_at,
-                groups=[]  # Groups handled by auth system
+                groups=[]
             )
-    
+
+    # Fallback: scan keys with NULL prefix (legacy rows before migration)
+    legacy_keys = await crud.get_active_api_keys_without_prefix(db)
+    for api_key_record in legacy_keys:
+        if verify_api_key(raw_key, api_key_record.key_hash):
+            # Backfill the prefix for future lookups
+            await crud.set_api_key_prefix(db, api_key_record.id, prefix)
+            await crud.update_api_key_last_used(db, api_key_record.id)
+            return User(
+                id=api_key_record.user.id,
+                email=api_key_record.user.email,
+                username=api_key_record.user.username,
+                is_active=api_key_record.user.is_active,
+                created_at=api_key_record.user.created_at,
+                updated_at=api_key_record.user.updated_at,
+                groups=[]
+            )
+
     return None
 
 async def get_current_user(

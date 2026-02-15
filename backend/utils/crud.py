@@ -690,16 +690,44 @@ async def get_all_active_api_keys(db: AsyncSession) -> List[models.ApiKey]:
     )
     return result.scalars().all()
 
-async def create_api_key(db: AsyncSession, api_key: schemas.ApiKeyCreate, user_id: uuid.UUID, key_hash: str, created_by: Optional[str] = None) -> models.ApiKey:
+async def get_active_api_keys_by_prefix(db: AsyncSession, prefix: str) -> List[models.ApiKey]:
+    """Get active API keys matching a given prefix (fast O(1) lookup)."""
+    result = await db.execute(
+        select(models.ApiKey)
+        .options(selectinload(models.ApiKey.user))
+        .where(models.ApiKey.is_active == True, models.ApiKey.key_prefix == prefix)
+    )
+    return result.scalars().all()
+
+async def get_active_api_keys_without_prefix(db: AsyncSession) -> List[models.ApiKey]:
+    """Get active API keys that have no prefix stored (legacy rows)."""
+    result = await db.execute(
+        select(models.ApiKey)
+        .options(selectinload(models.ApiKey.user))
+        .where(models.ApiKey.is_active == True, models.ApiKey.key_prefix == None)
+    )
+    return result.scalars().all()
+
+async def set_api_key_prefix(db: AsyncSession, api_key_id: uuid.UUID, prefix: str) -> None:
+    """Backfill the key_prefix column for a legacy API key."""
+    await db.execute(
+        update(models.ApiKey)
+        .where(models.ApiKey.id == api_key_id)
+        .values(key_prefix=prefix)
+    )
+    await db.commit()
+
+async def create_api_key(db: AsyncSession, api_key: schemas.ApiKeyCreate, user_id: uuid.UUID, key_hash: str, key_prefix: Optional[str] = None, created_by: Optional[str] = None) -> models.ApiKey:
     db_api_key = models.ApiKey(
         user_id=user_id,
         key_hash=key_hash,
+        key_prefix=key_prefix,
         name=api_key.name
     )
     db.add(db_api_key)
     await db.commit()
     await db.refresh(db_api_key)
-    
+
     log_db_operation("CREATE", "api_keys", db_api_key.id, created_by or "system", {"name": api_key.name, "user_id": str(user_id)})
     return db_api_key
 

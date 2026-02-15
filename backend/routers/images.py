@@ -15,7 +15,12 @@ from utils.dependencies import get_current_user
 from utils.dependencies import get_project_or_403
 from utils.boto3_client import upload_file_to_s3, get_presigned_download_url, delete_file_from_s3
 from utils.serialization import to_data_instance_schema
-from utils.file_security import get_content_disposition_header
+from utils.file_security import (
+    get_content_disposition_header,
+    validate_image_content_type,
+    validate_image_extension,
+    validate_image_magic_bytes,
+)
 from utils.cache_manager import get_cache
 import json as _json
 from PIL import Image
@@ -47,9 +52,29 @@ async def upload_image_to_project(
         except _json.JSONDecodeError:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON format for metadata")
     # If metadata_json is None or empty string, parsed_metadata remains None
-    # Basic validation
+
+    # -- File type validation --
+    if not validate_image_content_type(file.content_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {file.content_type}. Allowed types: JPEG, PNG, GIF, WebP, TIFF, BMP, SVG.",
+        )
+    if not validate_image_extension(file.filename):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File extension not allowed. Allowed extensions: jpg, jpeg, png, gif, webp, tiff, tif, bmp, svg.",
+        )
+    # Read a small header to verify magic bytes
+    file_header = file.file.read(32)
+    file.file.seek(0)
+    if file_header and not validate_image_magic_bytes(file_header):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content does not match a recognized image format.",
+        )
+
+    # Basic size validation
     max_size = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))  # 10MB default
-    # Try to read a small chunk to estimate streaming health, but do not load all into memory
     try:
         file.file.seek(0, io.SEEK_END)
         file_size = file.file.tell()
