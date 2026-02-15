@@ -10,7 +10,6 @@ import ImageComments from './components/ImageComments';
 import ImageDeletionControls from './components/ImageDeletionControls';
 import MLAnalysisPanel from './components/MLAnalysisPanel';
 import OverlayControls from './components/OverlayControls';
-import MLDebugOutputs from './components/MLDebugOutputs';
 import CalibrationManager from './components/CalibrationManager';
 import MeasurementList from './components/MeasurementList';
 
@@ -98,7 +97,7 @@ function ImageView() {
       if (!response.ok) {
         // If direct fetch fails (likely because image is deleted), 
         // try to find it through the project endpoint with deleted images included
-        console.log('Direct image fetch failed, trying project endpoint with deleted images...');
+        // Direct fetch failed, try project endpoint with deleted images included
         const projectResponse = await fetch(`/api/projects/${projectId}/images?include_deleted=true`);
         
         if (!projectResponse.ok) {
@@ -133,7 +132,7 @@ function ImageView() {
   // Load project images for navigation
   const loadProjectImages = useCallback(async () => {
     try {
-      console.log('Fetching images for project:', projectId);
+      // Fetch images for project navigation
       const response = await fetch(`/api/projects/${projectId}/images?include_deleted=true`);
 
       if (!response.ok) {
@@ -143,7 +142,6 @@ function ImageView() {
       const images = await response.json();
 
       if (!Array.isArray(images)) {
-        console.error('Server response is not an array:', images);
         throw new Error('Invalid server response: expected an array of images');
       }
 
@@ -199,24 +197,16 @@ function ImageView() {
     fetch('/api/users/me')
       .then(response => {
         if (!response.ok) {
-          // If we get a 401, it's expected when authentication is disabled
-          if (response.status === 401) {
-            console.log("Authentication is disabled or user is not logged in");
-            return null;
-          }
+          if (response.status === 401) return null;
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         return response.json();
       })
       .then(userData => {
-        if (userData) {
-          setCurrentUser(userData);
-        }
+        if (userData) setCurrentUser(userData);
       })
-      .catch(err => {
-        console.error("Failed to fetch current user:", err);
-      });
-    
+      .catch(() => {});
+
     loadImageData();
     loadProjectImages();
     loadClasses();
@@ -665,12 +655,6 @@ function ImageView() {
             </div>
           </div>
 
-          {/* Debug ML outputs section */}
-          {imageId && (
-            <div style={{ marginTop: '1rem' }}>
-              <MLDebugOutputs imageId={imageId} />
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -58,12 +58,6 @@ jest.mock('../components/MLAnalysisPanel', () => {
   };
 });
 
-jest.mock('../components/MLDebugOutputs', () => {
-  return function MockMLDebugOutputs() {
-    return <div>MLDebugOutputs</div>;
-  };
-});
-
 jest.mock('../components/CalibrationManager', () => {
   return function MockCalibrationManager() {
     return <div>CalibrationManager</div>;

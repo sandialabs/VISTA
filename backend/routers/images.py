@@ -1,5 +1,6 @@
 import uuid
 import io
+import logging
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Body
 from sqlalchemy import update
@@ -13,6 +14,8 @@ from core.config import settings
 from core.group_auth_helper import is_user_in_group
 from utils.dependencies import get_current_user
 from utils.dependencies import get_project_or_403
+
+logger = logging.getLogger(__name__)
 from utils.boto3_client import upload_file_to_s3, get_presigned_download_url, delete_file_from_s3
 from utils.serialization import to_data_instance_schema
 from utils.file_security import get_content_disposition_header
@@ -137,7 +140,7 @@ async def list_images_in_project(
                     continue
                 response_images.append(to_data_instance_schema(img))
             except Exception as e:
-                print(f"Error serializing image {img.id}: {e}")
+                logger.warning("Error serializing image %s: %s", img.id, e)
                 # Skip this image but continue processing others
                 continue
     
@@ -652,7 +655,7 @@ async def update_image_metadata(
             updated_at=db_image.updated_at,
         )
     except Exception as e:
-        print(f"Error building DataInstance response: {e}")
+        logger.error("Error building DataInstance response: %s", e)
         raise
 
 @router.delete("/images/{image_id}/metadata/{key}", response_model=schemas.DataInstance, status_code=status.HTTP_200_OK)
@@ -715,5 +718,5 @@ async def delete_image_metadata(
             updated_at=db_image.updated_at,
         )
     except Exception as e:
-        print(f"Error building DataInstance response: {e}")
+        logger.error("Error building DataInstance response: %s", e)
         raise

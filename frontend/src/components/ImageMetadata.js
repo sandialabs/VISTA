@@ -1,47 +1,12 @@
 import React, { useState } from 'react';
 import MetadataEditDialog from './MetadataEditDialog';
+import { formatFileSize, formatDate, parseMetadataValue } from '../utils';
 
 function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError }) {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState(null);
   const [editingValue, setEditingValue] = useState('');
 
-  // Helper function to format file size
-  const formatFileSize = (bytes) => {
-    if (!bytes) return 'Unknown size';
-
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
-    let unitIndex = 0;
-
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex++;
-    }
-
-    return `${size.toFixed(1)} ${units[unitIndex]}`;
-  };
-
-  // Helper function to format date
-  const formatDate = (dateString) => {
-    if (!dateString) return 'Unknown date';
-
-    const date = new Date(dateString);
-    return date.toLocaleString();
-  };
-
-  // Helper function to parse metadata value
-  const parseMetadataValue = (value) => {
-    if (value.trim() === '') {
-      return null;
-    }
-
-    try {
-      return JSON.parse(value);
-    } catch (e) {
-      return value;
-    }
-  };
 
   // Helper to format value for display in dialog
   const formatValueForEdit = (value) => {

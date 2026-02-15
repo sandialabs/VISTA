@@ -68,4 +68,4 @@ if __name__ == "__main__":
     test_debug_mode_auth()
     test_production_mode_auth()
     test_group_membership()
-    print("✅ All authentication tests passed!")
+    print("All authentication tests passed.")

@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { formatFileSize } from '../utils';
 
 // Fallback SVG for failed image loads
-const FALLBACK_IMAGE_SVG = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgZmlsbD0iI2YzZjRmNiIgc3Ryb2tlPSIjZTVlN2ViIiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSI1MCUiIHk9IjQ1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE2IiBmb250LXdlaWdodD0iNTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iIzlmYTZiMiI+SW1hZ2UgVW5hdmFpbGFibGU8L3RleHQ+PHRleHQgeD0iNTAlIiB5PSI1NSUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iIGZpbGw9IiNkMWQ1ZGIiPvCfk7c8L3RleHQ+PC9zdmc+';
+const FALLBACK_IMAGE_SVG = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgZmlsbD0iI2YzZjRmNiIgc3Ryb2tlPSIjZTVlN2ViIiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSI1MCUiIHk9IjQ1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE2IiBmb250LXdlaWdodD0iNTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iIzlmYTZiMiI+SW1hZ2UgVW5hdmFpbGFibGU8L3RleHQ+PHRleHQgeD0iNTAlIiB5PSI1NSUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iIGZpbGw9IiNkMWQ1ZGIiPltObyBQcmV2aWV3XTwvdGV4dD48L3N2Zz4=';
 
 // Deleted image placeholder SVG
-const DELETED_IMAGE_SVG = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgZmlsbD0iI2ZiZjVmNSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1kYXNoYXJyYXk9IjEwLDUiLz48dGV4dCB4PSI1MCUiIHk9IjQwJSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNjAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2M0MzAyYiI+SW1hZ2UgRGVsZXRlZDwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjU1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2Y1OWUwYiI+8J+XkeKcgO+4jzwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjY4JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iIzk3OWNhMSI+Q2xpY2sgdG8gdmlldyBkZXRhaWxzPC90ZXh0Pjwvc3ZnPg==';
+const DELETED_IMAGE_SVG = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgZmlsbD0iI2ZiZjVmNSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1kYXNoYXJyYXk9IjEwLDUiLz48dGV4dCB4PSI1MCUiIHk9IjQwJSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNjAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2M0MzAyYiI+SW1hZ2UgRGVsZXRlZDwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjU1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2Y1OWUwYiI+W1JlbW92ZWRdPC90ZXh0Pjx0ZXh0IHg9IjUwJSIgeT0iNjglIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIiBmaWxsPSIjOTc5Y2ExIj5DbGljayB0byB2aWV3IGRldGFpbHM8L3RleHQ+PC9zdmc+';
 
 function ImageGallery({ projectId, images, loading, onImageUpdated, refreshProjectImages }) {
   const navigate = useNavigate();
   const [imageLoadStatus, setImageLoadStatus] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
-  const [debugExpanded, setDebugExpanded] = useState(false);
   const [viewMode, setViewMode] = useState('medium'); // small, medium, large
   const [sortBy, setSortBy] = useState('date'); // date, name, size
   const [searchField, setSearchField] = useState('filename'); // 'filename', 'content_type', 'uploaded_by', 'metadata', or specific key
@@ -118,15 +118,6 @@ function ImageGallery({ projectId, images, loading, onImageUpdated, refreshProje
   
   const clearSelection = () => {
     setSelectedImages(new Set());
-  };
-
-  // Helper function to format file size
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
 
@@ -404,69 +395,6 @@ function ImageGallery({ projectId, images, loading, onImageUpdated, refreshProje
         )}
       </div>
 
-      
-      {/* Debug section moved to bottom */}
-      <div className="debug-section">
-        <div className="debug-header" onClick={() => setDebugExpanded(!debugExpanded)}>
-          <h4>Debug Information</h4>
-          <span className="debug-toggle">{debugExpanded ? '▲' : '▼'}</span>
-        </div>
-        
-        {debugExpanded && (
-          <div className="debug-content">
-            <div className="debug-stats">
-              <p>Image loading status: {Object.keys(imageLoadStatus).length} / {images.length} images tracked</p>
-            </div>
-            
-            <div className="debug-log">
-              <h5>Loading Status Log:</h5>
-              <div className="debug-log-list">
-                {Object.entries(imageLoadStatus).map(([imageId, status]) => (
-                  <div key={imageId} className={`debug-log-item ${status.status}`}>
-                    <span className="log-id">{imageId}</span>
-                    <span className="log-status">{status.status}</span>
-                    <span className="log-time">{new Date(status.timestamp).toLocaleTimeString()}</span>
-                    {status.error && <div className="log-error">Error: {status.error}</div>}
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            <div className="debug-actions">
-              <button 
-                className="debug-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  console.log('Current image load status:', imageLoadStatus);
-                  console.log('Images data:', images);
-                }}
-              >
-                Log to Console
-              </button>
-              
-              <button 
-                className="debug-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (images.length === 0) {
-                    console.log('No images to test');
-                    return;
-                  }
-                  const testImage = images[0];
-                  console.log(`Testing image loading for ${testImage.id}...`);
-                  
-                  fetch(`/api/images/${testImage.id}/download`)
-                    .then(response => response.json())
-                    .then(data => console.log('Download URL data:', data))
-                    .catch(err => console.error('Error testing image URLs:', err));
-                }}
-              >
-                Test Image URLs
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
   </div>
   );
 }

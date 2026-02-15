@@ -94,14 +94,14 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
         model_name: Model name to use for analysis
         model_version: Model version
     """
-    print(f"🚀 Starting ML Pipeline Simulation")
+    print(f"Starting ML Pipeline Simulation")
     print(f"   Base URL: {base_url}")
     print(f"   Image ID: {image_id}")
     print(f"   Model: {model_name} v{model_version}")
     print()
 
     # Step 1: Create analysis
-    print("📝 Step 1: Creating analysis...")
+    print("Step 1: Creating analysis...")
     create_payload = {
         "image_id": image_id,
         "model_name": model_name,
@@ -119,17 +119,17 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
     )
 
     if resp.status_code != 201:
-        print(f"❌ Failed to create analysis: {resp.status_code} - {resp.text}")
+        print(f"FAILED: Could not create analysis: {resp.status_code} - {resp.text}")
         return False
 
     analysis = resp.json()
     analysis_id = analysis['id']
-    print(f"✅ Analysis created: {analysis_id}")
+    print(f"OK: Analysis created: {analysis_id}")
     print(f"   Status: {analysis['status']}")
     print()
 
     # Step 2: Update status to processing
-    print("⚙️  Step 2: Updating status to 'processing'...")
+    print("Step 2: Updating status to 'processing'...")
     status_payload = {"status": "processing"}
     status_body = json.dumps(status_payload).encode('utf-8')
     status_headers = generate_hmac_headers(status_body, hmac_secret)
@@ -141,14 +141,14 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
     )
 
     if resp.status_code != 200:
-        print(f"❌ Failed to update status: {resp.status_code} - {resp.text}")
+        print(f"FAILED: Could not update status: {resp.status_code} - {resp.text}")
         return False
 
-    print(f"✅ Status updated to 'processing'")
+    print(f"OK: Status updated to 'processing'")
     print()
 
     # Step 3: Request presigned upload URL for heatmap
-    print("☁️  Step 3: Requesting presigned upload URL for heatmap...")
+    print("Step 3: Requesting presigned upload URL for heatmap...")
     presign_payload = {
         "artifact_type": "heatmap",
         "filename": "heatmap.png"
@@ -163,18 +163,18 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
     )
 
     if resp.status_code != 200:
-        print(f"❌ Failed to get presigned URL: {resp.status_code} - {resp.text}")
+        print(f"FAILED: Could not get presigned URL: {resp.status_code} - {resp.text}")
         return False
 
     presign_data = resp.json()
     upload_url = presign_data['upload_url']
     storage_path = presign_data['storage_path']
-    print(f"✅ Presigned URL obtained")
+    print(f"OK: Presigned URL obtained")
     print(f"   Storage path: {storage_path}")
     print()
 
     # Step 4: Upload heatmap (only if not a mock URL)
-    print("📤 Step 4: Uploading heatmap image...")
+    print("Step 4: Uploading heatmap image...")
     if not upload_url.startswith('https://example.com'):
         # Real S3 upload
         heatmap_bytes = create_fake_heatmap()
@@ -185,16 +185,16 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
         )
 
         if upload_resp.status_code not in (200, 204):
-            print(f"⚠️  Heatmap upload failed: {upload_resp.status_code}")
+            print(f"WARNING: Heatmap upload failed: {upload_resp.status_code}")
             print(f"   Continuing anyway (artifact upload is optional)")
         else:
-            print(f"✅ Heatmap uploaded successfully")
+            print(f"OK: Heatmap uploaded successfully")
     else:
-        print(f"ℹ️  Skipping upload (mock S3 URL detected)")
+        print(f"SKIP: Skipping upload (mock S3 URL detected)")
     print()
 
     # Step 5: Post bulk annotations
-    print("📊 Step 5: Posting bulk annotations...")
+    print("Step 5: Posting bulk annotations...")
 
     # Generate random bounding boxes
     num_boxes = random.randint(3, 8)
@@ -268,11 +268,11 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
     )
 
     if resp.status_code != 200:
-        print(f"❌ Failed to post annotations: {resp.status_code} - {resp.text}")
+        print(f"FAILED: Could not post annotations: {resp.status_code} - {resp.text}")
         return False
 
     result = resp.json()
-    print(f"✅ Annotations posted successfully")
+    print(f"OK: Annotations posted successfully")
     print(f"   Total annotations: {result['total']}")
     print(f"   Bounding boxes: {num_boxes}")
     print(f"   Heatmap: 1")
@@ -280,7 +280,7 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
     print()
 
     # Step 6: Finalize analysis
-    print("🏁 Step 6: Finalizing analysis...")
+    print("Step 6: Finalizing analysis...")
     finalize_payload = {"status": "completed"}
     finalize_body = json.dumps(finalize_payload).encode('utf-8')
     finalize_headers = generate_hmac_headers(finalize_body, hmac_secret)
@@ -292,18 +292,18 @@ def run_pipeline(base_url: str, image_id: str, hmac_secret: str, model_name: str
     )
 
     if resp.status_code != 200:
-        print(f"❌ Failed to finalize analysis: {resp.status_code} - {resp.text}")
+        print(f"FAILED: Could not finalize analysis: {resp.status_code} - {resp.text}")
         return False
 
     final_analysis = resp.json()
-    print(f"✅ Analysis finalized")
+    print(f"OK: Analysis finalized")
     print(f"   Status: {final_analysis['status']}")
     print(f"   Started: {final_analysis.get('started_at', 'N/A')}")
     print(f"   Completed: {final_analysis.get('completed_at', 'N/A')}")
     print()
 
     print("=" * 60)
-    print("🎉 ML Pipeline Simulation Completed Successfully!")
+    print("ML Pipeline Simulation Completed Successfully!")
     print("=" * 60)
     print(f"\nAnalysis ID: {analysis_id}")
     print(f"View in UI: {base_url.replace(':8000', ':3000')}/view/{image_id}")
@@ -342,7 +342,7 @@ def main():
     # Get HMAC secret from environment
     hmac_secret = os.getenv('ML_CALLBACK_HMAC_SECRET')
     if not hmac_secret:
-        print("❌ Error: ML_CALLBACK_HMAC_SECRET environment variable not set")
+        print("ERROR: ML_CALLBACK_HMAC_SECRET environment variable not set")
         print("   Please set it to match your backend configuration")
         print("   Example: export ML_CALLBACK_HMAC_SECRET='your_secret_here'")
         sys.exit(1)

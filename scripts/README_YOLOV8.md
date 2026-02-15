@@ -93,11 +93,11 @@ Options:
 
 | Model | Speed | Accuracy | Best For |
 |-------|-------|----------|----------|
-| `n` (nano) | ⚡⚡⚡⚡⚡ | ⭐⭐ | CPU testing, quick runs |
-| `s` (small) | ⚡⚡⚡⚡ | ⭐⭐⭐ | Balanced performance |
-| `m` (medium) | ⚡⚡⚡ | ⭐⭐⭐⭐ | Good accuracy |
-| `l` (large) | ⚡⚡ | ⭐⭐⭐⭐⭐ | High accuracy |
-| `x` (xlarge) | ⚡ | ⭐⭐⭐⭐⭐⭐ | Maximum accuracy |
+| `n` (nano) | Fastest | Low | CPU testing, quick runs |
+| `s` (small) | Fast | Medium | Balanced performance |
+| `m` (medium) | Moderate | Good | Good accuracy |
+| `l` (large) | Slow | High | High accuracy |
+| `x` (xlarge) | Slowest | Highest | Maximum accuracy |
 
 **Recommendation:** Use `n` for CPU testing, `m` or `l` for GPU systems.
 
@@ -152,7 +152,7 @@ YOLOv8 can detect 80 object classes from the COCO dataset:
 
 ### HMAC Secret Error
 ```
-❌ ML_CALLBACK_HMAC_SECRET environment variable is required
+ERROR: ML_CALLBACK_HMAC_SECRET environment variable is required
 ```
 **Solution:** Source your `.env` file or set the variable:
 ```bash
@@ -163,7 +163,7 @@ export ML_CALLBACK_HMAC_SECRET='your-secret-here'
 
 ### Missing System Libraries
 ```
-❌ Missing required system libraries for OpenCV
+ERROR: Missing required system libraries for OpenCV
 ```
 **Solution:** Install system dependencies:
 ```bash
@@ -173,7 +173,7 @@ sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
 
 ### ultralytics Not Found
 ```
-❌ ultralytics package not found
+ERROR: ultralytics package not found
 ```
 **Solution:** Install dependencies:
 ```bash
@@ -184,13 +184,13 @@ pip3 install -r scripts/ml_requirements.txt
 
 ### No Images Found
 ```
-⚠️  No images found in project
+WARNING: No images found in project
 ```
 **Solution:** Upload images to the project first via the web UI.
 
 ### API Connection Error
 ```
-❌ Error processing image: Connection refused
+ERROR: Error processing image: Connection refused
 ```
 **Solution:** Ensure backend is running:
 ```bash
@@ -199,7 +199,7 @@ cd backend && ./run.sh
 
 ### Model Size Not Recognized
 ```
-❌ Invalid model size: z (must be n|s|m|l|x)
+ERROR: Invalid model size: z (must be n|s|m|l|x)
 ```
 **Solution:** Use valid model size: `n`, `s`, `m`, `l`, or `x`
 

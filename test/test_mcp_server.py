@@ -15,10 +15,10 @@ def test_mcp_server_import():
     print("Testing MCP server import...")
     try:
         import mcp_server
-        print("✓ MCP server imported successfully")
+        print("OK: MCP server imported successfully")
         return True
     except Exception as e:
-        print(f"✗ Failed to import MCP server: {e}")
+        print(f"FAILED: Could not import MCP server: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -33,7 +33,7 @@ async def test_mcp_tools_available():
         mcp = mcp_server.mcp
         
         # List all registered tools
-        print(f"\n✓ MCP server '{mcp.name}' has the following tools registered:")
+        print(f"\nOK: MCP server '{mcp.name}' has the following tools registered:")
         
         # Use get_tools() method (it's async and returns a dict)
         tools = await mcp.get_tools()
@@ -55,7 +55,7 @@ async def test_mcp_tools_available():
         
         return True
     except Exception as e:
-        print(f"✗ Failed to list MCP tools: {e}")
+        print(f"FAILED: Could not list MCP tools: {e}")
         import traceback
         traceback.print_exc()
         return False

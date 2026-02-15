@@ -297,7 +297,7 @@ function ApiKeys() {
         {!loading && apiKeys.length === 0 && (
           <div className="card text-center">
             <div className="card-content">
-              <div style={{ fontSize: '4rem', marginBottom: 'var(--space-4)' }}>🔑</div>
+              <div style={{ fontSize: '2rem', marginBottom: 'var(--space-4)', color: 'var(--gray-400)' }}>API Key</div>
               <h3 style={{ marginBottom: 'var(--space-4)', color: 'var(--gray-600)' }}>
                 No API keys yet
               </h3>

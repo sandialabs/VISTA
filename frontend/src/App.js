@@ -9,61 +9,32 @@ const ImageView = lazy(() => import('./ImageView'));
 const ApiKeys = lazy(() => import('./ApiKeys'));
 const ProjectReport = lazy(() => import('./components/ProjectReport'));
 
-// Debug counter to track renders
-let renderCount = 0;
-
 // Create a separate component for the modal form
 const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit, currentUser }) {
-  console.log("Modal render count:", ++renderCount);
-  
   // Use refs for uncontrolled inputs
   const nameInputRef = useRef(null);
   const descriptionInputRef = useRef(null);
   const groupIdInputRef = useRef(null);
-  
-  // Track focus state for debugging
-  const [focusState, setFocusState] = useState('none');
-  
+
   // Handle form submission
   const handleSubmit = (e) => {
     e.preventDefault();
-    console.log("Form submitted");
-    
+
     // Get values directly from refs
     const newProject = {
       name: nameInputRef.current.value,
       description: descriptionInputRef.current.value,
       meta_group_id: groupIdInputRef.current.value
     };
-    
+
     onSubmit(newProject);
   };
-  
-  // Debug focus events
-  const handleFocus = (fieldName) => {
-    console.log(`Focus on: ${fieldName}`);
-    setFocusState(fieldName);
-  };
-  
-  const handleBlur = (fieldName) => {
-    console.log(`Blur from: ${fieldName}`);
-    if (focusState === fieldName) {
-      setFocusState('none');
-    }
-  };
-  
-  // Fetch available groups when component mounts
+
+  // Focus the name input when modal opens
   useEffect(() => {
-    console.log("Modal component mounted");
-    
-    // Focus the name input when modal opens
     if (nameInputRef.current) {
       nameInputRef.current.focus();
     }
-    
-    return () => {
-      console.log("Modal component unmounted");
-    };
   }, []);
   
   return (
@@ -77,12 +48,10 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
           <form id="create-project-form" onSubmit={handleSubmit}>
             <div className="form-group">
               <label htmlFor="name">Project Name *</label>
-              <input 
-                type="text" 
-                id="name" 
+              <input
+                type="text"
+                id="name"
                 ref={nameInputRef}
-                onFocus={() => handleFocus('name')}
-                onBlur={() => handleBlur('name')}
                 required
                 placeholder="Enter a descriptive project name"
                 className="form-control"
@@ -94,12 +63,10 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
             
             <div className="form-group">
               <label htmlFor="description">Description</label>
-              <textarea 
-                id="description" 
+              <textarea
+                id="description"
                 rows="3"
                 ref={descriptionInputRef}
-                onFocus={() => handleFocus('description')}
-                onBlur={() => handleBlur('description')}
                 placeholder="Describe what this project is for..."
                 className="form-control"
               ></textarea>
@@ -110,12 +77,10 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
             
             <div className="form-group">
               <label htmlFor="meta_group_id">Access Group *</label>
-              <input 
-                type="text" 
-                id="meta_group_id" 
+              <input
+                type="text"
+                id="meta_group_id"
                 ref={groupIdInputRef}
-                onFocus={() => handleFocus('groupId')}
-                onBlur={() => handleBlur('groupId')}
                 required
                 placeholder="Enter the group ID you have access to"
                 className="form-control"
@@ -172,17 +137,11 @@ const ProjectItem = memo(function ProjectItem({ project }) {
 });
 
 function App() {
-  // const navigate = useNavigate(); // Commented out - not currently used
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  // const [newProject, setNewProject] = useState({  // Commented out - not currently used
-  //   name: '',
-  //   description: '',
-  //   meta_group_id: ''
-  // });
   
   // Function to show a toast notification
   const showToast = (message, type = 'error') => {
@@ -201,7 +160,6 @@ function App() {
         if (!response.ok) {
           // If we get a 401, it's expected when authentication is disabled
           if (response.status === 401) {
-            console.log("Authentication is disabled or user is not logged in");
             return null;
           }
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -213,9 +171,7 @@ function App() {
           setCurrentUser(userData);
         }
       })
-      .catch(err => {
-        console.error("Failed to fetch current user:", err);
-      });
+      .catch(() => {});
 
     // Fetch projects from the API
     fetch('/api/projects/')
@@ -230,18 +186,13 @@ function App() {
         setLoading(false);
       })
       .catch(err => {
-        console.error("Failed to fetch projects:", err);
         showToast(`Failed to fetch projects: ${err.message}`, 'error');
         setLoading(false);
       });
   }, []); // Empty dependency array means this effect runs once on mount
 
-  // Log component renders for debugging
-  console.log("App render count:", ++renderCount);
-  
   // Handle project creation form submission
   const handleCreateProject = useCallback((projectData) => {
-    console.log("Creating project:", projectData);
     setLoading(true);
     
     fetch('/api/projects/', {
@@ -264,7 +215,6 @@ function App() {
         return response.json();
       })
       .then(data => {
-        console.log("Project created successfully:", data);
         // Add the new project to the projects list
         setProjects(prev => [...prev, data]);
         // Close modal
@@ -274,7 +224,6 @@ function App() {
         showToast(`Project "${data.name}" created successfully!`, 'success');
       })
       .catch(err => {
-        console.error("Failed to create project:", err);
         showToast(err.message, 'error');
         setLoading(false);
       });

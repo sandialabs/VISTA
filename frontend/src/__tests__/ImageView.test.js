@@ -161,9 +161,7 @@ describe('ImageView', () => {
       expect(fetch).toHaveBeenCalledWith('/api/projects/test-project-id/images?include_deleted=true');
     });
 
-    test('logs fallback attempt when direct fetch fails', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-
+    test('falls back to project endpoint when direct fetch fails', async () => {
       fetch.mockImplementation((url) => {
         if (url === '/api/users/me') return Promise.resolve({ ok: false, status: 401 });
         if (url === `/api/images/${mockParams.imageId}`) return Promise.resolve({ ok: false, status: 404 });
@@ -175,12 +173,8 @@ describe('ImageView', () => {
       renderImageView();
 
       await waitFor(() => {
-        expect(consoleSpy).toHaveBeenCalledWith(
-          'Direct image fetch failed, trying project endpoint with deleted images...'
-        );
+        expect(fetch).toHaveBeenCalledWith(`/api/projects/test-project-id/images?include_deleted=true`);
       });
-
-      consoleSpy.mockRestore();
     });
 
     test('sets document title correctly for deleted images loaded via fallback', async () => {

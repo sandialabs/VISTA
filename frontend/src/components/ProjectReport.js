@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { formatFileSize } from '../utils';
 
 function ProjectReport() {
   const { id } = useParams();
@@ -229,19 +230,6 @@ function ProjectReport() {
   // Print report
   const printReport = () => {
     window.print();
-  };
-
-  // Helper function to format file sizes
-  const formatFileSize = (bytes) => {
-    if (!bytes) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex++;
-    }
-    return `${size.toFixed(1)} ${units[unitIndex]}`;
   };
 
   if (loading) {

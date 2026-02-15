@@ -1,8 +1,11 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from typing import AsyncGenerator
+import logging
 import sys
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 # Use aiosqlite for SQLite URLs to support async operations
 database_url = settings.DATABASE_URL
@@ -35,54 +38,31 @@ async def create_db_and_tables():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     except Exception as e:
-        # Handle different types of database connection errors with user-friendly messages
         error_msg = str(e)
-        print(f"   Current DATABASE_URL: {settings.DATABASE_URL}")
-        
+
         if "gaierror" in error_msg or "Name or service not known" in error_msg:
-            print("\n❌ DATABASE CONNECTION ERROR:")
-            print("Cannot connect to PostgreSQL database.")
-            print("The database hostname cannot be resolved.")
-            print("\nPossible solutions:")
-            print("1. Make sure PostgreSQL container is running: cd backend && ./run.sh")
-            print("2. Check if Docker/container engine is running")
-            print("3. Verify DATABASE_URL in .env file")
-            print(f"   Current DATABASE_URL: {settings.DATABASE_URL}")
-            
+            logger.error(
+                "DATABASE CONNECTION ERROR: Cannot resolve database hostname. "
+                "Ensure PostgreSQL is running (cd backend && ./run.sh) and "
+                "DATABASE_URL is correct in .env"
+            )
         elif "Connection refused" in error_msg:
-            print("\n❌ DATABASE CONNECTION ERROR:")
-            print("PostgreSQL database is not accepting connections.")
-            print("The database server may not be running or is not ready yet.")
-            print("\nPossible solutions:")
-            print("1. Start PostgreSQL container: cd backend && ./run.sh")
-            print("2. Wait for PostgreSQL to finish starting up")
-            print(f"   Current DATABASE_URL: {settings.DATABASE_URL}")
-            print("3. Check if the database port is correct (default: 5433)")
-            
+            logger.error(
+                "DATABASE CONNECTION ERROR: PostgreSQL is not accepting connections. "
+                "Start the container (cd backend && ./run.sh) or check the port (default: 5433)"
+            )
         elif "authentication failed" in error_msg or "password authentication failed" in error_msg:
-            print("\n❌ DATABASE AUTHENTICATION ERROR:")
-            print("Invalid database credentials.")
-            print("\nPossible solutions:")
-            print("1. Check database username/password in .env file")
-            print("2. Verify PostgreSQL container was created with correct credentials")
-            print(f"   Current credentials: {settings.POSTGRES_USER}@{settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'unknown'}")
-            
+            logger.error(
+                "DATABASE AUTHENTICATION ERROR: Invalid credentials. "
+                "Check username/password in .env"
+            )
         elif "does not exist" in error_msg and "database" in error_msg:
-            print("\n❌ DATABASE DOES NOT EXIST:")
-            print("The specified database does not exist.")
-            print(f"Database '{settings.POSTGRES_DB}' was not found.")
-            print("\nPossible solutions:")
-            print("1. Check database name in .env file")
-            print("2. Recreate PostgreSQL container with correct database name")
-            
+            logger.error(
+                "DATABASE DOES NOT EXIST: Database '%s' not found. "
+                "Check database name in .env", settings.POSTGRES_DB
+            )
         else:
-            print("\n❌ DATABASE ERROR:")
-            print("An unexpected database error occurred.")
-            print(f"Error details: {error_msg}")
-            print("\nGeneral solutions:")
-            print("1. Make sure PostgreSQL container is running: cd backend && ./run.sh")
-            print("2. Check your .env file configuration")
-            
-        print(f"\nFull error for debugging:")
-        print(f"{type(e).__name__}: {error_msg}")
+            logger.error("DATABASE ERROR: %s: %s", type(e).__name__, error_msg)
+
+        logger.error("DATABASE_URL: %s", settings.DATABASE_URL)
         sys.exit(1)

@@ -1,17 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { formatDate } from '../utils';
 
 function ImageComments({ imageId, loading, setLoading, setError }) {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [editingComment, setEditingComment] = useState(null);
-
-  // Helper function to format date
-  const formatDate = (dateString) => {
-    if (!dateString) return 'Unknown date';
-    
-    const date = new Date(dateString);
-    return date.toLocaleString();
-  };
 
   // Load comments for the image
   useEffect(() => {
@@ -48,30 +41,17 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
     
     try {
       setLoading(true);
-      
-      console.log("Adding comment for image ID:", imageId);
-      
-      // Create the request payload
-      const payload = {
-        text: newComment,
-      };
-      
-      console.log("Comment request payload:", JSON.stringify(payload, null, 2));
-      
+
       const response = await fetch(`/api/images/${imageId}/comments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ text: newComment }),
       });
-      
-      console.log("Comment response status:", response.status);
-      
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Comment error response:", errorText);
-        throw new Error(`HTTP error! Status: ${response.status}, Details: ${errorText}`);
+        throw new Error(`HTTP error! Status: ${response.status}`);
       }
       
       const newCommentData = await response.json();

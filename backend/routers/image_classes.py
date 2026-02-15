@@ -118,18 +118,12 @@ async def classify_image(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    print(f"Classification request received for image_id: {image_id}")
-    print(f"Request body: {classification}")
-    
     # Check if the user has access to the image
     db_image = await get_image_or_403(image_id, db, current_user)
     
     # Ensure the image_id in the path matches the one in the request body
     # Convert both to strings for comparison to handle different UUID object types
     if str(image_id) != str(classification.image_id):
-        print(f"Image ID mismatch: path={image_id}, body={classification.image_id}")
-        print(f"Types: path={type(image_id)}, body={type(classification.image_id)}")
-        print(f"String comparison: {str(image_id)} vs {str(classification.image_id)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Image ID in the path must match the image_id in the request body. Path: {image_id}, Body: {classification.image_id}",
@@ -164,9 +158,6 @@ async def classify_image(
             db_user = await crud.create_user(db=db, user=user_create)
         
         classification.created_by_id = db_user.id
-    
-    # Log the final classification object before saving
-    print(f"Final classification object to save: {classification}")
     
     # Create the classification
     return await crud.create_image_classification(db=db, classification=classification)

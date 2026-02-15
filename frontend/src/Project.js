@@ -51,23 +51,15 @@ function Project() {
     fetch('/api/users/me')
       .then(response => {
         if (!response.ok) {
-          // If we get a 401, it's expected when authentication is disabled
-          if (response.status === 401) {
-            console.log("Authentication is disabled or user is not logged in");
-            return null;
-          }
+          if (response.status === 401) return null;
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         return response.json();
       })
       .then(userData => {
-        if (userData) {
-          setCurrentUser(userData);
-        }
+        if (userData) setCurrentUser(userData);
       })
-      .catch(err => {
-        console.error("Failed to fetch current user:", err);
-      });
+      .catch(() => {});
 
     // Load project data, metadata, classes, and images
     const fetchProjectData = async () => {
