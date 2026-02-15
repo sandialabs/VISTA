@@ -130,46 +130,55 @@ def _hmac_headers(body: bytes, secret: str):
 
 def test_phase2_bulk_and_finalize_flow(client, monkeypatch):
     from core import config as cfg
+    import json as _json
     # Patch the settings module directly where it's used
     secret = 'secret123'
     monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
     monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
 
-    # Create project & image & analysis
+    # Create API key for /api-ml auth (pipeline endpoints require API key + HMAC)
+    api_key_resp = client.post('/api/api-keys/', json={"name": "ml_test_key", "description": "ML test"}).json()
+    api_key = api_key_resp['key']
+
+    # Create project & image & analysis (via /api which uses middleware auth)
     proj = client.post('/api/projects/', json={"name":"P3","description":"d","meta_group_id":"data-scientists"}).json()
     img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
     analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
 
-    # Presign artifact
+    # Presign artifact (via /api-ml)
     presign_body = {"artifact_type":"heatmap","filename":"heat.png"}
-    import json as _json
     presign_body_bytes = _json.dumps(presign_body).encode('utf-8')
     headers = _hmac_headers(presign_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    pre = client.post(f"/api/analyses/{analysis['id']}/artifacts/presign", data=presign_body_bytes, headers=headers)
+    headers['Authorization'] = f'Bearer {api_key}'
+    pre = client.post(f"/api-ml/analyses/{analysis['id']}/artifacts/presign", data=presign_body_bytes, headers=headers)
     assert pre.status_code == 200, pre.text
 
-    # Bulk annotations
+    # Bulk annotations (via /api-ml)
     ann_body = {"annotations":[{"annotation_type":"classification","class_name":"cat","confidence":0.9,"data":{"score":0.9}}]}
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    bulk = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    headers['Authorization'] = f'Bearer {api_key}'
+    bulk = client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
     assert bulk.status_code == 200, bulk.text
     assert bulk.json()['total'] == 1
 
-    # Finalize (completed)
+    # Finalize (via /api-ml)
     fin_body = {"status":"completed"}
     fin_body_bytes = _json.dumps(fin_body).encode('utf-8')
     headers = _hmac_headers(fin_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    fin = client.post(f"/api/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
+    headers['Authorization'] = f'Bearer {api_key}'
+    fin = client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
     assert fin.status_code == 200, fin.text
     assert fin.json()['status'] == 'completed'
 
-    # Bad HMAC
+    # Bad HMAC (via /api-ml, no API key)
     bad_body_bytes = _json.dumps(ann_body).encode('utf-8')
-    bad = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=bad_body_bytes, headers={'X-ML-Timestamp':'0','X-ML-Signature':'sha256=deadbeef','Content-Type':'application/json'})
+    bad = client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=bad_body_bytes, headers={'X-ML-Timestamp':'0','X-ML-Signature':'sha256=deadbeef','Content-Type':'application/json'})
     assert bad.status_code in (401, 404)  # 404 if feature disabled, else 401
 
 
@@ -238,9 +247,16 @@ def test_pagination_annotations(client, monkeypatch):
     from core import config as cfg
     import json as _json
 
-    secret = 'secret123'; monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    secret = 'secret123'
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
     monkeypatch.setenv('ML_CALLBACK_HMAC_SECRET', 'secret123')
     monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+
+    # Create API key for /api-ml auth
+    api_key_resp = client.post('/api/api-keys/', json={"name": "ml_pagination_key", "description": "ML pagination"}).json()
+    api_key = api_key_resp['key']
 
     # Create project & image & analysis
     proj = client.post('/api/projects/', json={"name":"PaginationTest","description":"d","meta_group_id":"data-scientists"}).json()
@@ -261,7 +277,8 @@ def test_pagination_annotations(client, monkeypatch):
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    bulk = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    headers['Authorization'] = f'Bearer {api_key}'
+    bulk = client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
     assert bulk.status_code == 200, bulk.text
 
     # Test pagination
@@ -292,16 +309,23 @@ def test_export_json_format(client, monkeypatch):
     from core import config as cfg
     import json as _json
 
-    secret = 'secret123'; monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    secret = 'secret123'
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
     monkeypatch.setenv('ML_CALLBACK_HMAC_SECRET', 'secret123')
     monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+
+    # Create API key for /api-ml auth
+    api_key_resp = client.post('/api/api-keys/', json={"name": "ml_export_json_key", "description": "ML export"}).json()
+    api_key = api_key_resp['key']
 
     # Create project & image & analysis
     proj = client.post('/api/projects/', json={"name":"ExportTest","description":"d","meta_group_id":"data-scientists"}).json()
     img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
     analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"yolo_v8","model_version":"1.0","parameters":{"threshold": 0.5}}).json()
 
-    # Add annotations
+    # Add annotations (via /api-ml)
     ann_body = {
         "annotations": [
             {
@@ -321,15 +345,17 @@ def test_export_json_format(client, monkeypatch):
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    bulk = client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    headers['Authorization'] = f'Bearer {api_key}'
+    bulk = client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
     assert bulk.status_code == 200
 
-    # Finalize
+    # Finalize (via /api-ml)
     fin_body = {"status": "completed"}
     fin_body_bytes = _json.dumps(fin_body).encode('utf-8')
     headers = _hmac_headers(fin_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    client.post(f"/api/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
+    headers['Authorization'] = f'Bearer {api_key}'
+    client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=fin_body_bytes, headers=headers)
 
     # Export as JSON
     resp = client.get(f"/api/analyses/{analysis['id']}/export?format=json")
@@ -351,16 +377,23 @@ def test_export_csv_format(client, monkeypatch):
     from core import config as cfg
     import json as _json
 
-    secret = 'secret123'; monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    secret = 'secret123'
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
     monkeypatch.setenv('ML_CALLBACK_HMAC_SECRET', 'secret123')
     monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+
+    # Create API key for /api-ml auth
+    api_key_resp = client.post('/api/api-keys/', json={"name": "ml_csv_key", "description": "ML CSV"}).json()
+    api_key = api_key_resp['key']
 
     # Create project & image & analysis
     proj = client.post('/api/projects/', json={"name":"CSVTest","description":"d","meta_group_id":"data-scientists"}).json()
     img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
     analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
 
-    # Add annotation
+    # Add annotation (via /api-ml)
     ann_body = {
         "annotations": [
             {
@@ -374,7 +407,8 @@ def test_export_csv_format(client, monkeypatch):
     ann_body_bytes = _json.dumps(ann_body).encode('utf-8')
     headers = _hmac_headers(ann_body_bytes, secret)
     headers['Content-Type'] = 'application/json'
-    client.post(f"/api/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
+    headers['Authorization'] = f'Bearer {api_key}'
+    client.post(f"/api-ml/analyses/{analysis['id']}/annotations:bulk", data=ann_body_bytes, headers=headers)
 
     # Export as CSV
     resp = client.get(f"/api/analyses/{analysis['id']}/export?format=csv")

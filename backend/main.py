@@ -206,46 +206,41 @@ def create_app() -> FastAPI:
         dependencies=[Depends(require_hmac_auth)]
     )
 
-    # Auth tier separation: each prefix gets only the routers it needs.
+    # ---- Router registration by auth tier ----
+    #
+    # /api (proxy auth, user sessions): all user-facing routers
+    # /api-key (API key auth): data-access routers only, NOT user admin or key mgmt
+    # /api-ml (HMAC auth): ML pipeline callback endpoints only
+    #
     # This prevents:
-    # - API keys from creating new API keys (privilege escalation)
-    # - API keys from accessing user admin endpoints
-    # - ML pipeline endpoints from being reachable without HMAC auth
+    #   - API keys from creating new API keys (privilege escalation)
+    #   - API keys from accessing user admin endpoints
+    #   - ML pipeline endpoints from being reachable without HMAC auth
 
-    # /api (proxy auth): all routers including users + api_keys + pipeline
-    all_routers = [
+    # Routers available on both /api and /api-key (general data access)
+    shared_routers = [
         {"router": projects.router, "prefix": "/projects"},
         {"router": images.router, "prefix": None},
-        {"router": users.router, "prefix": "/users"},
         {"router": image_classes.router, "prefix": None},
         {"router": comments.router, "prefix": None},
         {"router": project_metadata.router, "prefix": None},
-        {"router": api_keys.router, "prefix": None},
         {"router": ml_analyses.router, "prefix": None},
-        {"router": ml_analyses.pipeline_router, "prefix": None},
     ]
-    for cfg in all_routers:
-        if cfg["prefix"]:
-            api_router.include_router(cfg["router"], prefix=cfg["prefix"])
+
+    for cfg in shared_routers:
+        prefix = cfg["prefix"]
+        if prefix:
+            api_router.include_router(cfg["router"], prefix=prefix)
+            api_key_router.include_router(cfg["router"], prefix=prefix)
         else:
             api_router.include_router(cfg["router"])
-
-    # /api-key (API key auth): data-access routers ONLY (no users, no api_keys)
-    data_routers = [
-        {"router": projects.router, "prefix": "/projects"},
-        {"router": images.router, "prefix": None},
-        {"router": image_classes.router, "prefix": None},
-        {"router": comments.router, "prefix": None},
-        {"router": project_metadata.router, "prefix": None},
-        {"router": ml_analyses.router, "prefix": None},
-    ]
-    for cfg in data_routers:
-        if cfg["prefix"]:
-            api_key_router.include_router(cfg["router"], prefix=cfg["prefix"])
-        else:
             api_key_router.include_router(cfg["router"])
 
-    # /api-ml (HMAC auth): ML pipeline callbacks ONLY
+    # Routers available on /api only (user sessions, not API keys)
+    api_router.include_router(users.router, prefix="/users")
+    api_router.include_router(api_keys.router)
+
+    # ML pipeline callback endpoints on /api-ml only (HMAC auth required)
     api_ml_router.include_router(ml_analyses.pipeline_router)
 
     # Add health check endpoint (no auth required)

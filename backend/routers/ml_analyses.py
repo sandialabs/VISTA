@@ -21,10 +21,8 @@ def sanitize_for_log(value: str) -> str:
 
 router = APIRouter(tags=["ML Analyses"])
 
-# Separate router for ML pipeline callback endpoints.
-# These require HMAC authentication and should only be mounted on /api-ml.
-# This prevents: API keys from calling pipeline-only endpoints without HMAC,
-# and keeps the /api-ml prefix restricted to pipeline callbacks only.
+# Pipeline-only router for HMAC-protected ML callback endpoints.
+# These must only be mounted on /api-ml (HMAC auth tier).
 pipeline_router = APIRouter(tags=["ML Pipeline"])
 
 
@@ -349,7 +347,7 @@ VALID_STATUS_TRANSITIONS = {
 }
 
 
-@pipeline_router.patch("/analyses/{analysis_id}/status", response_model=schemas.MLAnalysis)
+@router.patch("/analyses/{analysis_id}/status", response_model=schemas.MLAnalysis)
 async def update_ml_analysis_status(
     analysis_id: uuid.UUID,
     payload: StatusUpdatePayload,
@@ -439,7 +437,7 @@ def _verify_pipeline_hmac(request: Request, body_bytes: bytes):
         raise HTTPException(status_code=500, detail="HMAC secret not configured")
     sig = request.headers.get("X-ML-Signature", "")
     ts = request.headers.get("X-ML-Timestamp", "0")
-    if not verify_hmac_signature_flexible(secret, body_bytes, ts, sig):
+    if not verify_hmac_signature_flexible(secret, body_bytes, ts, sig, skew_seconds=settings.ML_HMAC_TIMESTAMP_SKEW_SECONDS):
         raise HTTPException(status_code=401, detail="Invalid HMAC signature")
 
 

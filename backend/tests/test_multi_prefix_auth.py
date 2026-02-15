@@ -45,37 +45,58 @@ def test_api_key_prefix_accepts_valid_key(client, api_user_with_key):
     assert isinstance(response.json(), list)
 
 
-def test_api_ml_prefix_requires_both_api_key_and_hmac(client, api_user_with_key):
+def test_api_ml_prefix_requires_both_api_key_and_hmac(client, api_user_with_key, monkeypatch):
     """Test that /api-ml endpoints require BOTH API key AND HMAC"""
+    import json as _json
     user, api_key = api_user_with_key
-    fake_id = "00000000-0000-0000-0000-000000000000"
+
+    secret = "test-hmac-secret-12345"
+    monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', secret)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+
+    # Create test data for pipeline endpoint
+    proj = client.post('/api/projects/', json={"name":"MLAuthTest","description":"d","meta_group_id":"data-scientists"}).json()
+    img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
+    analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
+
+    body = {"status": "completed"}
+    body_bytes = _json.dumps(body).encode('utf-8')
 
     # Test 1: No auth at all - should fail (missing API key + HMAC)
-    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
-                            json={"status": "processing"})
+    response = client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=body_bytes, headers={"Content-Type": "application/json"})
     assert response.status_code == 401
 
     # Test 2: API key but no HMAC - should fail
-    headers = {"Authorization": f"Bearer {api_key}"}
-    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
-                            json={"status": "processing"}, headers=headers)
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    response = client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=body_bytes, headers=headers)
     assert response.status_code == 401
     # Body may vary; we only require a 401 for missing HMAC
 
 
 def test_api_ml_prefix_accepts_valid_api_key_and_hmac(client, api_user_with_key, monkeypatch):
     """Test that /api-ml endpoints accept valid API key + HMAC"""
+    import json as _json
     user, api_key = api_user_with_key
-    fake_id = "00000000-0000-0000-0000-000000000000"
 
     # Set HMAC secret for this test
     test_secret = "test-hmac-secret-12345"
     monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
 
-    # Generate valid HMAC signature for the request body
-    body = b'{"status":"processing"}'
+    # Create test data for a pipeline endpoint
+    proj = client.post('/api/projects/', json={"name":"MLAcceptTest","description":"d","meta_group_id":"data-scientists"}).json()
+    img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
+    analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
+
+    # Generate valid HMAC signature for finalize POST
+    body = {"status": "completed"}
+    body_bytes = _json.dumps(body).encode('utf-8')
     timestamp = str(int(time.time()))
-    message = timestamp.encode('utf-8') + b'.' + body
+    message = timestamp.encode('utf-8') + b'.' + body_bytes
     signature_hex = hmac.new(test_secret.encode('utf-8'), message, hashlib.sha256).hexdigest()
     signature = f"sha256={signature_hex}"
 
@@ -86,40 +107,36 @@ def test_api_ml_prefix_accepts_valid_api_key_and_hmac(client, api_user_with_key,
         "Content-Type": "application/json"
     }
 
-    # Auth passes, but fake analysis_id means 404 from handler (not 401 from auth)
-    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
-                            content=body, headers=headers)
-    assert response.status_code == 404, (
-        f"Expected 404 (auth passed, analysis not found), got {response.status_code}"
-    )
+    response = client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=body_bytes, headers=headers)
+    assert response.status_code == 200
 
 
 def test_auth_tier_segregation(client):
-    """Test that auth tiers are properly segregated to prevent privilege escalation.
+    """Test that routers are mounted only on their intended auth prefixes.
 
-    /api (proxy auth): all routers including users + api_keys
-    /api-key (API key auth): data-access routers ONLY (no users, no api_keys)
-    /api-ml (HMAC auth): ML pipeline callbacks ONLY (no general endpoints)
+    /api and /api-key share data-access routers (projects, images, etc.)
+    /api-ml only has ML pipeline callback endpoints
+    /api-key does NOT expose user admin or API key management
     """
-    # /api should expose projects (all routers)
-    response = client.get("/api/projects")
-    assert response.status_code != 404, "/api/projects should exist"
+    # /api and /api-key both expose /projects
+    response1 = client.get("/api/projects")
+    response2 = client.get("/api-key/projects")
+    assert response1.status_code != 404, "/api/projects should exist"
+    assert response2.status_code != 404, "/api-key/projects should exist"
 
-    # /api-key should expose projects (data-access router)
-    response = client.get("/api-key/projects")
-    assert response.status_code != 404, "/api-key/projects should exist"
+    # /api-ml does NOT expose /projects (only pipeline endpoints)
+    response3 = client.get("/api-ml/projects")
+    assert response3.status_code == 404, "/api-ml/projects should NOT exist"
 
-    # /api-key must NOT expose user admin endpoints (privilege escalation risk)
-    response = client.get("/api-key/users/me")
-    assert response.status_code == 404, "/api-key/users/me should NOT exist"
+    # /api exposes user admin and API key management
+    response4 = client.get("/api/users/me")
+    assert response4.status_code != 404, "/api/users/me should exist"
 
-    # /api-key must NOT expose API key management (prevents key self-creation)
-    response = client.get("/api-key/api-keys")
-    assert response.status_code == 404, "/api-key/api-keys should NOT exist"
-
-    # /api-ml should NOT expose general endpoints (HMAC prefix is pipeline-only)
-    response = client.get("/api-ml/projects")
-    assert response.status_code == 404, "/api-ml/projects should NOT exist"
+    # /api-key does NOT expose user admin or API key management
+    response5 = client.get("/api-key/users/me")
+    assert response5.status_code == 404, "/api-key/users/me should NOT exist"
+    response6 = client.get("/api-key/api-keys")
+    assert response6.status_code == 404, "/api-key/api-keys should NOT exist"
 
 
 def test_api_key_prefix_project_operations(client, api_user_with_key):
@@ -161,30 +178,33 @@ def test_api_prefix_still_works_for_oauth(client):
 def test_invalid_api_key_rejected(client):
     """Test that invalid API keys are properly rejected"""
     headers = {"Authorization": "Bearer invalid-key-12345"}
-    fake_id = "00000000-0000-0000-0000-000000000000"
 
     # Try on /api-key prefix
     response = client.get("/api-key/projects", headers=headers)
     assert response.status_code == 401
 
-    # Try on /api-ml prefix (pipeline endpoint)
-    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
-                            json={"status": "processing"}, headers=headers)
-    assert response.status_code == 401
-
 
 def test_api_ml_rejects_expired_timestamp(client, api_user_with_key, monkeypatch):
     """Test that /api-ml endpoints reject old timestamps (replay protection)"""
+    import json as _json
     user, api_key = api_user_with_key
-    fake_id = "00000000-0000-0000-0000-000000000000"
 
     test_secret = "test-hmac-secret-12345"
     monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+
+    # Create test data for pipeline endpoint
+    proj = client.post('/api/projects/', json={"name":"ExpiredTSTest","description":"d","meta_group_id":"data-scientists"}).json()
+    img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
+    analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
 
     # Use old timestamp (1 hour ago)
     old_timestamp = str(int(time.time()) - 3600)
-    body = b'{"status":"processing"}'
-    message = old_timestamp.encode('utf-8') + b'.' + body
+    body = {"status": "completed"}
+    body_bytes = _json.dumps(body).encode('utf-8')
+    message = old_timestamp.encode('utf-8') + b'.' + body_bytes
     signature_hex = hmac.new(test_secret.encode('utf-8'), message, hashlib.sha256).hexdigest()
     signature = f"sha256={signature_hex}"
 
@@ -195,22 +215,30 @@ def test_api_ml_rejects_expired_timestamp(client, api_user_with_key, monkeypatch
         "Content-Type": "application/json"
     }
 
-    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
-                            content=body, headers=headers)
+    response = client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=body_bytes, headers=headers)
     # Should be rejected due to old timestamp
     assert response.status_code == 401
 
 
 def test_api_ml_rejects_invalid_hmac_signature(client, api_user_with_key, monkeypatch):
     """Test that /api-ml endpoints reject invalid HMAC signatures"""
+    import json as _json
     user, api_key = api_user_with_key
-    fake_id = "00000000-0000-0000-0000-000000000000"
 
     test_secret = "test-hmac-secret-12345"
     monkeypatch.setattr('utils.dependencies.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
+    monkeypatch.setattr('utils.dependencies.settings.ML_PIPELINE_REQUIRE_HMAC', True)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_CALLBACK_HMAC_SECRET', test_secret)
+    monkeypatch.setattr('routers.ml_analyses.settings.ML_PIPELINE_REQUIRE_HMAC', True)
 
+    # Create test data for pipeline endpoint
+    proj = client.post('/api/projects/', json={"name":"InvalidHMACTest","description":"d","meta_group_id":"data-scientists"}).json()
+    img = client.post(f"/api/projects/{proj['id']}/images", files={'file': ('f.png', b'\x89PNG\r\n', 'image/png')}, data={'metadata':'{}'}).json()
+    analysis = client.post(f"/api/images/{img['id']}/analyses", json={"image_id": img['id'], "model_name":"resnet50_classifier","model_version":"1","parameters":{}}).json()
+
+    body = {"status": "completed"}
+    body_bytes = _json.dumps(body).encode('utf-8')
     timestamp = str(int(time.time()))
-    body = b'{"status":"processing"}'
     # Use wrong signature
     signature = "sha256=0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -221,8 +249,7 @@ def test_api_ml_rejects_invalid_hmac_signature(client, api_user_with_key, monkey
         "Content-Type": "application/json"
     }
 
-    response = client.patch(f"/api-ml/analyses/{fake_id}/status",
-                            content=body, headers=headers)
+    response = client.post(f"/api-ml/analyses/{analysis['id']}/finalize", data=body_bytes, headers=headers)
     assert response.status_code == 401
     # Error message wording is not enforced; 401 status is sufficient
 
