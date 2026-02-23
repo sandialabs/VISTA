@@ -261,3 +261,38 @@ async def get_user_context(
     """Get resolved user context with automatic ID resolution."""
     await resolve_user_id(current_user, db)
     return UserContext(current_user)
+
+
+# --- Collection phase enforcement helpers ---
+
+# Actions allowed per phase
+_PHASE_ACTION_MATRIX = {
+    "manage_images": {"draft"},
+    "manage_classes": {"draft"},
+    "create_annotation": {"annotating", "review"},
+    "modify_annotation": {"annotating", "review"},
+    "review_annotation": {"review"},
+    "review_image": {"review"},
+    "any_mutation": {"draft", "annotating", "review"},
+}
+
+
+async def check_collection_allows(
+    collection_id: uuid.UUID,
+    action: str,
+    db: AsyncSession,
+) -> None:
+    """Raise HTTP 423 if the collection phase does not permit the action."""
+    from sqlalchemy import select as _select
+    result = await db.execute(
+        _select(models.ImageCollection).where(models.ImageCollection.id == collection_id)
+    )
+    coll = result.scalars().first()
+    if not coll:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    allowed_phases = _PHASE_ACTION_MATRIX.get(action, set())
+    if coll.phase not in allowed_phases:
+        raise HTTPException(
+            status_code=423,
+            detail=f"Action '{action}' not allowed in phase '{coll.phase}'",
+        )

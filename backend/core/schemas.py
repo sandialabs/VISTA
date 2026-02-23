@@ -121,10 +121,12 @@ class ImageClassBase(BaseModel):
 
 class ImageClassCreate(ImageClassBase):
     project_id: uuid.UUID
+    collection_id: Optional[uuid.UUID] = None
 
 class ImageClass(ImageClassBase):
     id: uuid.UUID
     project_id: uuid.UUID
+    collection_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -341,3 +343,23 @@ class MLAnnotationList(BaseModel):
     total: int
 
 
+# AuditEvent schemas
+class AuditEvent(BaseModel):
+    id: uuid.UUID
+    entity_type: str
+    entity_id: uuid.UUID
+    action: str
+    actor_id: uuid.UUID
+    project_id: uuid.UUID
+    details: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True,
+        "populate_by_name": True
+    }
+
+
+class AuditEventList(BaseModel):
+    events: List[AuditEvent]
+    total: int

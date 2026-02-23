@@ -8,6 +8,7 @@ const Project = lazy(() => import('./Project'));
 const ImageView = lazy(() => import('./ImageView'));
 const ApiKeys = lazy(() => import('./ApiKeys'));
 const ProjectReport = lazy(() => import('./components/ProjectReport'));
+const CollectionDetail = lazy(() => import('./components/CollectionDetail'));
 
 // Debug counter to track renders
 let renderCount = 0;
@@ -406,6 +407,14 @@ function App() {
         element={
           <Suspense fallback={<div className="loading-container">Loading report...</div>}>
             <ProjectReport />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/project/:id/collections/:collectionId"
+        element={
+          <Suspense fallback={<div className="loading-container">Loading collection...</div>}>
+            <CollectionDetail />
           </Suspense>
         }
       />

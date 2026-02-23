@@ -7,6 +7,8 @@ import ImageUploader from './components/ImageUploader';
 import MetadataManager from './components/MetadataManager';
 import ClassManager from './components/ClassManager';
 import ImageGallery from './components/ImageGallery';
+import CollectionManager from './components/CollectionManager';
+import AuditLog from './components/AuditLog';
 
 function Project() {
   const { id } = useParams();
@@ -199,53 +201,63 @@ function Project() {
         
         {!loading && (
           <div className="project-content">
+            {/* Collections Section */}
+            <div className="collections-section">
+              <CollectionManager projectId={id} />
+            </div>
+
             {/* Main Gallery Section */}
             <div className="gallery-section">
-              <ImageGallery 
-                projectId={id} 
-                images={images} 
-                loading={loading} 
+              <ImageGallery
+                projectId={id}
+                images={images}
+                loading={loading}
                 onImageUpdated={handleImageStateUpdate}
                 refreshProjectImages={(searchOpts) => fetchImages(id, searchOpts)}
               />
             </div>
-            
+
             {/* Quick Upload Section */}
             <div className="upload-section">
-              <ImageUploader 
-                projectId={id} 
-                onUploadComplete={handleUploadComplete} 
-                loading={loading} 
-                setLoading={setLoading} 
-                setError={setError} 
+              <ImageUploader
+                projectId={id}
+                onUploadComplete={handleUploadComplete}
+                loading={loading}
+                setLoading={setLoading}
+                setError={setError}
               />
             </div>
-            
+
             {/* Management Sections */}
             <div className="management-sections">
               <div className="metadata-section">
-                <MetadataManager 
-                  projectId={id} 
-                  metadata={metadata} 
-                  setMetadata={setMetadata} 
-                  loading={loading} 
-                  setLoading={setLoading} 
-                  setError={setError} 
+                <MetadataManager
+                  projectId={id}
+                  metadata={metadata}
+                  setMetadata={setMetadata}
+                  loading={loading}
+                  setLoading={setLoading}
+                  setError={setError}
                 />
               </div>
-              
+
               <div className="classes-section">
-                <ClassManager 
-                  projectId={id} 
-                  classes={classes} 
-                  setClasses={setClasses} 
-                  loading={loading} 
-                  setLoading={setLoading} 
-                  setError={setError} 
+                <ClassManager
+                  projectId={id}
+                  classes={classes}
+                  setClasses={setClasses}
+                  loading={loading}
+                  setLoading={setLoading}
+                  setError={setError}
                 />
               </div>
             </div>
             
+            {/* Audit Log */}
+            <div className="audit-section" style={{ marginTop: '24px' }}>
+              <AuditLog projectId={id} />
+            </div>
+
             {/* Image Deletion Controls - moved to bottom */}
             <div className="deletion-controls-section" style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e9ecef' }}>
               <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: '600', color: '#333' }}>Image View Options</h3>

@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Text, ForeignKey, DateTime, JSON, BigInteger, Boolean, UniqueConstraint, Numeric, Integer, Float
+from sqlalchemy import Column, String, Text, ForeignKey, DateTime, JSON, BigInteger, Boolean, UniqueConstraint, Numeric, Integer, Float, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -35,6 +35,7 @@ class Project(Base):
     images = relationship("DataInstance", back_populates="project", cascade="all, delete-orphan")
     image_classes = relationship("ImageClass", back_populates="project", cascade="all, delete-orphan")
     project_metadata = relationship("ProjectMetadata", back_populates="project", cascade="all, delete-orphan")
+    collections = relationship("ImageCollection", back_populates="project", cascade="all, delete-orphan")
 
 class DataInstance(Base):
     __tablename__ = "data_instances"
@@ -92,6 +93,7 @@ class ImageClass(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    collection_id = Column(UUID(as_uuid=True), ForeignKey("image_collections.id"), nullable=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -99,6 +101,7 @@ class ImageClass(Base):
     
     # Relationships
     project = relationship("Project", back_populates="image_classes")
+    collection = relationship("ImageCollection", back_populates="image_classes")
     classifications = relationship("ImageClassification", back_populates="image_class", cascade="all, delete-orphan")
 
 class ImageClassification(Base):
@@ -209,3 +212,150 @@ class MLAnnotation(Base):
     analysis = relationship("MLAnalysis", back_populates="annotations")
 
 
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type = Column(String(50), nullable=False)
+    entity_id = Column(UUID(as_uuid=True), nullable=False)
+    action = Column(String(50), nullable=False)
+    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_audit_entity", "entity_type", "entity_id"),
+        Index("ix_audit_project", "project_id"),
+        Index("ix_audit_created", "created_at"),
+    )
+
+    actor = relationship("User")
+    project = relationship("Project")
+
+
+class ImageCollection(Base):
+    __tablename__ = "image_collections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    purpose = Column(String(20), nullable=False, default="labeling")
+    phase = Column(String(20), nullable=False, default="draft", index=True)
+    source_collection_id = Column(UUID(as_uuid=True), ForeignKey("image_collections.id"), nullable=True)
+    ml_model_name = Column(String(255), nullable=True)
+    ml_model_version = Column(String(100), nullable=True)
+    certified_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    certified_at = Column(DateTime(timezone=True), nullable=True)
+    certification_notes = Column(Text, nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_collection_project_name"),
+    )
+
+    project = relationship("Project", back_populates="collections")
+    source_collection = relationship("ImageCollection", remote_side="ImageCollection.id")
+    certified_by = relationship("User", foreign_keys=[certified_by_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    memberships = relationship("CollectionMembership", back_populates="collection", cascade="all, delete-orphan")
+    bbox_classes = relationship("BoundingBoxClass", back_populates="collection", cascade="all, delete-orphan")
+    image_classes = relationship("ImageClass", back_populates="collection")
+    image_reviews = relationship("ImageReview", back_populates="collection", cascade="all, delete-orphan")
+
+
+class CollectionMembership(Base):
+    __tablename__ = "collection_memberships"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    collection_id = Column(UUID(as_uuid=True), ForeignKey("image_collections.id", ondelete="CASCADE"), nullable=False)
+    image_id = Column(UUID(as_uuid=True), ForeignKey("data_instances.id", ondelete="CASCADE"), nullable=False)
+    added_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("collection_id", "image_id", name="uq_collection_image"),
+    )
+
+    collection = relationship("ImageCollection", back_populates="memberships")
+    image = relationship("DataInstance")
+    added_by = relationship("User")
+
+
+class BoundingBoxClass(Base):
+    __tablename__ = "bounding_box_classes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    collection_id = Column(UUID(as_uuid=True), ForeignKey("image_collections.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    color = Column(String(7), nullable=False, default="#FF0000")
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("collection_id", "name", name="uq_bbox_class_collection_name"),
+    )
+
+    project = relationship("Project")
+    collection = relationship("ImageCollection", back_populates="bbox_classes")
+    annotations = relationship("UserAnnotation", back_populates="bbox_class")
+
+
+class UserAnnotation(Base):
+    __tablename__ = "user_annotations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    image_id = Column(UUID(as_uuid=True), ForeignKey("data_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    collection_id = Column(UUID(as_uuid=True), ForeignKey("image_collections.id"), nullable=True)
+    bbox_class_id = Column(UUID(as_uuid=True), ForeignKey("bounding_box_classes.id"), nullable=False)
+    created_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    x_min = Column(Float, nullable=False)
+    y_min = Column(Float, nullable=False)
+    x_max = Column(Float, nullable=False)
+    y_max = Column(Float, nullable=False)
+    image_width = Column(Integer, nullable=False)
+    image_height = Column(Integer, nullable=False)
+    review_status = Column(String(20), nullable=False, default="pending", index=True)
+    reviewed_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_comment = Column(Text, nullable=True)
+    origin = Column(String(20), nullable=False, default="manual")
+    original_annotation_id = Column(UUID(as_uuid=True), ForeignKey("user_annotations.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    image = relationship("DataInstance")
+    project = relationship("Project")
+    collection = relationship("ImageCollection")
+    bbox_class = relationship("BoundingBoxClass", back_populates="annotations")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
+    original_annotation = relationship("UserAnnotation", remote_side="UserAnnotation.id")
+
+
+class ImageReview(Base):
+    __tablename__ = "image_reviews"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    collection_id = Column(UUID(as_uuid=True), ForeignKey("image_collections.id", ondelete="CASCADE"), nullable=False)
+    image_id = Column(UUID(as_uuid=True), ForeignKey("data_instances.id"), nullable=False)
+    reviewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    status = Column(String(20), nullable=False)
+    notes = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("collection_id", "image_id", name="uq_image_review_collection_image"),
+    )
+
+    collection = relationship("ImageCollection", back_populates="image_reviews")
+    image = relationship("DataInstance")
+    reviewer = relationship("User")

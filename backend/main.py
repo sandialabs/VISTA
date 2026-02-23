@@ -18,7 +18,11 @@ from core.config import settings as _app_settings
 from utils.boto3_client import boto3_client, ensure_bucket_exists
 from middleware.cors_debug import add_cors_middleware, debug_exception_middleware
 from middleware.security_headers import SecurityHeadersMiddleware
-from routers import projects, images, users, image_classes, comments, project_metadata, api_keys, ml_analyses
+from routers import (
+    projects, images, users, image_classes, comments, project_metadata,
+    api_keys, ml_analyses, collections, annotations, annotation_reviews,
+    bbox_classes, image_reviews, audit_events,
+)
 
 
 """
@@ -182,6 +186,12 @@ def create_app() -> FastAPI:
     api_router.include_router(comments.router)
     api_router.include_router(project_metadata.router)
     api_router.include_router(ml_analyses.router)
+    api_router.include_router(collections.router)
+    api_router.include_router(annotations.router)
+    api_router.include_router(annotation_reviews.router)
+    api_router.include_router(bbox_classes.router)
+    api_router.include_router(image_reviews.router)
+    api_router.include_router(audit_events.router)
     api_router.include_router(users.router, prefix="/users")
     api_router.include_router(api_keys.router)
 

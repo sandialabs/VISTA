@@ -13,11 +13,18 @@ import OverlayControls from './components/OverlayControls';
 import MLDebugOutputs from './components/MLDebugOutputs';
 import CalibrationManager from './components/CalibrationManager';
 import MeasurementList from './components/MeasurementList';
+import AnnotationDrawingTool from './components/AnnotationDrawingTool';
+import UserAnnotationOverlay from './components/UserAnnotationOverlay';
+import AnnotationListPanel from './components/AnnotationListPanel';
+import BboxClassSelector from './components/BboxClassSelector';
+import ImageReviewControls from './components/ImageReviewControls';
+import useUserAnnotations from './hooks/useUserAnnotations';
 
 function ImageView() {
   const { imageId } = useParams();
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('project');
+  const collectionId = searchParams.get('collection');
   const navigate = useNavigate();
 
   // State variables
@@ -62,6 +69,22 @@ function ImageView() {
     const saved = localStorage.getItem('mlAutoSelectLatest');
     return saved === 'true' || saved === null; // Default to true
   });
+
+  // Annotation/collection state
+  const [collectionPhase, setCollectionPhase] = useState(null);
+  const [selectedBboxClassId, setSelectedBboxClassId] = useState(null);
+  const [annotationDrawingActive, setAnnotationDrawingActive] = useState(false);
+  const [selectedUserAnnotationId, setSelectedUserAnnotationId] = useState(null);
+
+  const {
+    annotations: userAnnotations,
+    bboxClasses,
+    createAnnotation: createUserAnnotation,
+    deleteAnnotation: deleteUserAnnotation,
+    getClassById,
+    refresh: refreshAnnotations,
+    refreshClasses: refreshBboxClasses,
+  } = useUserAnnotations(imageId, collectionId);
 
   // Measurement state
   const [calibration, setCalibration] = useState(null);
@@ -187,6 +210,20 @@ function ImageView() {
       setError('Failed to load classes. Please try again later.');
     }
   }, [projectId]);
+
+  // Fetch collection phase when in collection context
+  useEffect(() => {
+    if (!collectionId) {
+      setCollectionPhase(null);
+      return;
+    }
+    fetch(`/api/collections/${collectionId}`)
+      .then(resp => resp.ok ? resp.json() : null)
+      .then(data => {
+        if (data) setCollectionPhase(data.phase);
+      })
+      .catch(err => console.error('Failed to fetch collection:', err));
+  }, [collectionId]);
 
   // Initialize data on component mount
   useEffect(() => {
@@ -565,6 +602,47 @@ function ImageView() {
                   selectedMeasurementId={selectedMeasurementId}
                   onSelectMeasurement={setSelectedMeasurementId}
                 />
+              )}
+
+              {/* User Annotations (collection context) */}
+              {collectionId && collectionPhase && (
+                <>
+                  {(collectionPhase === 'annotating' || collectionPhase === 'review') && (
+                    <BboxClassSelector
+                      bboxClasses={bboxClasses}
+                      selectedClassId={selectedBboxClassId}
+                      onSelect={setSelectedBboxClassId}
+                      collectionId={collectionId}
+                      onClassCreated={() => refreshBboxClasses()}
+                    />
+                  )}
+                  <AnnotationListPanel
+                    annotations={userAnnotations}
+                    getClassById={getClassById}
+                    selectedAnnotationId={selectedUserAnnotationId}
+                    onSelectAnnotation={setSelectedUserAnnotationId}
+                    onDeleteAnnotation={(id) => deleteUserAnnotation(id)}
+                    onAnnotationReviewed={() => refreshAnnotations()}
+                    showReviewControls={collectionPhase === 'review'}
+                  />
+                  <ImageReviewControls
+                    collectionId={collectionId}
+                    imageId={imageId}
+                    collectionPhase={collectionPhase}
+                  />
+                  {(collectionPhase === 'annotating' || collectionPhase === 'review') && (
+                    <div style={{ padding: '0.5rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={annotationDrawingActive}
+                          onChange={e => setAnnotationDrawingActive(e.target.checked)}
+                        />
+                        Drawing Mode
+                      </label>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* ML Analysis Panel (read-only, only visible when analyses exist) */}
