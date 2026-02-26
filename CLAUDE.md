@@ -334,6 +334,23 @@ Single container deployment via `Dockerfile`:
 - Backend should only accept connections from trusted reverse proxy
 
 
+## Claude Code Agents
+
+Custom subagents are defined in `.claude/agents/` for specialized workflows:
+
+- **`final-checklist-reviewer`** -- Comprehensive PR/branch review. Runs tests, checks
+  linting, verifies documentation, validates migrations, and performs visual verification
+  with Playwright when available. Use before merging any branch.
+- **`test-report-runner`** -- Executes the full test suite and reports results factually.
+  Also performs visual verification via Playwright if the app is running. Does not suggest
+  fixes -- just reports what passed and what failed.
+- **`git-worktree-setup`** -- Creates an isolated git worktree as a sibling directory for
+  reviewing or testing a branch/PR without disrupting the main checkout. Handles env
+  config, port conflicts, dependency installation, and optional tmux session setup.
+
+All agents follow the project conventions: no emojis, professional output, `uv` for Python,
+and Playwright-based visual verification when available.
+
 # Pull Request Checklist
 
 Before creating or approving a PR, always verify that relevant documentation has been updated to reflect the changes. Check these files and update as needed:
