@@ -9,26 +9,17 @@ const ImageView = lazy(() => import('./ImageView'));
 const ApiKeys = lazy(() => import('./ApiKeys'));
 const ProjectReport = lazy(() => import('./components/ProjectReport'));
 
-// Debug counter to track renders
-let renderCount = 0;
 
 // Create a separate component for the modal form
 const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit, currentUser }) {
-  console.log("Modal render count:", ++renderCount);
-  
   // Use refs for uncontrolled inputs
   const nameInputRef = useRef(null);
   const descriptionInputRef = useRef(null);
   const groupIdInputRef = useRef(null);
   
-  // Track focus state for debugging
-  const [focusState, setFocusState] = useState('none');
-  
   // Handle form submission
   const handleSubmit = (e) => {
     e.preventDefault();
-    console.log("Form submitted");
-    
     // Get values directly from refs
     const newProject = {
       name: nameInputRef.current.value,
@@ -39,31 +30,11 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
     onSubmit(newProject);
   };
   
-  // Debug focus events
-  const handleFocus = (fieldName) => {
-    console.log(`Focus on: ${fieldName}`);
-    setFocusState(fieldName);
-  };
-  
-  const handleBlur = (fieldName) => {
-    console.log(`Blur from: ${fieldName}`);
-    if (focusState === fieldName) {
-      setFocusState('none');
-    }
-  };
-  
-  // Fetch available groups when component mounts
+  // Focus the name input when modal opens
   useEffect(() => {
-    console.log("Modal component mounted");
-    
-    // Focus the name input when modal opens
     if (nameInputRef.current) {
       nameInputRef.current.focus();
     }
-    
-    return () => {
-      console.log("Modal component unmounted");
-    };
   }, []);
   
   return (
@@ -81,8 +52,6 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
                 type="text" 
                 id="name" 
                 ref={nameInputRef}
-                onFocus={() => handleFocus('name')}
-                onBlur={() => handleBlur('name')}
                 required
                 placeholder="Enter a descriptive project name"
                 className="form-control"
@@ -98,8 +67,6 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
                 id="description" 
                 rows="3"
                 ref={descriptionInputRef}
-                onFocus={() => handleFocus('description')}
-                onBlur={() => handleBlur('description')}
                 placeholder="Describe what this project is for..."
                 className="form-control"
               ></textarea>
@@ -114,8 +81,6 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
                 type="text" 
                 id="meta_group_id" 
                 ref={groupIdInputRef}
-                onFocus={() => handleFocus('groupId')}
-                onBlur={() => handleBlur('groupId')}
                 required
                 placeholder="Enter the group ID you have access to"
                 className="form-control"
@@ -236,12 +201,8 @@ function App() {
       });
   }, []); // Empty dependency array means this effect runs once on mount
 
-  // Log component renders for debugging
-  console.log("App render count:", ++renderCount);
-  
   // Handle project creation form submission
   const handleCreateProject = useCallback((projectData) => {
-    console.log("Creating project:", projectData);
     setLoading(true);
     
     fetch('/api/projects/', {
@@ -264,7 +225,6 @@ function App() {
         return response.json();
       })
       .then(data => {
-        console.log("Project created successfully:", data);
         // Add the new project to the projects list
         setProjects(prev => [...prev, data]);
         // Close modal

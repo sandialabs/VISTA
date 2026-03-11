@@ -1,3 +1,4 @@
+import logging
 import uuid
 import io
 import os
@@ -137,7 +138,7 @@ async def list_images_in_project(
                     continue
                 response_images.append(to_data_instance_schema(img))
             except Exception as e:
-                print(f"Error serializing image {img.id}: {e}")
+                logger.warning("Error serializing image %s: %s", img.id, e)
                 # Skip this image but continue processing others
                 continue
     
@@ -652,7 +653,7 @@ async def update_image_metadata(
             updated_at=db_image.updated_at,
         )
     except Exception as e:
-        print(f"Error building DataInstance response: {e}")
+        logger.error("Error building DataInstance response: %s", e)
         raise
 
 @router.delete("/images/{image_id}/metadata/{key}", response_model=schemas.DataInstance, status_code=status.HTTP_200_OK)
@@ -715,5 +716,5 @@ async def delete_image_metadata(
             updated_at=db_image.updated_at,
         )
     except Exception as e:
-        print(f"Error building DataInstance response: {e}")
+        logger.error("Error building DataInstance response: %s", e)
         raise

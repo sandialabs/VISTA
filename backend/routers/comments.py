@@ -1,3 +1,4 @@
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +7,8 @@ import utils.crud as crud
 from core import schemas
 from core.database import get_db
 from utils.dependencies import get_current_user, get_user_context, UserContext, get_image_or_403
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     tags=["Comments"],
@@ -18,9 +21,9 @@ async def create_comment(
     db: AsyncSession = Depends(get_db),
     user_context: UserContext = Depends(get_user_context),
 ):
-    print(f"Comment request received for image_id: {image_id}")
-    print(f"Comment text: {comment.text}")
-    print(f"Current user: {user_context.user}")
+    logger.debug("Comment request received for image_id: %s", image_id)
+    logger.debug("Comment text: %s", comment.text)
+    logger.debug("Current user: %s", user_context.user)
     
     # Check if the user has access to the image
     await get_image_or_403(image_id, db, user_context.user)
@@ -32,7 +35,7 @@ async def create_comment(
         author_id=user_context.id  # Automatically resolved ID
     )
     
-    print(f"Created comment object: {comment_create}")
+    logger.debug("Created comment object: %s", comment_create)
     
     # Create the comment with automatic user context
     return await crud.create_comment(db=db, comment=comment_create, created_by=user_context.email)
