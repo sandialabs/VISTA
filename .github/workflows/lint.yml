@@ -1,0 +1,62 @@
+name: Lint
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  python-lint:
+    name: Python (ruff)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install dependencies
+      run: uv sync --frozen
+
+    # Change --exit-zero to --exit-non-zero-on-fix once existing issues are fixed
+    - name: Run ruff check
+      run: uv run ruff check backend/ --exit-zero
+
+    # Change to remove "|| true" once existing formatting issues are fixed
+    - name: Run ruff format check
+      run: uv run ruff format --check backend/ || true
+
+  javascript-lint:
+    name: JavaScript (eslint)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js 22
+      uses: actions/setup-node@v5
+      with:
+        node-version: "22"
+        cache: "npm"
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci --legacy-peer-deps
+
+    # Change to remove "|| true" once existing lint issues are fixed
+    - name: Run eslint
+      run: |
+        cd frontend
+        npx eslint src/ || true

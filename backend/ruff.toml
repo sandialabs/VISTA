@@ -1,0 +1,24 @@
+# Ruff linter and formatter configuration for VISTA backend.
+# See https://docs.astral.sh/ruff/configuration/ for full reference.
+
+line-length = 120
+target-version = "py311"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort (import ordering)
+]
+
+ignore = [
+    "E501",  # line-too-long -- existing code exceeds 120 chars in many places
+]
+
+[lint.isort]
+known-first-party = ["core", "routers", "utils", "middleware"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
