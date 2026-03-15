@@ -3,6 +3,10 @@ import BoundingBoxOverlay from './BoundingBoxOverlay';
 import HeatmapOverlay from './HeatmapOverlay';
 import MeasurementTool from './MeasurementTool';
 import MeasurementOverlay from './MeasurementOverlay';
+import UserAnnotationOverlay from './UserAnnotationOverlay';
+import AnnotationDrawingTool from './AnnotationDrawingTool';
+import ImageDeleteModal from './ImageDeleteModal';
+import downloadImage from '../utils/imageDownload';
 
 // Deleted image placeholder SVG for larger display
 const DELETED_IMAGE_DISPLAY_SVG = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgZmlsbD0iI2ZiZjVmNSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1kYXNoYXJyYXk9IjE1LDgiLz48dGV4dCB4PSI1MCUiIHk9IjM1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjM2IiBmb250LXdlaWdodD0iNjAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2M0MzAyYiI+SW1hZ2UgRGVsZXRlZDwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjY0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2Y1OWUwYiI+8J+XkeKcgO+4jzwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjY1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iIzk3OWNhMSI+VGhpcyBpbWFnZSBoYXMgYmVlbiBkZWxldGVkPC90ZXh0Pjx0ZXh0IHg9IjUwJSIgeT0iNzAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIiBmaWxsPSIjOTc5Y2ExIj5DaGVjayB0aGUgZGVsZXRpb24gY29udHJvbHMgYmVsb3cgZm9yIG1vcmUgaW5mbzwvdGV4dD48L3N2Zz4=';
@@ -14,38 +18,19 @@ const MIN_VISIBLE_IMAGE_MARGIN = 50;
 const PAN_EXCLUDE_SELECTOR = 'button, a, input, select, textarea';
 
 function ImageDisplay({
-  imageId,
-  image,
-  isTransitioning,
-  projectId,
-  setImage,
-  refreshProjectImages,
-  navigateToPreviousImage,
-  navigateToNextImage,
-  currentImageIndex,
-  projectImages,
-  selectedAnalysis,
-  annotations,
-  overlayOptions,
-  calibration,
-  measurements,
-  measurementActive,
-  setMeasurementActive,
-  onSaveMeasurement,
-  selectedMeasurementId,
-  visibleMeasurementIds
+  imageId, image, isTransitioning, projectId, setImage, refreshProjectImages,
+  navigateToPreviousImage, navigateToNextImage, currentImageIndex, projectImages,
+  selectedAnalysis, annotations, overlayOptions, calibration, measurements,
+  measurementActive, setMeasurementActive, onSaveMeasurement, selectedMeasurementId,
+  visibleMeasurementIds, userAnnotations, showUserAnnotations, annotationMode,
+  activeClassColor, selectedAnnotationId, onSelectAnnotation, onAnnotationCreated,
+  onToggleAnnotationMode
 }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [reason, setReason] = useState("");
-  const [force, setForce] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [showForceDeleteConfirm, setShowForceDeleteConfirm] = useState(false);
-  const [deleteError, setDeleteError] = useState(null);
-  const MIN_REASON = 5;
 
   // Refs for stable event-handler access to latest state
   const zoomRef = useRef(zoomLevel);
@@ -53,17 +38,14 @@ function ImageDisplay({
   useEffect(() => { zoomRef.current = zoomLevel; }, [zoomLevel]);
   useEffect(() => { panRef.current = panOffset; }, [panOffset]);
 
-  // Apply zoom (kept for keyboard shortcuts)
-  const handleZoomIn = useCallback(() => {
-    setZoomLevel(prev => Math.min(10, prev + 0.25));
-  }, []);
+  const handleZoomIn = useCallback(() => setZoomLevel(prev => Math.min(10, prev + 0.25)), []);
+  const handleZoomOut = useCallback(() => setZoomLevel(prev => Math.max(0.25, prev - 0.25)), []);
 
-  // Handle zoom out (kept for keyboard shortcuts)
-  const handleZoomOut = useCallback(() => {
-    setZoomLevel(prev => Math.max(0.25, prev - 0.25));
-  }, []);
+  const containerRef = useRef(null);
+  const imgRef = useRef(null);
+  const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
 
-  // Clamp pan so at least MIN_VISIBLE_IMAGE_MARGIN px of the image remains visible in the container
   const clampPan = useCallback((pan, zoom) => {
     const container = containerRef.current;
     const img = imgRef.current;
@@ -79,7 +61,6 @@ function ImageDisplay({
     };
   }, []);
 
-  // Handle reset zoom and pan
   const handleResetZoom = useCallback(() => {
     setZoomLevel(1);
     setPanOffset({ x: 0, y: 0 });
@@ -87,197 +68,48 @@ function ImageDisplay({
     panRef.current = { x: 0, y: 0 };
   }, []);
 
-  // Handle delete
-  const handleDelete = async () => {
-    if (reason.trim().length < MIN_REASON) {
-      setDeleteError(`Reason must be at least ${MIN_REASON} characters`);
-      return;
-    }
-    
-    // If force delete and not confirmed, show secondary confirmation
-    if (force && !showForceDeleteConfirm) {
-      setShowForceDeleteConfirm(true);
-      return;
-    }
-    
-    setSubmitting(true);
-    try {
-      const resp = await fetch(`/api/projects/${projectId}/images/${image.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: reason.trim(), force })
-      });
-      if (!resp.ok) {
-        const detail = await resp.text();
-        throw new Error(`Delete failed (${resp.status}): ${detail}`);
-      }
-      const data = await resp.json();
-      setImage(data);
-      if (refreshProjectImages) refreshProjectImages();
-      setShowDeleteModal(false);
-      setReason("");
-      setForce(false);
-      setDeleteError(null);
-      setShowForceDeleteConfirm(false);
-    } catch (e) {
-      setDeleteError(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // Handle download
-  const handleDownload = async () => {
+  const handleDownload = useCallback(async () => {
     if (!image) return;
-    
     try {
-      console.log('Starting download for image %s...', imageId);
-      
-      // Try multiple endpoints to find the working one
-      const endpoints = [
-        `/api/images/${imageId}/content`,
-        `/api/images/${imageId}/download`,
-      ];
-      
-      let imageBlob = null;
-      let filename = image.filename || `image-${imageId}`;
-      
-      for (const endpoint of endpoints) {
-        try {
-          console.log('Trying endpoint: %s', endpoint);
-          const response = await fetch(endpoint);
-          
-          if (!response.ok) {
-            console.log('Endpoint %s failed: %s %s', endpoint, response.status, response.statusText);
-            continue;
-          }
-          
-          const contentType = response.headers.get('content-type');
-          console.log('Endpoint %s - Content-Type: %s', endpoint, contentType);
-          
-          if (contentType && contentType.includes('application/json')) {
-            // This might be a redirect URL response
-            const jsonData = await response.json();
-            console.log('Got JSON response:', jsonData);
-            
-            if (jsonData.url) {
-              // Try to fetch from the provided URL
-              console.log('Fetching from provided URL: %s', jsonData.url);
-              const imageResponse = await fetch(jsonData.url);
-              
-              if (imageResponse.ok) {
-                const blobContentType = imageResponse.headers.get('content-type');
-                if (blobContentType && blobContentType.startsWith('image/')) {
-                  imageBlob = await imageResponse.blob();
-                  break;
-                }
-              }
-            }
-          } else if (contentType && contentType.startsWith('image/')) {
-            // Direct image response
-            imageBlob = await response.blob();
-            break;
-          } else {
-            console.log('Unexpected content type: %s', contentType);
-          }
-        } catch (endpointError) {
-          console.error('Error with endpoint %s:', endpoint, endpointError);
-          continue;
-        }
-      }
-      
-      if (!imageBlob) {
-        throw new Error('Unable to download image from any available endpoint');
-      }
-      
-      console.log('Successfully got image blob:', {
-        size: imageBlob.size,
-        type: imageBlob.type
-      });
-      
-      // Ensure we have the right file extension
-      if (!filename.includes('.') && imageBlob.type) {
-        const extension = imageBlob.type.split('/')[1];
-        if (extension && extension !== 'jpeg') {
-          filename = `${filename}.${extension}`;
-        } else if (extension === 'jpeg') {
-          filename = `${filename}.jpg`;
-        }
-      }
-      
-      // Create a URL for the blob and trigger download
-      const blobUrl = window.URL.createObjectURL(imageBlob);
-      
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      
-      // Append to the document, click it, and remove it
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // Clean up the blob URL
-      window.URL.revokeObjectURL(blobUrl);
-      
-      console.log('Download completed successfully: %s', filename);
-      
-    } catch (error) {
-      console.error('Error downloading image:', error);
-      alert(`Download failed: ${error.message}`);
+      await downloadImage(imageId, image.filename || `image-${imageId}`);
+    } catch (err) {
+      console.error('Error downloading image:', err);
+      alert(`Download failed: ${err.message}`);
     }
-  };
+  }, [image, imageId]);
 
   // Keyboard navigation for zoom
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === '+' || e.key === '=') {
-        handleZoomIn();
-      } else if (e.key === '-') {
-        handleZoomOut();
-      } else if (e.key === '0') {
-        handleResetZoom();
-      }
+      if (e.key === '+' || e.key === '=') handleZoomIn();
+      else if (e.key === '-') handleZoomOut();
+      else if (e.key === '0') handleResetZoom();
     };
-    
     document.addEventListener('keydown', handleKeyDown);
-    
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleZoomIn, handleZoomOut, handleResetZoom]);
-
-  const containerRef = useRef(null);
 
   // Wheel zoom toward cursor
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     const container = containerRef.current;
     if (!container) return;
-
     const rect = container.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-
     const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     const prevZoom = zoomRef.current;
     const newZoom = Math.max(0.25, Math.min(10, prevZoom * zoomFactor));
     const scale = newZoom / prevZoom;
-
     const prevPan = panRef.current;
-    const rawPan = {
-      x: mouseX - scale * (mouseX - prevPan.x),
-      y: mouseY - scale * (mouseY - prevPan.y)
-    };
+    const rawPan = { x: mouseX - scale * (mouseX - prevPan.x), y: mouseY - scale * (mouseY - prevPan.y) };
     const newPan = clampPan(rawPan, newZoom);
-
     zoomRef.current = newZoom;
     panRef.current = newPan;
     setZoomLevel(newZoom);
     setPanOffset(newPan);
   }, [clampPan]);
 
-  // Attach wheel listener (passive: false allows preventDefault)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -285,17 +117,16 @@ function ImageDisplay({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // Pan: start on plain left-click (not on interactive elements, not in measure mode)
+  // Pan: start on plain left-click
   const handlePanMouseDown = useCallback((e) => {
+    if (annotationMode) return;
     if (e.button !== 0 || e.ctrlKey) return;
     if (e.target.closest(PAN_EXCLUDE_SELECTOR)) return;
     e.preventDefault();
-    const start = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
-    panStartRef.current = start;
+    panStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
     setIsPanning(true);
-  }, []);
+  }, [annotationMode]);
 
-  // Pan: global mousemove/mouseup for dragging
   useEffect(() => {
     if (!isPanning) return;
     const handleMouseMove = (e) => {
@@ -312,46 +143,15 @@ function ImageDisplay({
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isPanning, clampPan]);
-  const imgRef = useRef(null);
-  const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
-  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
 
   const measure = useCallback(() => {
     if (imgRef.current) {
-      // getBoundingClientRect gives us the actual displayed size after CSS transform
-      // But we want the pre-transform size since the overlay is positioned relative to the container
-      // Use offsetWidth/offsetHeight for the layout dimensions (pre-transform)
-      const measuredSize = {
-        width: imgRef.current.offsetWidth,
-        height: imgRef.current.offsetHeight
-      };
-
-      const naturalDimensions = {
-        width: imgRef.current.naturalWidth,
-        height: imgRef.current.naturalHeight
-      };
-
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[ImageDisplay] Measured display size:', {
-          displaySize: measuredSize,
-          naturalSize: naturalDimensions,
-          naturalWidth: imgRef.current.naturalWidth,
-          naturalHeight: imgRef.current.naturalHeight,
-          offsetWidth: imgRef.current.offsetWidth,
-          offsetHeight: imgRef.current.offsetHeight,
-          clientWidth: imgRef.current.clientWidth,
-          clientHeight: imgRef.current.clientHeight,
-          zoomLevel,
-          imageId
-        });
-      }
-
-      setDisplaySize(measuredSize);
-      setNaturalSize(naturalDimensions);
+      setDisplaySize({ width: imgRef.current.offsetWidth, height: imgRef.current.offsetHeight });
+      setNaturalSize({ width: imgRef.current.naturalWidth, height: imgRef.current.naturalHeight });
     }
-  }, [zoomLevel, imageId]);
+  }, []);
 
-  // Reset display size, zoom, and pan when imageId changes to prevent stale dimensions
+  // Reset display size, zoom, and pan when imageId changes
   useEffect(() => {
     setDisplaySize({ width: 0, height: 0 });
     setNaturalSize({ width: 0, height: 0 });
@@ -367,92 +167,56 @@ function ImageDisplay({
     return () => window.removeEventListener('resize', measure);
   }, [measure]);
 
-  // Side-by-side mode helper
   const isSideBySide = overlayOptions?.viewMode === 'side-by-side' && overlayOptions?.bitmapAvailable;
 
   const renderImageView = (showOverlays = true, containerStyle = {}, attachRef = true) => (
     <div style={{ position: 'relative', ...containerStyle }}>
       <div style={{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)`, position: 'relative' }}>
       {!image ? (
-        <div className="loading-container">
-          <div className="loading"></div>
-          <p>Loading image...</p>
-        </div>
+        <div className="loading-container"><div className="loading"></div><p>Loading image...</p></div>
       ) : image.deleted_at ? (
-        <img
-          src={DELETED_IMAGE_DISPLAY_SVG}
-          alt="Deleted"
-          className="view-image deleted-image"
-          style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
-          ref={attachRef ? imgRef : null}
-        />
+        <img src={DELETED_IMAGE_DISPLAY_SVG} alt="Deleted" className="view-image deleted-image"
+          style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }} ref={attachRef ? imgRef : null} />
       ) : (
-        <img
-          src={`/api/images/${imageId}/content`}
-          alt={image.filename || ''}
-          className="view-image"
-          style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
-          onLoad={measure}
-          onError={(e) => {
-            console.error('Failed to load image with ID: %s', imageId, e);
-            if (!e.target.src.includes('thumbnail')) {
-              e.target.src = `/api/images/${imageId}/thumbnail?width=800&height=600`;
-            }
-          }}
-          ref={attachRef ? imgRef : null}
-        />
+        <img src={`/api/images/${imageId}/content`} alt={image.filename || ''} className="view-image"
+          style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }} onLoad={measure}
+          onError={(e) => { if (!e.target.src.includes('thumbnail')) e.target.src = `/api/images/${imageId}/thumbnail?width=800&height=600`; }}
+          ref={attachRef ? imgRef : null} />
       )}
-      {showOverlays && image && overlayOptions?.showBoxes && annotations?.length > 0 && displaySize.width > 0 && (() => {
-        console.log('[ImageDisplay] Rendering BoundingBoxOverlay:', {
-          imageMetadata: { width: image.width, height: image.height },
-          displaySize,
-          zoomLevel,
-          annotationCount: annotations.length
-        });
-        return (
-          <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
-            <BoundingBoxOverlay
-              annotations={annotations}
-              naturalSize={naturalSize}
-              containerSize={displaySize}
-              opacity={overlayOptions.opacity}
-            />
-          </div>
-        );
-      })()}
+      {showOverlays && image && overlayOptions?.showBoxes && annotations?.length > 0 && displaySize.width > 0 && (
+        <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
+          <BoundingBoxOverlay annotations={annotations} naturalSize={naturalSize} containerSize={displaySize} opacity={overlayOptions.opacity} />
+        </div>
+      )}
       {showOverlays && image && overlayOptions?.showHeatmap && annotations?.length > 0 && displaySize.width > 0 && (
         <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
-          <HeatmapOverlay
-            annotations={annotations}
-            containerSize={displaySize}
-            opacity={overlayOptions.opacity}
-          />
+          <HeatmapOverlay annotations={annotations} containerSize={displaySize} opacity={overlayOptions.opacity} />
         </div>
       )}
-      {showOverlays && image && measurements && measurements.length > 0 && displaySize.width > 0 && naturalSize.width > 0 && (
+      {showOverlays && image && measurements?.length > 0 && displaySize.width > 0 && naturalSize.width > 0 && (
         <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
-          <MeasurementOverlay
-            measurements={measurements}
-            naturalSize={naturalSize}
-            containerSize={displaySize}
-            calibration={calibration}
-            selectedMeasurementId={selectedMeasurementId}
-            visibleMeasurementIds={visibleMeasurementIds}
-            zoomLevel={zoomLevel}
-          />
+          <MeasurementOverlay measurements={measurements} naturalSize={naturalSize} containerSize={displaySize}
+            calibration={calibration} selectedMeasurementId={selectedMeasurementId}
+            visibleMeasurementIds={visibleMeasurementIds} zoomLevel={zoomLevel} />
         </div>
+      )}
+      {showOverlays && image && userAnnotations?.length > 0 && showUserAnnotations && displaySize.width > 0 && (
+        <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
+          <UserAnnotationOverlay annotations={userAnnotations} naturalSize={naturalSize} containerSize={displaySize}
+            opacity={overlayOptions?.opacity || 0.7} selectedAnnotationId={selectedAnnotationId}
+            onSelectAnnotation={onSelectAnnotation} visible={showUserAnnotations} />
+        </div>
+      )}
+      {image && !image.deleted_at && annotationMode && displaySize.width > 0 && naturalSize.width > 0 && (
+        <AnnotationDrawingTool containerSize={displaySize} naturalSize={naturalSize} zoomLevel={zoomLevel}
+          active={annotationMode} leftClickEnabled={annotationMode} activeClassColor={activeClassColor || '#FF9800'}
+          onAnnotationCreated={onAnnotationCreated} onCancel={() => {}} />
       )}
       {image && displaySize.width > 0 && naturalSize.width > 0 && (
-        <MeasurementTool
-          containerSize={displaySize}
-          naturalSize={naturalSize}
-          zoomLevel={zoomLevel}
-          calibration={calibration}
-          onSaveMeasurement={onSaveMeasurement}
+        <MeasurementTool containerSize={displaySize} naturalSize={naturalSize} zoomLevel={zoomLevel}
+          calibration={calibration} onSaveMeasurement={onSaveMeasurement}
           onCancel={() => setMeasurementActive && setMeasurementActive(false)}
-          existingMeasurementCount={measurements ? measurements.length : 0}
-          leftClickEnabled={!!measurementActive}
-        />
+          existingMeasurementCount={measurements ? measurements.length : 0} leftClickEnabled={!!measurementActive} />
       )}
       </div>
     </div>
@@ -460,7 +224,8 @@ function ImageDisplay({
 
   return (
     <>
-      <div id="image-display" className={isTransitioning ? 'transitioning' : ''} ref={containerRef} style={{ position: 'relative', cursor: isPanning ? 'grabbing' : 'crosshair' }} onMouseDown={handlePanMouseDown}>
+      <div id="image-display" className={isTransitioning ? 'transitioning' : ''} ref={containerRef}
+        style={{ position: 'relative', cursor: isPanning ? 'grabbing' : 'crosshair' }} onMouseDown={handlePanMouseDown}>
         {isSideBySide ? (
           <div style={{ display: 'flex', gap: '1rem', width: '100%' }}>
             <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -472,139 +237,46 @@ function ImageDisplay({
               {renderImageView(true, {}, false)}
             </div>
           </div>
-        ) : (
-          renderImageView(true, {}, true)
-        )}
+        ) : renderImageView(true, {}, true)}
       </div>
-      
+
       <div className="image-controls">
-        {/* Navigation buttons */}
         {navigateToPreviousImage && (
-          <button
-            className="btn btn-secondary btn-small control-btn"
-            onClick={navigateToPreviousImage}
-            disabled={currentImageIndex <= 0}
-          >
-            ← Prev
+          <button className="btn btn-secondary btn-small control-btn" onClick={navigateToPreviousImage} disabled={currentImageIndex <= 0}>
+            &larr; Prev
           </button>
         )}
         {navigateToNextImage && (
-          <button
-            className="btn btn-secondary btn-small control-btn"
-            onClick={navigateToNextImage}
-            disabled={currentImageIndex >= (projectImages?.length || 0) - 1 || currentImageIndex === -1}
-          >
-            Next →
+          <button className="btn btn-secondary btn-small control-btn" onClick={navigateToNextImage}
+            disabled={currentImageIndex >= (projectImages?.length || 0) - 1 || currentImageIndex === -1}>
+            Next &rarr;
           </button>
         )}
-
-        {/* Zoom controls */}
-        <button
-          className="btn btn-secondary control-btn"
-          onClick={handleResetZoom}
-        >
-          Reset
-        </button>
-
-        {/* Other controls */}
+        <button className="btn btn-secondary control-btn" onClick={handleResetZoom}>Reset</button>
         {image && !image.deleted_at && setMeasurementActive && (
-          <button
-            className={`btn control-btn ${measurementActive ? 'btn-warning' : 'btn-secondary'}`}
-            onClick={() => setMeasurementActive(!measurementActive)}
-          >
+          <button className={`btn control-btn ${measurementActive ? 'btn-warning' : 'btn-secondary'}`}
+            onClick={() => setMeasurementActive(!measurementActive)}>
             {measurementActive ? 'Done Measuring' : 'Measure'}
           </button>
         )}
-        {measurementActive && (
-          <span className="measure-hint">
-            Left-click to draw. Right-click also works.
-          </span>
-        )}
-        <button
-          className="btn btn-success control-btn"
-          onClick={handleDownload}
-        >
-          Download
-        </button>
-        {image && !image.deleted_at && (
-          <button
-            className="btn btn-danger control-btn"
-            onClick={() => setShowDeleteModal(true)}
-          >
-            Delete
+        {measurementActive && <span className="measure-hint">Left-click to draw. Right-click also works.</span>}
+        {image && !image.deleted_at && onToggleAnnotationMode && (
+          <button className={`btn control-btn ${annotationMode ? 'btn-primary' : 'btn-secondary'}`} onClick={onToggleAnnotationMode}>
+            {annotationMode ? 'Done Annotating' : 'Annotate'}
           </button>
         )}
+        {annotationMode && <span className="measure-hint">Left-click and drag to draw a bounding box.</span>}
+        <button className="btn btn-success control-btn" onClick={handleDownload}>Download</button>
+        {image && !image.deleted_at && (
+          <button className="btn btn-danger control-btn" onClick={() => setShowDeleteModal(true)}>Delete</button>
+        )}
       </div>
-      
-      {showDeleteModal && (
-        <div className="modal" style={{ display: 'flex' }}>
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>{force ? 'Force Delete Image' : 'Delete Image'}</h3>
-              <span className="close-modal" onClick={() => {
-                setShowDeleteModal(false);
-                setReason("");
-                setForce(false);
-                setDeleteError(null);
-                setShowForceDeleteConfirm(false);
-              }}>&times;</span>
-            </div>
-            
-            <div className="modal-body">
-              <p>{force ? 'This will remove the file from storage immediately. Database record stays for audit.' : 'The image will be hidden and can be restored until retention expires.'}</p>
-              
-              {force && showForceDeleteConfirm && (
-                <div className="alert alert-warning" style={{ margin: '16px 0', padding: '12px', backgroundColor: '#fff3cd', border: '1px solid #ffeaa7', borderRadius: '4px', color: '#856404' }}>
-                  <strong>⚠️ Final Warning:</strong> This action will permanently delete the image file from storage and cannot be undone. Are you absolutely sure you want to proceed?
-                </div>
-              )}
-              
-              <div className="form-group">
-                <label htmlFor="delete-reason">Reason (required)</label>
-                <textarea 
-                  id="delete-reason" 
-                  rows={3} 
-                  value={reason} 
-                  onChange={e => setReason(e.target.value)}
-                  placeholder="Enter a reason for deleting this image..."
-                />
-                <small>Min {MIN_REASON} chars. Helps auditing.</small>
-              </div>
-              
-              <div className="form-group">
-                <label style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={force} 
-                    onChange={e => {
-                      setForce(e.target.checked);
-                      if (!e.target.checked) {
-                        setShowForceDeleteConfirm(false);
-                      }
-                    }} 
-                  />
-                  Force delete (also remove object from storage)
-                </label>
-              </div>
-              
-              {deleteError && <div className="alert alert-error">{deleteError}</div>}
-            </div>
-            
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => {
-                setShowDeleteModal(false);
-                setReason("");
-                setForce(false);
-                setDeleteError(null);
-                setShowForceDeleteConfirm(false);
-              }} disabled={submitting}>Cancel</button>
-              <button className="btn btn-danger" onClick={handleDelete} disabled={submitting}>
-                {submitting ? 'Deleting...' : (force && showForceDeleteConfirm ? 'Permanently Delete' : force ? 'Force Delete' : 'Delete')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
+      <ImageDeleteModal
+        image={image} projectId={projectId} setImage={setImage}
+        refreshProjectImages={refreshProjectImages} show={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+      />
     </>
   );
 }
