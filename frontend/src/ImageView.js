@@ -412,6 +412,7 @@ function ImageView() {
                 <UserAnnotationPanel
                   imageId={imageId} projectId={projectId}
                   bboxClasses={annotationHook.bboxClasses}
+                  annotations={annotationHook.userAnnotations}
                   onAnnotationsChange={annotationHook.loadUserAnnotations}
                   selectedAnnotationId={annotationHook.selectedAnnotationId}
                   onSelectAnnotation={annotationHook.setSelectedAnnotationId}
@@ -419,13 +420,15 @@ function ImageView() {
               )}
               {image && annotationHook.bboxClasses.length > 0 && (
                 <AnnotationToolbar
-                  annotationMode={annotationHook.annotationMode}
-                  onToggleAnnotationMode={() => annotationHook.setAnnotationMode(prev => !prev)}
+                  interactionMode={annotationHook.interactionMode}
+                  onModeChange={annotationHook.setInteractionMode}
                   bboxClasses={annotationHook.bboxClasses}
                   activeClassId={annotationHook.activeClassId}
                   onActiveClassChange={annotationHook.setActiveClassId}
                   showUserAnnotations={annotationHook.showUserAnnotations}
                   onToggleShowAnnotations={() => annotationHook.setShowUserAnnotations(prev => !prev)}
+                  selectedAnnotationId={annotationHook.selectedAnnotationId}
+                  onDeleteSelected={annotationHook.handleDeleteSelected}
                 />
               )}
               {annotationHook.selectedAnnotationId && (
@@ -511,6 +514,8 @@ function ImageView() {
                 userAnnotations={annotationHook.userAnnotations}
                 showUserAnnotations={annotationHook.showUserAnnotations}
                 annotationMode={annotationHook.annotationMode}
+                selectMode={annotationHook.selectMode}
+                interactionMode={annotationHook.interactionMode}
                 activeClassColor={annotationHook.bboxClasses.find(c => c.id === annotationHook.activeClassId)?.color || '#FF9800'}
                 selectedAnnotationId={annotationHook.selectedAnnotationId}
                 onSelectAnnotation={annotationHook.setSelectedAnnotationId}

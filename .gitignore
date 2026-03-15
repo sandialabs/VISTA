@@ -218,3 +218,6 @@ yarn-error.log*
 pids
 logs
 yolov8n.pt
+
+# Generated/temporary files
+tmp/
