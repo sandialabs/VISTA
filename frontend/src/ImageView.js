@@ -19,6 +19,7 @@ import { loadGalleryState, applyGalleryFilters, sortImages } from './utils/galle
 import UserAnnotationPanel from './components/UserAnnotationPanel';
 import AnnotationToolbar from './components/AnnotationToolbar';
 import AnnotationReviewControls from './components/AnnotationReviewControls';
+import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp';
 
 // Custom hooks
 import useAnnotations from './hooks/useAnnotations';
@@ -41,6 +42,7 @@ function ImageView() {
   const [currentUser, setCurrentUser] = useState(null);
   const [sidebarWidth, setSidebarWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // Navigation settings - restore from localStorage
   const [skipDeletedImages, setSkipDeletedImages] = useState(() => {
@@ -335,11 +337,14 @@ function ImageView() {
     }
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
-  // Keyboard navigation
+  // Keyboard navigation and help toggle
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key === 'ArrowLeft') navigateToPreviousImage();
       else if (e.key === 'ArrowRight') navigateToNextImage();
+      else if (e.key === '?') setShowShortcutsHelp(prev => !prev);
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -467,7 +472,6 @@ function ImageView() {
           </div>
 
           <ImageDeletionControls projectId={projectId} image={image} setImage={setImage} refreshProjectImages={loadProjectImages} />
-
           <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--bg-secondary, #f8f9fa)', borderRadius: '6px', border: '1px solid var(--border-color, #dee2e6)' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
               <input type="checkbox" checked={skipDeletedImages} onChange={(e) => setSkipDeletedImages(e.target.checked)} style={{ cursor: 'pointer' }} />
@@ -477,14 +481,10 @@ function ImageView() {
               When enabled, arrow key navigation will automatically skip over soft-deleted images.
             </div>
           </div>
-
-          {imageId && (
-            <div style={{ marginTop: '1rem' }}>
-              <MLDebugOutputs imageId={imageId} />
-            </div>
-          )}
+          {imageId && <div style={{ marginTop: '1rem' }}><MLDebugOutputs imageId={imageId} /></div>}
         </div>
       </div>
+      <KeyboardShortcutsHelp show={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
     </div>
   );
 }
