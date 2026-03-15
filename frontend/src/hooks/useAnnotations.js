@@ -21,6 +21,7 @@ function useAnnotations(imageId, projectId, setError) {
   const [interactionMode, setInteractionMode] = useState('pan');
   const [userAnnotations, setUserAnnotations] = useState([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+  const [hoveredAnnotationId, setHoveredAnnotationId] = useState(null);
   const [showUserAnnotations, setShowUserAnnotations] = useState(true);
   const [bboxClasses, setBBoxClasses] = useState([]);
   const [activeClassId, setActiveClassId] = useState(null);
@@ -200,6 +201,8 @@ function useAnnotations(imageId, projectId, setError) {
     userAnnotations,
     selectedAnnotationId,
     setSelectedAnnotationId,
+    hoveredAnnotationId,
+    setHoveredAnnotationId,
     showUserAnnotations,
     setShowUserAnnotations,
     bboxClasses,

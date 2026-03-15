@@ -393,6 +393,8 @@ function ImageView() {
                   onAnnotationsChange={annotationHook.loadUserAnnotations}
                   selectedAnnotationId={annotationHook.selectedAnnotationId}
                   onSelectAnnotation={annotationHook.setSelectedAnnotationId}
+                  hoveredAnnotationId={annotationHook.hoveredAnnotationId}
+                  onHoverAnnotation={annotationHook.setHoveredAnnotationId}
                 />
               )}
               {image && annotationHook.bboxClasses.length > 0 && (
@@ -470,6 +472,7 @@ function ImageView() {
                 interactionMode={annotationHook.interactionMode}
                 activeClassColor={annotationHook.bboxClasses.find(c => c.id === annotationHook.activeClassId)?.color || '#FF9800'}
                 selectedAnnotationId={annotationHook.selectedAnnotationId}
+                hoveredAnnotationId={annotationHook.hoveredAnnotationId}
                 onSelectAnnotation={annotationHook.setSelectedAnnotationId}
                 onAnnotationCreated={annotationHook.handleAnnotationCreated}
                 onAnnotationUpdate={annotationHook.handleAnnotationUpdate}
