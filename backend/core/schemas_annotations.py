@@ -3,6 +3,17 @@
 These schemas cover BBoxClass, UserAnnotation, Collection, AnnotationReview,
 and AuditEvent models. Re-exported via core.schemas for backward compatibility.
 """
+__all__ = [
+    "DEFAULT_BBOX_COLORS",
+    "BBoxClassBase", "BBoxClassCreate", "BBoxClass", "BBoxClassUpdate",
+    "UserAnnotationBase", "UserAnnotationCreate", "UserAnnotationUpdate",
+    "UserAnnotation", "UserAnnotationWithDetails",
+    "CollectionBase", "CollectionCreate", "Collection", "CollectionUpdate",
+    "CollectionImageAdd", "CollectionImageInfo", "CollectionLockRequest",
+    "AnnotationReviewBase", "AnnotationReviewCreate", "AnnotationReview",
+    "AuditEventBase", "AuditEvent", "AuditEventList",
+]
+
 import uuid
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any

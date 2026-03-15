@@ -232,7 +232,7 @@ function ImageView() {
     loadImageData();
     loadClasses();
     annotationHook.loadBBoxClasses();
-  }, [imageId, projectId, loadImageData, loadClasses, annotationHook.loadBBoxClasses]);
+  }, [imageId, projectId, loadImageData, loadClasses, annotationHook.loadBBoxClasses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch project archive status (only when projectId changes, not on every image navigation)
   useEffect(() => {
@@ -262,7 +262,7 @@ function ImageView() {
   }, [projectId, searchParams]);
   useEffect(() => {
     annotationHook.loadUserAnnotations();
-  }, [imageId, annotationHook.loadUserAnnotations]);
+  }, [imageId, annotationHook.loadUserAnnotations]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Navigate to previous image
   const navigateToPreviousImage = useCallback(() => {

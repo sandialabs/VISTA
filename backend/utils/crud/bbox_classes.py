@@ -1,9 +1,8 @@
 import logging
 import uuid
 from typing import List, Optional
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from core.models import BBoxClass
 

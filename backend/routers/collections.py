@@ -23,7 +23,6 @@ from utils.crud.collections import (
     add_images_to_collection,
     remove_image_from_collection,
     get_collection_images,
-    count_collection_images,
 )
 
 router = APIRouter(
