@@ -3,19 +3,43 @@ import { useState, useCallback, useEffect } from 'react';
 /**
  * Custom hook encapsulating user annotation state and handlers.
  *
+ * Interaction modes:
+ *   'pan'    -- default: left-click pans the image
+ *   'select' -- left-click selects/resizes existing annotations
+ *   'draw'   -- left-click draws new bounding boxes
+ *
  * Hotkeys (active when not focused on an input):
- *   1-9       Select bbox class N and enter draw mode
- *   Tab       Select next annotation on current image
- *   Shift+Tab Select previous annotation
- *   Escape    Deselect annotation / exit draw mode
+ *   V / S         Enter select mode
+ *   B / D         Enter draw mode (with active class)
+ *   1-9           Select bbox class N and enter draw mode
+ *   Tab           Select next annotation on current image
+ *   Shift+Tab     Select previous annotation
+ *   Delete/Bksp   Delete selected annotation
+ *   Escape        Deselect annotation -> exit mode -> pan
  */
 function useAnnotations(imageId, projectId, setError) {
-  const [annotationMode, setAnnotationMode] = useState(false);
+  const [interactionMode, setInteractionMode] = useState('pan');
   const [userAnnotations, setUserAnnotations] = useState([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
   const [showUserAnnotations, setShowUserAnnotations] = useState(true);
   const [bboxClasses, setBBoxClasses] = useState([]);
   const [activeClassId, setActiveClassId] = useState(null);
+
+  // Derived booleans for backward compatibility
+  const annotationMode = interactionMode === 'draw';
+  const selectMode = interactionMode === 'select';
+
+  const setAnnotationMode = useCallback((val) => {
+    if (typeof val === 'function') {
+      setInteractionMode(prev => {
+        const prevBool = prev === 'draw';
+        const next = val(prevBool);
+        return next ? 'draw' : 'pan';
+      });
+    } else {
+      setInteractionMode(val ? 'draw' : 'pan');
+    }
+  }, []);
 
   const loadBBoxClasses = useCallback(async () => {
     try {
@@ -83,6 +107,22 @@ function useAnnotations(imageId, projectId, setError) {
     }
   }, [loadUserAnnotations, setError]);
 
+  // Delete selected annotation
+  const handleDeleteSelected = useCallback(async () => {
+    if (!selectedAnnotationId) return;
+    try {
+      const response = await fetch(`/api/user-annotations/${selectedAnnotationId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to delete annotation');
+      setSelectedAnnotationId(null);
+      await loadUserAnnotations();
+    } catch (err) {
+      console.error('Error deleting annotation:', err);
+      setError('Failed to delete annotation.');
+    }
+  }, [selectedAnnotationId, loadUserAnnotations, setError]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -94,13 +134,38 @@ function useAnnotations(imageId, projectId, setError) {
       if (num >= 1 && num <= 9 && bboxClasses.length >= num) {
         const cls = bboxClasses[num - 1];
         setActiveClassId(cls.id);
-        setAnnotationMode(true);
+        setInteractionMode('draw');
+        return;
+      }
+
+      // V or S: enter select mode
+      if ((e.key === 'v' || e.key === 's') && !e.ctrlKey && !e.metaKey) {
+        setInteractionMode('select');
+        return;
+      }
+
+      // B or D: enter draw mode
+      if ((e.key === 'b' || e.key === 'd') && !e.ctrlKey && !e.metaKey) {
+        if (bboxClasses.length > 0) {
+          setInteractionMode('draw');
+        }
+        return;
+      }
+
+      // Delete / Backspace: delete selected annotation
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedAnnotationId) {
+        e.preventDefault();
+        handleDeleteSelected();
         return;
       }
 
       // Tab / Shift+Tab: cycle through annotations
       if (e.key === 'Tab' && userAnnotations.length > 0) {
         e.preventDefault();
+        // Switch to select mode when tabbing through annotations
+        if (interactionMode !== 'select') {
+          setInteractionMode('select');
+        }
         const currentIdx = userAnnotations.findIndex(a => a.id === selectedAnnotationId);
         let nextIdx;
         if (e.shiftKey) {
@@ -112,22 +177,25 @@ function useAnnotations(imageId, projectId, setError) {
         return;
       }
 
-      // Escape: deselect annotation, then exit draw mode
+      // Escape: deselect annotation -> exit mode -> pan
       if (e.key === 'Escape') {
         if (selectedAnnotationId) {
           setSelectedAnnotationId(null);
-        } else if (annotationMode) {
-          setAnnotationMode(false);
+        } else if (interactionMode !== 'pan') {
+          setInteractionMode('pan');
         }
         return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [bboxClasses, userAnnotations, selectedAnnotationId, annotationMode]);
+  }, [bboxClasses, userAnnotations, selectedAnnotationId, interactionMode, handleDeleteSelected]);
 
   return {
+    interactionMode,
+    setInteractionMode,
     annotationMode,
+    selectMode,
     setAnnotationMode,
     userAnnotations,
     selectedAnnotationId,
@@ -141,6 +209,7 @@ function useAnnotations(imageId, projectId, setError) {
     loadUserAnnotations,
     handleAnnotationCreated,
     handleAnnotationUpdate,
+    handleDeleteSelected,
   };
 }
 

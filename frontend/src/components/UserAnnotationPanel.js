@@ -9,32 +9,40 @@ function UserAnnotationPanel({
   imageId,
   projectId,
   bboxClasses,
+  annotations: externalAnnotations,
   onAnnotationsChange,
   selectedAnnotationId,
   onSelectAnnotation
 }) {
-  const [annotations, setAnnotations] = useState([]);
+  const [localAnnotations, setLocalAnnotations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editingNotes, setEditingNotes] = useState({});
   const [reclassifying, setReclassifying] = useState(null);
 
+  // Use externally provided annotations when available, fall back to local fetch
+  const annotations = externalAnnotations || localAnnotations;
+
   const loadAnnotations = useCallback(async () => {
     if (!imageId) return;
+    if (externalAnnotations) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
       const response = await fetch(`/api/images/${imageId}/user-annotations`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      setAnnotations(data);
+      setLocalAnnotations(data);
     } catch (err) {
       console.error('Failed to load annotations:', err);
       setError('Failed to load annotations');
     } finally {
       setLoading(false);
     }
-  }, [imageId]);
+  }, [imageId, externalAnnotations]);
 
   useEffect(() => {
     loadAnnotations();

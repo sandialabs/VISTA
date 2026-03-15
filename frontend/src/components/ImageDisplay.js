@@ -23,8 +23,8 @@ function ImageDisplay({
   selectedAnalysis, annotations, overlayOptions, calibration, measurements,
   measurementActive, setMeasurementActive, onSaveMeasurement, selectedMeasurementId,
   visibleMeasurementIds, userAnnotations, showUserAnnotations, annotationMode,
-  activeClassColor, selectedAnnotationId, onSelectAnnotation, onAnnotationCreated,
-  onAnnotationUpdate, onToggleAnnotationMode
+  selectMode, interactionMode, activeClassColor, selectedAnnotationId,
+  onSelectAnnotation, onAnnotationCreated, onAnnotationUpdate, onToggleAnnotationMode
 }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -117,15 +117,16 @@ function ImageDisplay({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // Pan: start on plain left-click
+  // Pan: start on plain left-click (only in pan mode, or middle-click in any mode)
   const handlePanMouseDown = useCallback((e) => {
     if (annotationMode) return;
+    if (selectMode && e.button === 0) return; // let select mode handle left clicks
     if (e.button !== 0 || e.ctrlKey) return;
     if (e.target.closest(PAN_EXCLUDE_SELECTOR)) return;
     e.preventDefault();
     panStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
     setIsPanning(true);
-  }, [annotationMode]);
+  }, [annotationMode, selectMode]);
 
   useEffect(() => {
     if (!isPanning) return;
@@ -217,7 +218,8 @@ function ImageDisplay({
       )}
       {showOverlays && image && userAnnotations?.length > 0 && showUserAnnotations && displaySize.width > 0 && (
         <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0,
-          zIndex: selectedAnnotationId ? 1002 : undefined }}>
+          zIndex: (selectedAnnotationId && selectMode) ? 1002 : undefined,
+          pointerEvents: annotationMode ? 'none' : undefined }}>
           <UserAnnotationOverlay annotations={userAnnotations} naturalSize={naturalSize} containerSize={displaySize}
             opacity={overlayOptions?.opacity || 0.7} selectedAnnotationId={selectedAnnotationId}
             onSelectAnnotation={onSelectAnnotation} onAnnotationUpdate={onAnnotationUpdate} visible={showUserAnnotations} />
@@ -241,7 +243,35 @@ function ImageDisplay({
   return (
     <>
       <div id="image-display" className={isTransitioning ? 'transitioning' : ''} ref={containerRef}
-        style={{ position: 'relative', cursor: isPanning ? 'grabbing' : 'crosshair' }} onMouseDown={handlePanMouseDown}>
+        style={{
+          position: 'relative',
+          cursor: isPanning ? 'grabbing'
+            : annotationMode ? 'crosshair'
+            : selectMode ? 'default'
+            : 'grab'
+        }} onMouseDown={handlePanMouseDown}>
+        {/* Mode indicator badge */}
+        {interactionMode && interactionMode !== 'pan' && (
+          <div style={{
+            position: 'absolute',
+            top: 8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 2000,
+            padding: '4px 12px',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            letterSpacing: '0.5px',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            background: interactionMode === 'draw' ? '#2563eb' : '#7c3aed',
+            color: '#fff',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          }}>
+            {interactionMode === 'draw' ? 'DRAW MODE' : 'SELECT MODE'}
+          </div>
+        )}
         {isSideBySide ? (
           <div style={{ display: 'flex', gap: '1rem', width: '100%' }}>
             <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -276,12 +306,12 @@ function ImageDisplay({
           </button>
         )}
         {measurementActive && <span className="measure-hint">Left-click to draw. Right-click also works.</span>}
-        {image && !image.deleted_at && onToggleAnnotationMode && (
-          <button className={`btn control-btn ${annotationMode ? 'btn-primary' : 'btn-secondary'}`} onClick={onToggleAnnotationMode}>
-            {annotationMode ? 'Done Annotating' : 'Annotate'}
-          </button>
+        {interactionMode && interactionMode !== 'pan' && (
+          <span className="measure-hint" style={{ fontWeight: 600 }}>
+            {interactionMode === 'draw' && 'DRAW: Left-click and drag to draw a bounding box. Press Esc to exit.'}
+            {interactionMode === 'select' && 'SELECT: Click a box to select it. Tab to cycle. Delete to remove.'}
+          </span>
         )}
-        {annotationMode && <span className="measure-hint">Left-click and drag to draw a bounding box.</span>}
         <button className="btn btn-success control-btn" onClick={handleDownload}>Download</button>
         {image && !image.deleted_at && (
           <button className="btn btn-danger control-btn" onClick={() => setShowDeleteModal(true)}>Delete</button>
