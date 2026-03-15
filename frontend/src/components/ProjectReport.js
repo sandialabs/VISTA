@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { downloadExcel } from '../utils/downloadExcel';
+import { generateCSVReport, generateJSONReport } from '../utils/reportExport';
+import ReportImageCard from './ReportImageCard';
 
 function ProjectReport() {
   const { id } = useParams();
@@ -8,6 +10,8 @@ function ProjectReport() {
   const [project, setProject] = useState(null);
   const [images, setImages] = useState([]);
   const [classes, setClasses] = useState([]);
+  const [annotations, setAnnotations] = useState([]);
+  const [bboxClasses, setBboxClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -18,6 +22,27 @@ function ProjectReport() {
   const getClassLabels = (classifications, classes) => {
     if (!classifications || classifications.length === 0) return 'None';
     return classifications.map(c => classes.find(cls => cls.id === c.class_id)?.name || 'Unknown').join(', ');
+  };
+
+  // Build lookup maps for annotations
+  const bboxClassMap = {};
+  bboxClasses.forEach(c => { bboxClassMap[c.id] = c; });
+
+  const annotationsByImage = {};
+  annotations.forEach(ann => {
+    const imgId = ann.image_id;
+    if (!annotationsByImage[imgId]) annotationsByImage[imgId] = [];
+    annotationsByImage[imgId].push(ann);
+  });
+
+  const getAnnotationSummary = (imageId) => {
+    const anns = annotationsByImage[imageId] || [];
+    if (anns.length === 0) return '';
+    return anns.map(a => {
+      const cls = bboxClassMap[a.bbox_class_id];
+      const name = cls?.name || 'Unknown';
+      return `${name} [${Math.round(a.bbox_x_min)},${Math.round(a.bbox_y_min)},${Math.round(a.bbox_x_max)},${Math.round(a.bbox_y_max)}]`;
+    }).join('; ');
   };
 
   // Load project data
@@ -85,6 +110,16 @@ function ProjectReport() {
           setClasses(classesData);
         }
 
+        // Load bbox classes and user annotations
+        const bboxResponse = await fetch(`/api/projects/${id}/bbox-classes`);
+        if (bboxResponse.ok) {
+          setBboxClasses(await bboxResponse.json());
+        }
+        const annResponse = await fetch(`/api/projects/${id}/user-annotations`);
+        if (annResponse.ok) {
+          setAnnotations(await annResponse.json());
+        }
+
       } catch (error) {
         console.error('Error loading data:', error);
         setError(error.message);
@@ -96,82 +131,10 @@ function ProjectReport() {
     loadData();
   }, [id]);
 
-  // Helper function to escape CSV values properly with CSV injection protection
-  const escapeCsvValue = (value) => {
-    if (value === null || value === undefined) {
-      return '';
-    }
-
-    let stringValue = value.toString().trim();
-
-    // CSV injection protection: prevent formula execution in spreadsheet applications
-    // Characters that start formulas: = @ + - and also tab characters
-    if (stringValue.match(/^[=@+\t-]/) || stringValue.toLowerCase().startsWith('cmd|') || stringValue.toLowerCase().startsWith('dde|')) {
-      stringValue = `'${stringValue}`;
-    }
-
-    // If the value contains quotes, commas, newlines, or other special characters, escape it
-    if (stringValue.includes('"') || stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('\r') || stringValue.includes('\t')) {
-      // Escape quotes by doubling them and wrap the entire value in quotes
-      return `"${stringValue.replace(/"/g, '""')}"`;
-    }
-
-    // Additional protection: wrap values that start with dangerous characters
-    if (stringValue.match(/^[=@+-]/)) {
-      return `"${stringValue}"`;
-    }
-
-    return stringValue;
-  };
-
-  // Generate CSV export
   const generateCSV = () => {
     setGenerating(true);
-
     try {
-      const headers = [
-        'Image ID',
-        'Filename',
-        'Size (bytes)',
-        'Content Type',
-        'Upload Date',
-        'Deleted',
-        'Comments Count',
-        'Comments',
-        'Classifications',
-        'Custom Metadata'
-      ];
-
-      const rows = images.map(image => {
-        const comments = image.comments?.map(c => `${c.text} (by ${c.author?.email || 'Unknown'} on ${new Date(c.created_at).toLocaleString()})`).join('; ') || '';
-        const classifications = image.classifications?.map(c => classes.find(cls => cls.id === c.class_id)?.name || 'Unknown').join(', ') || '';
-        const customMetadata = image.metadata ? JSON.stringify(image.metadata) : '';
-
-        return [
-          escapeCsvValue(image.id),
-          escapeCsvValue(image.filename || ''),
-          escapeCsvValue(image.size_bytes || 0),
-          escapeCsvValue(image.content_type || ''),
-          escapeCsvValue(new Date(image.created_at).toLocaleString()),
-          escapeCsvValue(image.deleted_at ? 'Yes' : 'No'),
-          escapeCsvValue(image.comments?.length || 0),
-          escapeCsvValue(comments),
-          escapeCsvValue(classifications),
-          escapeCsvValue(customMetadata)
-        ];
-      });
-
-      const csvContent = [headers.map(escapeCsvValue), ...rows].map(row => row.join(',')).join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${project.name}_report.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      generateCSVReport({ images, classes, project, annotationsByImage, getAnnotationSummary });
     } catch (error) {
       console.error('Error generating CSV:', error);
       setError('Failed to generate CSV report');
@@ -180,46 +143,13 @@ function ProjectReport() {
     }
   };
 
-  // Generate JSON export
   const generateJSON = () => {
     setGenerating(true);
-
     try {
-      const reportData = {
-        project: {
-          id: project.id,
-          name: project.name,
-          description: project.description,
-          meta_group_id: project.meta_group_id,
-          created_at: project.created_at
-        },
-        classes: classes,
-        images: images.map(image => ({
-          id: image.id,
-          filename: image.filename,
-          size_bytes: image.size_bytes,
-          content_type: image.content_type,
-          created_at: image.created_at,
-          deleted_at: image.deleted_at,
-          metadata: image.metadata || {},
-          comments: image.comments || [],
-          classifications: image.classifications || []
-        })),
-        generated_at: new Date().toISOString(),
-        generated_by: currentUser?.email || 'Unknown'
-      };
-
-      const jsonContent = JSON.stringify(reportData, null, 2);
-
-      const blob = new Blob([jsonContent], { type: 'application/json' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${project.name}_report.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      generateJSONReport({
+        images, classes, bboxClasses, bboxClassMap,
+        project, currentUser, annotationsByImage,
+      });
     } catch (error) {
       console.error('Error generating JSON:', error);
       setError('Failed to generate JSON report');
@@ -396,6 +326,10 @@ function ProjectReport() {
                   <div className="stat-number">{classes.length}</div>
                   <div className="stat-label">Classifications</div>
                 </div>
+                <div className="stat-item">
+                  <div className="stat-number">{annotations.length}</div>
+                  <div className="stat-label">Annotations</div>
+                </div>
               </div>
             </div>
 
@@ -416,75 +350,16 @@ function ProjectReport() {
               <h2 className="section-title">Image Details</h2>
               <div className="images-list">
                 {images.map(image => (
-                  <div key={image.id} className="image-item">
-                    <div className={`image-display-section ${fullWidthImages ? 'full-width' : ''}`}>
-                      <div className={`image-thumbnail ${fullWidthImages ? 'full-width-thumbnail' : ''}`}>
-                        {image.deleted_at ? (
-                          <div className="deleted-image-placeholder">
-                            <div className="deleted-image-text">
-                              <div>IMAGE DELETED</div>
-                              <div className="deleted-date">
-                                {new Date(image.deleted_at).toLocaleDateString()}
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <img
-                            src={fullWidthImages
-                              ? (image.content_type === 'image/tiff' 
-                                  ? `/api/images/${image.id}/thumbnail?width=800&height=800`
-                                  : `/api/images/${image.id}/content`)
-                              : `/api/images/${image.id}/thumbnail?width=300&height=300`
-                            }
-                            alt={image.filename || 'Image'}
-                            className="report-image"
-                            onError={(e) => {
-                              // Fallback to content endpoint if thumbnail fails
-                              if (!e.target.src.includes('/content')) {
-                                e.target.src = `/api/images/${image.id}/content`;
-                              }
-                            }}
-                          />
-                        )}
-                      </div>
-                      <div className="image-details">
-                        <div className="image-title">{image.filename || 'Untitled'}</div>
-                        <div className="image-meta">
-                          <span><strong>ID:</strong> {image.id}</span>
-                          <span><strong>Size:</strong> {formatFileSize(image.size_bytes)}</span>
-                          <span><strong>Type:</strong> {image.content_type || 'Unknown'}</span>
-                          <span><strong>Uploaded:</strong> {new Date(image.created_at).toLocaleString()}</span>
-
-                          <span><strong>Class Labels:</strong> {getClassLabels(image.classifications, classes)}</span>
-
-                          {image.deleted_at && (
-                            <span className="deleted-indicator">
-                              <strong>DELETED:</strong> {new Date(image.deleted_at).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {image.comments && image.comments.length > 0 && (
-                      <div className="image-comments">
-                        <strong>Comments ({image.comments.length}):</strong>
-                        {image.comments.map((comment, idx) => (
-                          <div key={idx} className="comment">
-                            <strong>{comment.author?.email || 'Unknown'}:</strong> {comment.text}
-                            <small className="comment-date"> - {new Date(comment.created_at).toLocaleString()}</small>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {image.metadata && Object.keys(image.metadata).length > 0 && (
-                      <div className="image-metadata">
-                        <strong>Custom Metadata:</strong>
-                        <pre className="metadata-json">{JSON.stringify(image.metadata, null, 2)}</pre>
-                      </div>
-                    )}
-                  </div>
+                  <ReportImageCard
+                    key={image.id}
+                    image={image}
+                    fullWidthImages={fullWidthImages}
+                    annotations={annotationsByImage[image.id] || []}
+                    bboxClassMap={bboxClassMap}
+                    classes={classes}
+                    formatFileSize={formatFileSize}
+                    getClassLabels={getClassLabels}
+                  />
                 ))}
               </div>
             </div>

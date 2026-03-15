@@ -11,6 +11,7 @@ export default function UserAnnotationOverlay({
   containerSize,
   opacity,
   selectedAnnotationId,
+  hoveredAnnotationId,
   onSelectAnnotation,
   onAnnotationUpdate,
   visible
@@ -185,7 +186,9 @@ export default function UserAnnotationOverlay({
     >
       {boxes.map(b => {
         const isSelected = selectedAnnotationId === b.id;
+        const isHovered = hoveredAnnotationId === b.id;
         const color = b.class_color;
+        const highlighted = isSelected || isHovered;
 
         return (
           <div
@@ -198,13 +201,19 @@ export default function UserAnnotationOverlay({
               top: b.top,
               width: b.width,
               height: b.height,
-              border: isSelected
-                ? `3px solid ${color}`
-                : `2px solid ${color}`,
+              border: isHovered
+                ? `4px solid ${color}`
+                : isSelected
+                  ? `3px solid ${color}`
+                  : `2px solid ${color}`,
               boxSizing: 'border-box',
-              background: `${color}10`,
+              background: isHovered ? `${color}40` : isSelected ? `${color}25` : `${color}10`,
+              boxShadow: isHovered
+                ? `0 0 16px ${color}, 0 0 4px ${color}, inset 0 0 12px ${color}50`
+                : undefined,
               cursor: 'pointer',
-              pointerEvents: 'auto'
+              pointerEvents: 'auto',
+              transition: 'border-width 100ms, background 100ms, box-shadow 100ms',
             }}
           >
             {/* Label */}

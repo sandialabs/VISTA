@@ -24,7 +24,8 @@ function ImageDisplay({
   measurementActive, setMeasurementActive, onSaveMeasurement, selectedMeasurementId,
   visibleMeasurementIds, userAnnotations, showUserAnnotations, annotationMode,
   selectMode, interactionMode, activeClassColor, selectedAnnotationId,
-  onSelectAnnotation, onAnnotationCreated, onAnnotationUpdate, onToggleAnnotationMode
+  hoveredAnnotationId, onSelectAnnotation, onAnnotationCreated,
+  onAnnotationUpdate, onToggleAnnotationMode
 }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -222,6 +223,7 @@ function ImageDisplay({
           pointerEvents: annotationMode ? 'none' : undefined }}>
           <UserAnnotationOverlay annotations={userAnnotations} naturalSize={naturalSize} containerSize={displaySize}
             opacity={overlayOptions?.opacity || 0.7} selectedAnnotationId={selectedAnnotationId}
+            hoveredAnnotationId={hoveredAnnotationId}
             onSelectAnnotation={onSelectAnnotation} onAnnotationUpdate={onAnnotationUpdate} visible={showUserAnnotations} />
         </div>
       )}
