@@ -2477,7 +2477,7 @@ ul li:hover {
 #image-display {
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  align-items: center;
   height: 100%;
   background: var(--bg-primary);
   border: 1px solid var(--border-light);

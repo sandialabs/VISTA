@@ -145,9 +145,24 @@ function ImageDisplay({
   }, [isPanning, clampPan]);
 
   const measure = useCallback(() => {
-    if (imgRef.current) {
-      setDisplaySize({ width: imgRef.current.offsetWidth, height: imgRef.current.offsetHeight });
-      setNaturalSize({ width: imgRef.current.naturalWidth, height: imgRef.current.naturalHeight });
+    const img = imgRef.current;
+    const container = containerRef.current;
+    if (!img || !container) return;
+    const natW = img.naturalWidth;
+    const natH = img.naturalHeight;
+    setNaturalSize({ width: natW, height: natH });
+    if (natW > 0 && natH > 0) {
+      const cs = getComputedStyle(container);
+      const availW = container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const availH = container.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      const scale = Math.min(availW / natW, availH / natH);
+      const fitW = Math.round(natW * scale);
+      const fitH = Math.round(natH * scale);
+      img.style.width = fitW + 'px';
+      img.style.height = fitH + 'px';
+      setDisplaySize({ width: fitW, height: fitH });
+    } else {
+      setDisplaySize({ width: img.offsetWidth, height: img.offsetHeight });
     }
   }, []);
 
