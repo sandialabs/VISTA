@@ -163,7 +163,7 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
   };
 
   return (
-    <div className="card" id="comments-card">
+    <div className="card" id="image-comments-section">
       <div className="card-header">
         <h2>Comments</h2>
       </div>

@@ -85,6 +85,20 @@ function ReviewPanel({ imageId }) {
     }
   };
 
+  // Keyboard shortcuts: p = pass, r = reject
+  const submitRef = React.useRef(submitReview);
+  submitRef.current = submitReview;
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'p') submitRef.current('pass');
+      else if (e.key === 'r') submitRef.current('reject_pending');
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const statusColor = STATUS_COLORS[currentStatus] || '#94a3b8';
   const statusLabel = STATUS_LABELS[currentStatus] || 'Unknown';
 

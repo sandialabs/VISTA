@@ -199,7 +199,6 @@ function ImageView() {
   }, [projectId, imageId, searchParams]);
 
   useEffect(() => { localStorage.setItem('skipDeletedImages', JSON.stringify(skipDeletedImages)); }, [skipDeletedImages]);
-
   const loadClasses = useCallback(async () => {
     try {
       const response = await fetch(`/api/projects/${projectId}/classes`);
@@ -248,7 +247,6 @@ function ImageView() {
     if (galleryKey) params.set('galleryKey', galleryKey);
     return params.toString();
   }, [projectId, searchParams]);
-
   useEffect(() => {
     annotationHook.loadUserAnnotations();
   }, [imageId, annotationHook.loadUserAnnotations]);
@@ -294,7 +292,6 @@ function ImageView() {
     annotationHook.setAnnotationMode(false);
     annotationHook.setSelectedAnnotationId(null);
   }, [imageId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Load measurements when image changes
   useEffect(() => {
     const metadata = image?.metadata || image?.metadata_;
@@ -306,13 +303,11 @@ function ImageView() {
       measurementHook.setVisibleMeasurementIds(null);
     }
   }, [imageId, image]); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     const { bitmapAvailable, ...persistentOptions } = overlayOptions;
     localStorage.setItem('mlOverlayOptions', JSON.stringify(persistentOptions));
   }, [overlayOptions]);
   useEffect(() => { localStorage.setItem('mlAutoSelectLatest', autoSelectLatest.toString()); }, [autoSelectLatest]);
-
   // Sidebar resize
   const handleMouseDown = useCallback(() => setIsResizing(true), []);
   const handleMouseMove = useCallback((e) => {
@@ -345,6 +340,13 @@ function ImageView() {
       if (e.key === 'ArrowLeft') navigateToPreviousImage();
       else if (e.key === 'ArrowRight') navigateToNextImage();
       else if (e.key === '?') setShowShortcutsHelp(prev => !prev);
+      else if (e.key === 'c') {
+        const el = document.getElementById('image-comments-section');
+        if (!el) return;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const ta = el.querySelector('textarea');
+        if (ta) setTimeout(() => ta.focus(), 300);
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
