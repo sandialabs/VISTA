@@ -24,7 +24,7 @@ function ImageDisplay({
   measurementActive, setMeasurementActive, onSaveMeasurement, selectedMeasurementId,
   visibleMeasurementIds, userAnnotations, showUserAnnotations, annotationMode,
   activeClassColor, selectedAnnotationId, onSelectAnnotation, onAnnotationCreated,
-  onToggleAnnotationMode
+  onAnnotationUpdate, onToggleAnnotationMode
 }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -201,10 +201,11 @@ function ImageDisplay({
         </div>
       )}
       {showOverlays && image && userAnnotations?.length > 0 && showUserAnnotations && displaySize.width > 0 && (
-        <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
+        <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0,
+          zIndex: selectedAnnotationId ? 1002 : undefined }}>
           <UserAnnotationOverlay annotations={userAnnotations} naturalSize={naturalSize} containerSize={displaySize}
             opacity={overlayOptions?.opacity || 0.7} selectedAnnotationId={selectedAnnotationId}
-            onSelectAnnotation={onSelectAnnotation} visible={showUserAnnotations} />
+            onSelectAnnotation={onSelectAnnotation} onAnnotationUpdate={onAnnotationUpdate} visible={showUserAnnotations} />
         </div>
       )}
       {image && !image.deleted_at && annotationMode && displaySize.width > 0 && naturalSize.width > 0 && (

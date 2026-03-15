@@ -2,7 +2,8 @@ import React from 'react';
 
 /**
  * AnnotationToolbar
- * Simple toolbar with annotation mode controls.
+ * Annotation mode controls with quick-select class buttons.
+ * Number keys 1-9 select a class and enter draw mode (handled in useAnnotations).
  */
 function AnnotationToolbar({
   annotationMode,
@@ -14,6 +15,13 @@ function AnnotationToolbar({
   onToggleShowAnnotations
 }) {
   const activeClass = bboxClasses.find(c => c.id === activeClassId);
+
+  const handleClassClick = (classId) => {
+    onActiveClassChange(classId);
+    if (!annotationMode) {
+      onToggleAnnotationMode();
+    }
+  };
 
   return (
     <div className="annotation-toolbar" style={{
@@ -48,44 +56,90 @@ function AnnotationToolbar({
           {annotationMode ? 'Done Drawing' : 'Draw Bounding Box'}
         </button>
 
-        {/* Active class selector */}
+        {/* Quick class buttons -- one click enters draw mode for that class */}
         {bboxClasses.length > 0 && (
           <div>
-            <label style={{ fontSize: '0.75rem', color: 'var(--gray-500, #64748b)', display: 'block', marginBottom: '2px' }}>
-              Active Class
+            <label style={{
+              fontSize: '0.75rem',
+              color: 'var(--gray-500, #64748b)',
+              display: 'block',
+              marginBottom: '4px',
+            }}>
+              Quick Draw (press 1-{Math.min(9, bboxClasses.length)} or click)
             </label>
-            <select
-              value={activeClassId || ''}
-              onChange={(e) => onActiveClassChange(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.3rem 0.4rem',
-                fontSize: '0.8rem',
-                borderRadius: '4px',
-                border: '1px solid var(--border-light, #e2e8f0)',
-              }}
-            >
-              {bboxClasses.map(cls => (
-                <option key={cls.id} value={cls.id}>
-                  {cls.name}
-                </option>
-              ))}
-            </select>
-            {activeClass && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                <span style={{
-                  display: 'inline-block',
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  backgroundColor: activeClass.color || '#4CAF50',
-                  border: '1px solid #ccc',
-                }} />
-                <span style={{ fontSize: '0.75rem', color: 'var(--gray-500, #64748b)' }}>
-                  {activeClass.color || '#4CAF50'}
-                </span>
-              </div>
-            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+              {bboxClasses.map((cls, idx) => {
+                const isActive = activeClassId === cls.id && annotationMode;
+                const hotkey = idx < 9 ? idx + 1 : null;
+                return (
+                  <button
+                    key={cls.id}
+                    onClick={() => handleClassClick(cls.id)}
+                    title={`${cls.name}${hotkey ? ` (${hotkey})` : ''}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '3px 8px',
+                      fontSize: '0.78rem',
+                      fontWeight: isActive ? 700 : 500,
+                      border: isActive
+                        ? `2px solid ${cls.color || '#4CAF50'}`
+                        : '1px solid var(--border-light, #e2e8f0)',
+                      borderRadius: '4px',
+                      background: isActive ? `${cls.color}18` : 'var(--bg-secondary, #f8fafc)',
+                      cursor: 'pointer',
+                      transition: 'all 100ms',
+                    }}
+                  >
+                    <span style={{
+                      display: 'inline-block',
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      backgroundColor: cls.color || '#4CAF50',
+                      border: '1px solid #ccc',
+                      flexShrink: 0,
+                    }} />
+                    {hotkey && (
+                      <span style={{
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        color: 'var(--gray-400, #94a3b8)',
+                        minWidth: 12,
+                        textAlign: 'center',
+                      }}>
+                        {hotkey}
+                      </span>
+                    )}
+                    {cls.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Active class indicator (when in draw mode) */}
+        {annotationMode && activeClass && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '4px 8px',
+            background: `${activeClass.color}12`,
+            borderRadius: '4px',
+            fontSize: '0.78rem',
+          }}>
+            <span style={{
+              display: 'inline-block',
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              backgroundColor: activeClass.color || '#4CAF50',
+              border: '1px solid #ccc',
+            }} />
+            Drawing: <strong>{activeClass.name}</strong>
           </div>
         )}
 

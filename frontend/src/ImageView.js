@@ -460,6 +460,7 @@ function ImageView() {
                 selectedAnnotationId={annotationHook.selectedAnnotationId}
                 onSelectAnnotation={annotationHook.setSelectedAnnotationId}
                 onAnnotationCreated={annotationHook.handleAnnotationCreated}
+                onAnnotationUpdate={annotationHook.handleAnnotationUpdate}
                 onToggleAnnotationMode={() => annotationHook.setAnnotationMode(prev => !prev)}
               />
             </div>

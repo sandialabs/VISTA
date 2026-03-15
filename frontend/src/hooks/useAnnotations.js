@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 /**
  * Custom hook encapsulating user annotation state and handlers.
@@ -44,7 +44,7 @@ function useAnnotations(imageId, projectId, setError) {
     }
   }, [imageId]);
 
-  // Annotation creation handler
+  // Annotation creation handler -- auto-selects the new annotation
   const handleAnnotationCreated = useCallback(async (bbox) => {
     if (!activeClassId) return;
     try {
@@ -57,12 +57,51 @@ function useAnnotations(imageId, projectId, setError) {
         }),
       });
       if (!response.ok) throw new Error('Failed to create annotation');
+      const created = await response.json();
       await loadUserAnnotations();
+      // Auto-select the newly created annotation so user can adjust it
+      if (created && created.id) {
+        setSelectedAnnotationId(created.id);
+      }
     } catch (err) {
       console.error('Error creating annotation:', err);
       setError('Failed to create annotation.');
     }
   }, [activeClassId, imageId, loadUserAnnotations, setError]);
+
+  // Annotation bbox update handler (for resize)
+  const handleAnnotationUpdate = useCallback(async (annotationId, bboxUpdate) => {
+    try {
+      const response = await fetch(`/api/user-annotations/${annotationId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bboxUpdate),
+      });
+      if (!response.ok) throw new Error('Failed to update annotation');
+      await loadUserAnnotations();
+    } catch (err) {
+      console.error('Error updating annotation:', err);
+      setError('Failed to update annotation.');
+    }
+  }, [loadUserAnnotations, setError]);
+
+  // Hotkeys: number keys 1-9 to select class and enter draw mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore if user is typing in an input field
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      const num = parseInt(e.key, 10);
+      if (num >= 1 && num <= 9 && bboxClasses.length >= num) {
+        const cls = bboxClasses[num - 1];
+        setActiveClassId(cls.id);
+        setAnnotationMode(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [bboxClasses]);
 
   return {
     annotationMode,
@@ -78,6 +117,7 @@ function useAnnotations(imageId, projectId, setError) {
     loadBBoxClasses,
     loadUserAnnotations,
     handleAnnotationCreated,
+    handleAnnotationUpdate,
   };
 }
 
