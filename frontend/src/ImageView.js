@@ -19,6 +19,7 @@ import { loadGalleryState, applyGalleryFilters, sortImages } from './utils/galle
 import UserAnnotationPanel from './components/UserAnnotationPanel';
 import AnnotationToolbar from './components/AnnotationToolbar';
 import AnnotationReviewControls from './components/AnnotationReviewControls';
+import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp';
 
 // Custom hooks
 import useAnnotations from './hooks/useAnnotations';
@@ -42,6 +43,7 @@ function ImageView() {
   const [sidebarWidth, setSidebarWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
   const [projectArchived, setProjectArchived] = useState(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // Navigation settings - restore from localStorage
   const [skipDeletedImages, setSkipDeletedImages] = useState(() => {
@@ -348,11 +350,14 @@ function ImageView() {
     }
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
-  // Keyboard navigation
+  // Keyboard navigation and help toggle
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key === 'ArrowLeft') navigateToPreviousImage();
       else if (e.key === 'ArrowRight') navigateToNextImage();
+      else if (e.key === '?') setShowShortcutsHelp(prev => !prev);
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -532,14 +537,10 @@ function ImageView() {
               When enabled, arrow key navigation will automatically skip over soft-deleted images.
             </div>
           </div>
-
-          {imageId && (
-            <div style={{ marginTop: '1rem' }}>
-              <MLDebugOutputs imageId={imageId} />
-            </div>
-          )}
+          {imageId && <div style={{ marginTop: '1rem' }}><MLDebugOutputs imageId={imageId} /></div>}
         </div>
       </div>
+      <KeyboardShortcutsHelp show={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
     </div>
   );
 }

@@ -3,10 +3,11 @@ import { useState, useCallback, useEffect } from 'react';
 /**
  * Custom hook encapsulating user annotation state and handlers.
  *
- * @param {string} imageId  - current image ID
- * @param {string} projectId - current project ID
- * @param {function} setError - error-setter from the parent component
- * @returns annotation state values and handler functions
+ * Hotkeys (active when not focused on an input):
+ *   1-9       Select bbox class N and enter draw mode
+ *   Tab       Select next annotation on current image
+ *   Shift+Tab Select previous annotation
+ *   Escape    Deselect annotation / exit draw mode
  */
 function useAnnotations(imageId, projectId, setError) {
   const [annotationMode, setAnnotationMode] = useState(false);
@@ -16,7 +17,6 @@ function useAnnotations(imageId, projectId, setError) {
   const [bboxClasses, setBBoxClasses] = useState([]);
   const [activeClassId, setActiveClassId] = useState(null);
 
-  // Load bbox classes for the project
   const loadBBoxClasses = useCallback(async () => {
     try {
       const response = await fetch(`/api/projects/${projectId}/bbox-classes`);
@@ -31,7 +31,6 @@ function useAnnotations(imageId, projectId, setError) {
     }
   }, [projectId, activeClassId]);
 
-  // Load user annotations for current image
   const loadUserAnnotations = useCallback(async () => {
     if (!imageId) return;
     try {
@@ -44,7 +43,7 @@ function useAnnotations(imageId, projectId, setError) {
     }
   }, [imageId]);
 
-  // Annotation creation handler -- auto-selects the new annotation
+  // Create annotation -- auto-selects the new one
   const handleAnnotationCreated = useCallback(async (bbox) => {
     if (!activeClassId) return;
     try {
@@ -59,7 +58,6 @@ function useAnnotations(imageId, projectId, setError) {
       if (!response.ok) throw new Error('Failed to create annotation');
       const created = await response.json();
       await loadUserAnnotations();
-      // Auto-select the newly created annotation so user can adjust it
       if (created && created.id) {
         setSelectedAnnotationId(created.id);
       }
@@ -69,7 +67,7 @@ function useAnnotations(imageId, projectId, setError) {
     }
   }, [activeClassId, imageId, loadUserAnnotations, setError]);
 
-  // Annotation bbox update handler (for resize)
+  // Update annotation bbox (resize)
   const handleAnnotationUpdate = useCallback(async (annotationId, bboxUpdate) => {
     try {
       const response = await fetch(`/api/user-annotations/${annotationId}`, {
@@ -85,23 +83,48 @@ function useAnnotations(imageId, projectId, setError) {
     }
   }, [loadUserAnnotations, setError]);
 
-  // Hotkeys: number keys 1-9 to select class and enter draw mode
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Ignore if user is typing in an input field
       const tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+      // 1-9: select class and enter draw mode
       const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 9 && bboxClasses.length >= num) {
         const cls = bboxClasses[num - 1];
         setActiveClassId(cls.id);
         setAnnotationMode(true);
+        return;
+      }
+
+      // Tab / Shift+Tab: cycle through annotations
+      if (e.key === 'Tab' && userAnnotations.length > 0) {
+        e.preventDefault();
+        const currentIdx = userAnnotations.findIndex(a => a.id === selectedAnnotationId);
+        let nextIdx;
+        if (e.shiftKey) {
+          nextIdx = currentIdx <= 0 ? userAnnotations.length - 1 : currentIdx - 1;
+        } else {
+          nextIdx = currentIdx < 0 || currentIdx >= userAnnotations.length - 1 ? 0 : currentIdx + 1;
+        }
+        setSelectedAnnotationId(userAnnotations[nextIdx].id);
+        return;
+      }
+
+      // Escape: deselect annotation, then exit draw mode
+      if (e.key === 'Escape') {
+        if (selectedAnnotationId) {
+          setSelectedAnnotationId(null);
+        } else if (annotationMode) {
+          setAnnotationMode(false);
+        }
+        return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [bboxClasses]);
+  }, [bboxClasses, userAnnotations, selectedAnnotationId, annotationMode]);
 
   return {
     annotationMode,
