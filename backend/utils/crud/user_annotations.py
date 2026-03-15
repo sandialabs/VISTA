@@ -1,30 +1,20 @@
 import logging
 import uuid
-from datetime import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.models import UserAnnotation, BBoxClass, User
+from core.models import UserAnnotation
 
 logger = logging.getLogger(__name__)
-
-
-def _sanitize(val: str) -> str:
-    if not val:
-        return ""
-    return val.replace("\n", "").replace("\r", "")
 
 
 async def create_user_annotation(
     db: AsyncSession, image_id: uuid.UUID, project_id: uuid.UUID,
     annotation_data, user_id: uuid.UUID, created_by: str = ""
 ) -> UserAnnotation:
-    logger.info(
-        "Creating user annotation",
-        extra={"image_id": str(image_id), "user": _sanitize(created_by)},
-    )
+    logger.info("Creating user annotation for image %s", str(image_id))
     db_obj = UserAnnotation(
         image_id=image_id,
         project_id=project_id,

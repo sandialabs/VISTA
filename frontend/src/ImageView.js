@@ -231,7 +231,7 @@ function ImageView() {
     loadImageData();
     loadClasses();
     annotationHook.loadBBoxClasses();
-  }, [imageId, projectId, loadImageData, loadClasses, annotationHook.loadBBoxClasses]);
+  }, [imageId, projectId, loadImageData, loadClasses, annotationHook.loadBBoxClasses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load project images for navigation once we know the current image's group
   useEffect(() => {
@@ -249,7 +249,7 @@ function ImageView() {
   }, [projectId, searchParams]);
   useEffect(() => {
     annotationHook.loadUserAnnotations();
-  }, [imageId, annotationHook.loadUserAnnotations]);
+  }, [imageId, annotationHook.loadUserAnnotations]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Navigate to previous image
   const navigateToPreviousImage = useCallback(() => {

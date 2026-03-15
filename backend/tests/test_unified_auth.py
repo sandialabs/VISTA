@@ -390,7 +390,7 @@ class TestLogSanitization:
     def test_log_db_operation_sanitizes_additional_info(self):
         """log_db_operation passes additional_info through sanitization."""
         record_id = uuid.uuid4()
-        with patch("utils.crud.logger") as mock_logger:
+        with patch("utils.crud._base.logger") as mock_logger:
             log_db_operation(
                 "CREATE", "api_keys", record_id,
                 "user@example.com",
