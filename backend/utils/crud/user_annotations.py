@@ -14,7 +14,9 @@ async def create_user_annotation(
     db: AsyncSession, image_id: uuid.UUID, project_id: uuid.UUID,
     annotation_data, user_id: uuid.UUID, created_by: str = ""
 ) -> UserAnnotation:
-    logger.info("Creating user annotation for image %s", str(image_id))
+    # Use validated UUID format to prevent log injection (image_id is uuid.UUID)
+    safe_id = uuid.UUID(str(image_id))
+    logger.info("Creating user annotation for image %s", safe_id)
     db_obj = UserAnnotation(
         image_id=image_id,
         project_id=project_id,
