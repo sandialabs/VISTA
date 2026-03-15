@@ -21,6 +21,7 @@ class User(Base):
     classifications = relationship("ImageClassification", back_populates="created_by")
     api_keys = relationship("ApiKey", back_populates="user")
     reviews = relationship("ImageReview", back_populates="reviewer")
+    user_annotations = relationship("UserAnnotation", back_populates="created_by", foreign_keys="UserAnnotation.created_by_user_id")
 
 class Project(Base):
     __tablename__ = "projects"
@@ -38,6 +39,9 @@ class Project(Base):
     project_metadata = relationship("ProjectMetadata", back_populates="project", cascade="all, delete-orphan")
     reviews = relationship("ImageReview", back_populates="project", cascade="all, delete-orphan")
     image_groups = relationship("ImageGroup", back_populates="project", cascade="all, delete-orphan")
+    collections = relationship("Collection", back_populates="project", cascade="all, delete-orphan")
+    bbox_classes = relationship("BBoxClass", back_populates="project", cascade="all, delete-orphan")
+    user_annotations = relationship("UserAnnotation", back_populates="project", cascade="all, delete-orphan")
 
 
 class ImageGroup(Base):
@@ -92,6 +96,7 @@ class DataInstance(Base):
     classifications = relationship("ImageClassification", back_populates="image", cascade="all, delete-orphan")
     ml_analyses = relationship("MLAnalysis", back_populates="image", cascade="all, delete-orphan")
     reviews = relationship("ImageReview", back_populates="image", cascade="all, delete-orphan")
+    user_annotations = relationship("UserAnnotation", back_populates="image", cascade="all, delete-orphan")
 
 
 class ImageDeletionEvent(Base):
@@ -191,6 +196,53 @@ class ApiKey(Base):
     user = relationship("User", back_populates="api_keys")
 
 
+class BBoxClass(Base):
+    """Bounding box class definition for spatial annotations within a project."""
+    __tablename__ = "bbox_classes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    color = Column(String(7), nullable=False, default="#FF9800")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project", back_populates="bbox_classes")
+    annotations = relationship("UserAnnotation", back_populates="bbox_class", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint('project_id', 'name', name='uix_bbox_class_project_name'),
+    )
+
+
+class UserAnnotation(Base):
+    """User-drawn bounding box annotation on an image."""
+    __tablename__ = "user_annotations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    image_id = Column(UUID(as_uuid=True), ForeignKey("data_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    bbox_class_id = Column(UUID(as_uuid=True), ForeignKey("bbox_classes.id", ondelete="CASCADE"), nullable=False, index=True)
+    bbox_x_min = Column(Float, nullable=False)
+    bbox_y_min = Column(Float, nullable=False)
+    bbox_x_max = Column(Float, nullable=False)
+    bbox_y_max = Column(Float, nullable=False)
+    image_width = Column(Integer, nullable=False)
+    image_height = Column(Integer, nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    updated_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    image = relationship("DataInstance", back_populates="user_annotations")
+    project = relationship("Project", back_populates="user_annotations")
+    bbox_class = relationship("BBoxClass", back_populates="annotations")
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_user_id])
+
+
 class MLAnalysis(Base):
     """Represents one ML analysis job for a given image and model."""
     __tablename__ = "ml_analyses"
@@ -260,3 +312,78 @@ class ImageReview(Base):
     reviewer = relationship("User", back_populates="reviews")
 
 
+class Collection(Base):
+    """Named collection of images within a project for organizing work."""
+    __tablename__ = "collections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    is_locked = Column(Boolean, default=False, nullable=False)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    locked_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    lock_reason = Column(Text, nullable=True)
+    review_required = Column(Boolean, default=False, nullable=False)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project", back_populates="collections")
+    images = relationship("CollectionImage", back_populates="collection", cascade="all, delete-orphan")
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    locked_by = relationship("User", foreign_keys=[locked_by_user_id])
+
+    __table_args__ = (
+        UniqueConstraint('project_id', 'name', name='uix_collection_project_name'),
+    )
+
+
+class CollectionImage(Base):
+    """Join table linking images to collections."""
+    __tablename__ = "collection_images"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    collection_id = Column(UUID(as_uuid=True), ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True)
+    image_id = Column(UUID(as_uuid=True), ForeignKey("data_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    added_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    collection = relationship("Collection", back_populates="images")
+    image = relationship("DataInstance")
+    added_by = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint('collection_id', 'image_id', name='uix_collection_image'),
+    )
+
+
+class AnnotationReview(Base):
+    """Review action on an annotation (approve, reject, flag)."""
+    __tablename__ = "annotation_reviews"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    annotation_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    annotation_type = Column(String(20), nullable=False)  # "user" or "ml"
+    reviewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    action = Column(String(50), nullable=False, index=True)  # approve, reject, flag_revision
+    comment = Column(Text, nullable=True)
+    edits_made = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    reviewer = relationship("User")
+
+
+class AuditEvent(Base):
+    """Generic audit trail for tracking changes across the system."""
+    __tablename__ = "audit_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type = Column(String(50), nullable=False, index=True)
+    entity_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    action = Column(String(50), nullable=False, index=True)
+    actor_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    actor = relationship("User")

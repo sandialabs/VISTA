@@ -434,3 +434,6 @@ class ProjectReviewStatus(BaseModel):
     reject_confirmed: int
 
 
+# Re-export annotation, collection, and review schemas for backward compatibility.
+# Consumers can continue using `from core import schemas; schemas.BBoxClass` etc.
+from core.schemas_annotations import *  # noqa: F401,F403
