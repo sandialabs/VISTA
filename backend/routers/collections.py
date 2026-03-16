@@ -169,6 +169,23 @@ async def add_collection_images(
     await get_project_or_403(coll.project_id, db, user_context.user)
     await _check_not_locked(coll)
 
+    # Verify all images belong to the same project as the collection
+    from sqlalchemy import select
+    from core.models import DataInstance
+    result = await db.execute(
+        select(DataInstance.id).where(
+            DataInstance.id.in_(body.image_ids),
+            DataInstance.project_id == coll.project_id,
+        )
+    )
+    valid_ids = {row[0] for row in result.all()}
+    invalid_ids = set(body.image_ids) - valid_ids
+    if invalid_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Images not found in this project: {[str(i) for i in invalid_ids]}",
+        )
+
     return await add_images_to_collection(
         db, collection_id, body.image_ids, user_context.id,
     )
@@ -276,7 +293,7 @@ async def toggle_review_required(
     coll = await _get_collection_or_404(collection_id, db)
     await get_project_or_403(coll.project_id, db, user_context.user)
 
-    required = body.get("required", False)
+    required = body.get("review_required", False)
     updated = await set_review_required(db, collection_id, required)
     if not updated:
         raise HTTPException(

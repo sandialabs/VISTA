@@ -9,10 +9,13 @@ from core.models import BBoxClass
 logger = logging.getLogger(__name__)
 
 
-def _sanitize(val: str) -> str:
+def _sanitize_email_domain(val: str) -> str:
+    """Return only the domain part of an email to avoid logging PII."""
     if not val:
         return ""
-    return val.replace("\n", "").replace("\r", "")
+    clean = val.replace("\n", "").replace("\r", "")
+    parts = clean.split("@")
+    return f"@{parts[1]}" if len(parts) == 2 else "(invalid)"
 
 
 async def create_bbox_class(
@@ -20,7 +23,7 @@ async def create_bbox_class(
 ) -> BBoxClass:
     logger.info(
         "Creating bbox class",
-        extra={"project_id": str(bbox_class.project_id), "user": _sanitize(created_by)},
+        extra={"project_id": str(bbox_class.project_id), "user_domain": _sanitize_email_domain(created_by)},
     )
     db_obj = BBoxClass(
         project_id=bbox_class.project_id,

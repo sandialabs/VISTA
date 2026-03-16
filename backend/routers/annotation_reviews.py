@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 
@@ -18,10 +18,25 @@ from utils.crud.annotation_reviews import (
     get_audit_events,
     count_audit_events,
 )
+from utils.crud.user_annotations import get_user_annotation
 
 router = APIRouter(
     tags=["Annotation Reviews"],
 )
+
+
+async def _get_annotation_and_authorize(
+    annotation_id: uuid.UUID, db: AsyncSession, user
+):
+    """Verify the annotation exists and the caller has access to its project."""
+    annotation = await get_user_annotation(db, annotation_id)
+    if not annotation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Annotation not found",
+        )
+    await get_project_or_403(annotation.project_id, db, user)
+    return annotation
 
 
 @router.post(
@@ -36,6 +51,8 @@ async def create_review(
     user_context: UserContext = Depends(get_user_context),
 ):
     """Create a review for a user annotation (approve, reject, flag_revision)."""
+    await _get_annotation_and_authorize(annotation_id, db, user_context.user)
+
     review_data = schemas.AnnotationReviewCreate(
         annotation_id=annotation_id,
         annotation_type="user",
@@ -59,6 +76,8 @@ async def list_reviews(
     current_user: schemas.User = Depends(get_current_user),
 ):
     """Get the review history for a user annotation."""
+    await _get_annotation_and_authorize(annotation_id, db, current_user)
+
     return await get_reviews_for_annotation(
         db=db, annotation_id=annotation_id, annotation_type="user",
     )
@@ -97,11 +116,13 @@ async def get_project_audit_log(
         db=db,
         entity_type=entity_type,
         action=action,
+        project_id=project_id,
         skip=skip,
         limit=limit,
     )
     total = await count_audit_events(
         db=db,
         entity_type=entity_type,
+        project_id=project_id,
     )
     return schemas.AuditEventList(events=events, total=total)

@@ -136,6 +136,7 @@ def upgrade():
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True,
                   server_default=sa.text('gen_random_uuid()')),
         sa.Column('annotation_id', postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey('user_annotations.id', ondelete='CASCADE'),
                   nullable=False),
         sa.Column('annotation_type', sa.String(20), nullable=False),
         sa.Column('reviewer_id', postgresql.UUID(as_uuid=True),
@@ -164,6 +165,9 @@ def upgrade():
         sa.Column('actor_user_id', postgresql.UUID(as_uuid=True),
                   sa.ForeignKey('users.id'),
                   nullable=False),
+        sa.Column('project_id', postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey('projects.id'),
+                  nullable=True),
         sa.Column('details', postgresql.JSON(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True),
                   server_default=sa.text('now()')),
@@ -174,10 +178,13 @@ def upgrade():
                     ['entity_id'])
     op.create_index('ix_audit_events_action', 'audit_events',
                     ['action'])
+    op.create_index('ix_audit_events_project_id', 'audit_events',
+                    ['project_id'])
 
 
 def downgrade():
     # -- audit_events --
+    op.drop_index('ix_audit_events_project_id', table_name='audit_events')
     op.drop_index('ix_audit_events_action', table_name='audit_events')
     op.drop_index('ix_audit_events_entity_id', table_name='audit_events')
     op.drop_index('ix_audit_events_entity_type', table_name='audit_events')

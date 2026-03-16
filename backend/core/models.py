@@ -363,7 +363,7 @@ class AnnotationReview(Base):
     __tablename__ = "annotation_reviews"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    annotation_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    annotation_id = Column(UUID(as_uuid=True), ForeignKey("user_annotations.id", ondelete="CASCADE"), nullable=False, index=True)
     annotation_type = Column(String(20), nullable=False)  # "user" or "ml"
     reviewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     action = Column(String(50), nullable=False, index=True)  # approve, reject, flag_revision
@@ -383,7 +383,9 @@ class AuditEvent(Base):
     entity_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     action = Column(String(50), nullable=False, index=True)
     actor_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True)
     details = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     actor = relationship("User")
+    project = relationship("Project")
