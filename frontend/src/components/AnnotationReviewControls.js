@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-const REVIEW_STATUS_LABELS = {
-  approved: 'Approved',
-  rejected: 'Rejected',
-  flagged: 'Flagged',
+// Map backend action values to display labels
+const ACTION_LABELS = {
+  approve: 'Approved',
+  reject: 'Rejected',
+  flag_revision: 'Flagged',
 };
 
-const REVIEW_STATUS_COLORS = {
-  approved: '#16a34a',
-  rejected: '#dc2626',
-  flagged: '#f59e0b',
+const ACTION_COLORS = {
+  approve: '#16a34a',
+  reject: '#dc2626',
+  flag_revision: '#f59e0b',
 };
 
 /**
@@ -46,7 +47,7 @@ function AnnotationReviewControls({ annotationId, onReviewComplete }) {
     loadReviews();
   }, [loadReviews]);
 
-  const submitReview = async (status) => {
+  const submitReview = async (action) => {
     try {
       setSubmitting(true);
       setError(null);
@@ -54,7 +55,7 @@ function AnnotationReviewControls({ annotationId, onReviewComplete }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status,
+          action,
           comment: comment.trim() || null,
         }),
       });
@@ -73,9 +74,9 @@ function AnnotationReviewControls({ annotationId, onReviewComplete }) {
     }
   };
 
-  const currentStatus = reviews.length > 0 ? reviews[0].status : null;
-  const statusColor = currentStatus ? (REVIEW_STATUS_COLORS[currentStatus] || '#94a3b8') : '#94a3b8';
-  const statusLabel = currentStatus ? (REVIEW_STATUS_LABELS[currentStatus] || currentStatus) : 'Not reviewed';
+  const currentAction = reviews.length > 0 ? reviews[0].action : null;
+  const statusColor = currentAction ? (ACTION_COLORS[currentAction] || '#94a3b8') : '#94a3b8';
+  const statusLabel = currentAction ? (ACTION_LABELS[currentAction] || currentAction) : 'Not reviewed';
 
   return (
     <div style={{
@@ -131,27 +132,27 @@ function AnnotationReviewControls({ annotationId, onReviewComplete }) {
 
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
-        {['approved', 'rejected', 'flagged'].map(status => (
+        {['approve', 'reject', 'flag_revision'].map(action => (
           <button
-            key={status}
-            onClick={() => submitReview(status)}
+            key={action}
+            onClick={() => submitReview(action)}
             disabled={submitting || loading}
             style={{
               flex: 1,
               padding: '0.4rem 0.5rem',
-              border: currentStatus === status
-                ? `2px solid ${REVIEW_STATUS_COLORS[status]}`
+              border: currentAction === action
+                ? `2px solid ${ACTION_COLORS[action]}`
                 : '1px solid var(--border-light, #e2e8f0)',
               borderRadius: 'var(--radius-sm, 6px)',
-              background: currentStatus === status ? `${REVIEW_STATUS_COLORS[status]}10` : 'var(--bg-secondary, #f8fafc)',
-              color: REVIEW_STATUS_COLORS[status],
+              background: currentAction === action ? `${ACTION_COLORS[action]}10` : 'var(--bg-secondary, #f8fafc)',
+              color: ACTION_COLORS[action],
               fontWeight: 600,
               fontSize: '0.8rem',
               cursor: submitting ? 'wait' : 'pointer',
               transition: 'all 150ms',
             }}
           >
-            {REVIEW_STATUS_LABELS[status]}
+            {ACTION_LABELS[action]}
           </button>
         ))}
       </div>
@@ -200,16 +201,16 @@ function AnnotationReviewControls({ annotationId, onReviewComplete }) {
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{
                       fontWeight: 600,
-                      color: REVIEW_STATUS_COLORS[review.status] || '#94a3b8',
+                      color: ACTION_COLORS[review.action] || '#94a3b8',
                     }}>
-                      {REVIEW_STATUS_LABELS[review.status] || review.status}
+                      {ACTION_LABELS[review.action] || review.action}
                     </span>
                     <span style={{ color: 'var(--gray-400, #94a3b8)' }}>
                       {new Date(review.created_at).toLocaleString()}
                     </span>
                   </div>
                   <div style={{ color: 'var(--gray-500, #64748b)', marginTop: '2px' }}>
-                    By: {review.reviewer_email?.split('@')[0] || 'Unknown'}
+                    By: {review.reviewer_id ? String(review.reviewer_id).slice(0, 8) : 'Unknown'}
                   </div>
                   {review.comment && (
                     <div style={{ color: 'var(--gray-600, #475569)', marginTop: '2px' }}>

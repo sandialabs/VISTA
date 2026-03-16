@@ -41,31 +41,25 @@ def is_user_in_group(user_email: str, group_id: str) -> bool:
     current_time = time.time()
 
     # Check cache first
+    # Log only domain portion of email to avoid PII exposure
+    domain = ("@" + user_email.split("@")[1]) if "@" in user_email else "(unknown)"
+    safe_group_id = group_id.replace('\n', '').replace('\r', '')
+
     if cache_key in _group_membership_cache:
         is_member, cached_time = _group_membership_cache[cache_key]
         if current_time - cached_time < _CACHE_TTL:
-            # Sanitize for logging
-            safe_user_email = user_email.replace('\n', '').replace('\r', '')
-            safe_group_id = group_id.replace('\n', '').replace('\r', '')
-            logger.debug("Cache hit", extra={"user": safe_user_email, "group": safe_group_id, "result": is_member, "debug": debug_mode})
+            logger.debug("Cache hit", extra={"user_domain": domain, "group": safe_group_id, "result": is_member, "debug": debug_mode})
             return is_member
         else:
-            # Cache expired, remove entry
             del _group_membership_cache[cache_key]
-            # Sanitize for logging
-            safe_user_email = user_email.replace('\n', '').replace('\r', '')
-            safe_group_id = group_id.replace('\n', '').replace('\r', '')
-            logger.debug("Cache expired", extra={"user": safe_user_email, "group": safe_group_id, "debug": debug_mode})
+            logger.debug("Cache expired", extra={"user_domain": domain, "group": safe_group_id, "debug": debug_mode})
 
     # Call core auth function
     is_member = _core_is_user_in_group(user_email, group_id)
 
     # Cache the result
     _group_membership_cache[cache_key] = (is_member, current_time)
-    # Sanitize for logging
-    safe_user_email = user_email.replace('\n', '').replace('\r', '')
-    safe_group_id = group_id.replace('\n', '').replace('\r', '')
-    logger.debug("Cached result", extra={"user": safe_user_email, "group": safe_group_id, "result": is_member})
+    logger.debug("Cached result", extra={"user_domain": domain, "group": safe_group_id, "result": is_member})
     
     return is_member
 
@@ -160,7 +154,8 @@ def clear_user_cache(user_email: str) -> None:
     for key in keys_to_remove:
         del _group_membership_cache[key]
 
-    logger.info(f"Cleared cache for user: {user_email}")
+    domain = user_email.split("@")[1] if "@" in user_email else "(unknown)"
+    logger.info("Cleared cache for user domain: @%s", domain)
 
 
 def get_cache_stats() -> Dict[str, int]:

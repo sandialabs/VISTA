@@ -44,6 +44,7 @@ async def get_annotation_review_stats(
     db: AsyncSession, project_id: uuid.UUID
 ) -> Dict[str, int]:
     """Get aggregate review stats for annotations in a project."""
+    from sqlalchemy import text
     from core.models import UserAnnotation
 
     total_result = await db.execute(
@@ -53,36 +54,40 @@ async def get_annotation_review_stats(
     )
     total = total_result.scalar() or 0
 
-    ann_result = await db.execute(
-        select(UserAnnotation.id).where(UserAnnotation.project_id == project_id)
-    )
-    ann_ids = [row[0] for row in ann_result.all()]
-
-    if not ann_ids:
+    if total == 0:
         return {"total": 0, "approved": 0, "rejected": 0, "flagged": 0, "unreviewed": 0}
 
-    reviewed_ids = set()
-    status_counts = {"approve": 0, "reject": 0, "flag_revision": 0}
-
-    for ann_id in ann_ids:
-        latest = await db.execute(
-            select(AnnotationReview)
-            .where(AnnotationReview.annotation_id == ann_id)
-            .order_by(AnnotationReview.created_at.desc())
-            .limit(1)
+    # Single query: get the latest review action per annotation using a window function
+    latest_reviews = (
+        select(
+            AnnotationReview.annotation_id,
+            AnnotationReview.action,
+            func.row_number().over(
+                partition_by=AnnotationReview.annotation_id,
+                order_by=AnnotationReview.created_at.desc(),
+            ).label("rn"),
         )
-        review = latest.scalars().first()
-        if review:
-            reviewed_ids.add(ann_id)
-            if review.action in status_counts:
-                status_counts[review.action] += 1
+        .where(
+            AnnotationReview.annotation_id.in_(
+                select(UserAnnotation.id).where(UserAnnotation.project_id == project_id)
+            )
+        )
+        .subquery()
+    )
+    result = await db.execute(
+        select(latest_reviews.c.action, func.count())
+        .where(latest_reviews.c.rn == 1)
+        .group_by(latest_reviews.c.action)
+    )
+    action_counts = dict(result.all())
+    reviewed = sum(action_counts.values())
 
     return {
         "total": total,
-        "approved": status_counts["approve"],
-        "rejected": status_counts["reject"],
-        "flagged": status_counts["flag_revision"],
-        "unreviewed": total - len(reviewed_ids),
+        "approved": action_counts.get("approve", 0),
+        "rejected": action_counts.get("reject", 0),
+        "flagged": action_counts.get("flag_revision", 0),
+        "unreviewed": total - reviewed,
     }
 
 
@@ -105,6 +110,8 @@ async def get_audit_events(
         query = query.where(AuditEvent.action == action)
     if actor_user_id:
         query = query.where(AuditEvent.actor_user_id == actor_user_id)
+    if project_id:
+        query = query.where(AuditEvent.project_id == project_id)
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
@@ -114,11 +121,14 @@ async def count_audit_events(
     db: AsyncSession,
     entity_type: Optional[str] = None,
     entity_id: Optional[uuid.UUID] = None,
+    project_id: Optional[uuid.UUID] = None,
 ) -> int:
     query = select(func.count()).select_from(AuditEvent)
     if entity_type:
         query = query.where(AuditEvent.entity_type == entity_type)
     if entity_id:
         query = query.where(AuditEvent.entity_id == entity_id)
+    if project_id:
+        query = query.where(AuditEvent.project_id == project_id)
     result = await db.execute(query)
     return result.scalar() or 0

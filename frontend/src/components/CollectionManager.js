@@ -193,7 +193,7 @@ function CollectionManager({ projectId }) {
                   <div className="class-info">
                     <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {col.name}
-                      {col.locked && (
+                      {col.is_locked && (
                         <span style={{
                           fontSize: '0.7rem', padding: '1px 6px', borderRadius: 10,
                           background: '#fef3c7', color: '#92400e', fontWeight: 600,
@@ -241,7 +241,7 @@ function CollectionManager({ projectId }) {
                 </div>
                 {/* Lock/unlock controls */}
                 <div style={{ marginTop: '4px', display: 'flex', gap: '4px', alignItems: 'center' }}>
-                  {col.locked ? (
+                  {col.is_locked ? (
                     <button
                       className="btn btn-small btn-secondary"
                       onClick={() => handleUnlock(col.id)}

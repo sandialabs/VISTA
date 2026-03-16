@@ -15,6 +15,7 @@ async def log_audit_event(
     action: str,
     actor_user_id: uuid.UUID,
     details: Optional[Dict[str, Any]] = None,
+    project_id: Optional[uuid.UUID] = None,
 ) -> AuditEvent:
     """Record an audit event for any tracked entity."""
     event = AuditEvent(
@@ -22,6 +23,7 @@ async def log_audit_event(
         entity_id=entity_id,
         action=action,
         actor_user_id=actor_user_id,
+        project_id=project_id,
         details=details,
     )
     db.add(event)

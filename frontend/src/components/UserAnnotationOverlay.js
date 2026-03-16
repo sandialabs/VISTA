@@ -188,7 +188,6 @@ export default function UserAnnotationOverlay({
         const isSelected = selectedAnnotationId === b.id;
         const isHovered = hoveredAnnotationId === b.id;
         const color = b.class_color;
-        const highlighted = isSelected || isHovered;
 
         return (
           <div

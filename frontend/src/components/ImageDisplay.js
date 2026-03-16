@@ -20,7 +20,7 @@ const PAN_EXCLUDE_SELECTOR = 'button, a, input, select, textarea';
 function ImageDisplay({
   imageId, image, isTransitioning, projectId, setImage, refreshProjectImages,
   navigateToPreviousImage, navigateToNextImage, currentImageIndex, projectImages,
-  selectedAnalysis, annotations, overlayOptions, calibration, measurements,
+  annotations, overlayOptions, calibration, measurements,
   measurementActive, setMeasurementActive, onSaveMeasurement, selectedMeasurementId,
   visibleMeasurementIds, userAnnotations, showUserAnnotations, annotationMode,
   selectMode, interactionMode, activeClassColor, selectedAnnotationId,
