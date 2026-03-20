@@ -18,8 +18,6 @@ function AnnotationToolbar({
   selectedAnnotationId,
   onDeleteSelected,
 }) {
-  const activeClass = bboxClasses.find(c => c.id === activeClassId);
-
   const handleClassClick = (classId) => {
     onActiveClassChange(classId);
     onModeChange('draw');

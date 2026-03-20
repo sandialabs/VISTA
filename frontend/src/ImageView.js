@@ -12,13 +12,10 @@ import MLAnalysisPanel from './components/MLAnalysisPanel';
 import OverlayControls from './components/OverlayControls';
 import MLDebugOutputs from './components/MLDebugOutputs';
 import CalibrationManager from './components/CalibrationManager';
-import MeasurementList from './components/MeasurementList';
-import MeasurementPanel from './components/MeasurementPanel';
 import AnnotationMeasurementTabs from './components/AnnotationMeasurementTabs';
 import ReviewPanel from './components/ReviewPanel';
 import ImageGroupPanel from './components/ImageGroupPanel';
 import { loadGalleryState, applyGalleryFilters, sortImages } from './utils/galleryState';
-import UserAnnotationPanel from './components/UserAnnotationPanel';
 import AnnotationToolbar from './components/AnnotationToolbar';
 import AnnotationReviewControls from './components/AnnotationReviewControls';
 import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp';
@@ -412,7 +409,16 @@ function ImageView() {
             &larr; Back
           </button>
           <span className="view-filename">{image ? image.filename : 'Loading...'}</span>
-          {currentUser && <span className="view-user-info">{currentUser.email}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {currentUser && <span className="view-user-info">{currentUser.email}</span>}
+            <button
+              className="btn btn-secondary btn-small"
+              onClick={() => setShowShortcutsHelp(prev => !prev)}
+              title="Help (?)"
+            >
+              Help
+            </button>
+          </div>
         </div>
       </header>
 
@@ -579,7 +585,7 @@ function ImageView() {
           {imageId && <div style={{ marginTop: '1rem' }}><MLDebugOutputs imageId={imageId} /></div>}
         </div>
       </div>
-      <KeyboardShortcutsHelp show={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
+      <KeyboardShortcutsHelp show={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} classes={classes} />
     </div>
   );
 }

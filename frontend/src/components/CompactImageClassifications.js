@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 function CompactImageClassifications({ imageId, classes, loading, setLoading, setError, onClassificationsChange, readOnly = false }) {
   const [imageClassifications, setImageClassifications] = useState([]);
-  const [showHelp, setShowHelp] = useState(false);
 
   // Generate hotkey mapping for classes
   const generateHotkeys = useCallback((classList) => {
@@ -201,18 +200,13 @@ function CompactImageClassifications({ imageId, classes, loading, setLoading, se
         }
       }
       
-      // Toggle help with 'h' key
-      if (e.key.toLowerCase() === 'h') {
-        e.preventDefault();
-        setShowHelp(!showHelp);
-      }
     };
-    
+
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [hotkeyMap, handleClassifyImage, showHelp, readOnly]);
+  }, [hotkeyMap, handleClassifyImage, readOnly]);
 
   return (
     <div className="compact-classifications">
@@ -236,56 +230,7 @@ function CompactImageClassifications({ imageId, classes, loading, setLoading, se
             );
           })}
         </div>
-        <div className="compact-help-controls">
-          <button 
-            className="help-toggle-btn"
-            onClick={() => setShowHelp(!showHelp)}
-            title="Show/hide keyboard shortcuts (h)"
-          >
-            ?
-          </button>
-        </div>
       </div>
-      
-      {showHelp && (
-        <div className="compact-help-panel">
-          <div className="help-content">
-            <h4>Quick Labeling Guide</h4>
-            <div className="help-sections">
-              <div className="help-section">
-                <strong>Navigation:</strong>
-                <ul>
-                  <li>← → Arrow keys to navigate between images</li>
-                  <li>Click buttons or use keyboard shortcuts to classify</li>
-                </ul>
-              </div>
-              <div className="help-section">
-                <strong>Classification Shortcuts:</strong>
-                <ul>
-                  {classes.map(cls => {
-                    const hotkey = hotkeyMap.get(cls.id);
-                    if (hotkey) {
-                      return (
-                        <li key={cls.id}>
-                          <kbd>{hotkey}</kbd> - {cls.name}
-                        </li>
-                      );
-                    }
-                    return null;
-                  })}
-                </ul>
-              </div>
-              <div className="help-section">
-                <strong>Other:</strong>
-                <ul>
-                  <li><kbd>h</kbd> - Toggle this help panel</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
     </div>
   );
 }

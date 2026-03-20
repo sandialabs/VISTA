@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 
 const SHORTCUTS = [
   { section: 'Modes' },
@@ -27,7 +27,64 @@ const SHORTCUTS = [
   { keys: ['?'], desc: 'Toggle this help' },
 ];
 
-function KeyboardShortcutsHelp({ show, onClose }) {
+// Generate classification hotkey mapping (same logic as CompactImageClassifications)
+function generateClassHotkeys(classes) {
+  if (!classes || !classes.length) return new Map();
+  const usedKeys = new Set(['h']);
+  const hotkeyMap = new Map();
+  const priorityKeys = ['a', 's', 'd', 'f', 'q', 'w', 'e', 'r'];
+  const allKeys = 'abcdefghijklmnopqrstuvwxyz1234567890'.split('');
+
+  classes.forEach(cls => {
+    const firstLetter = cls.name.toLowerCase().charAt(0);
+    if (!usedKeys.has(firstLetter) && allKeys.includes(firstLetter)) {
+      hotkeyMap.set(cls.id, firstLetter);
+      usedKeys.add(firstLetter);
+    }
+  });
+  let pi = 0;
+  classes.forEach(cls => {
+    if (!hotkeyMap.has(cls.id)) {
+      while (pi < priorityKeys.length && usedKeys.has(priorityKeys[pi])) pi++;
+      if (pi < priorityKeys.length) {
+        hotkeyMap.set(cls.id, priorityKeys[pi]);
+        usedKeys.add(priorityKeys[pi]);
+        pi++;
+      }
+    }
+  });
+  let ki = 0;
+  classes.forEach(cls => {
+    if (!hotkeyMap.has(cls.id)) {
+      while (ki < allKeys.length && usedKeys.has(allKeys[ki])) ki++;
+      if (ki < allKeys.length) {
+        hotkeyMap.set(cls.id, allKeys[ki]);
+        usedKeys.add(allKeys[ki]);
+        ki++;
+      }
+    }
+  });
+  return hotkeyMap;
+}
+
+const kbdStyle = {
+  display: 'inline-block',
+  padding: '2px 7px',
+  fontSize: '0.78rem',
+  fontFamily: 'inherit',
+  fontWeight: 600,
+  color: '#334155',
+  background: '#f1f5f9',
+  border: '1px solid #cbd5e1',
+  borderRadius: 4,
+  boxShadow: '0 1px 0 #cbd5e1',
+  minWidth: 22,
+  textAlign: 'center',
+};
+
+function KeyboardShortcutsHelp({ show, onClose, classes }) {
+  const classHotkeys = useMemo(() => generateClassHotkeys(classes), [classes]);
+
   useEffect(() => {
     if (!show) return;
     const handleKey = (e) => {
@@ -62,7 +119,7 @@ function KeyboardShortcutsHelp({ show, onClose }) {
           background: '#fff',
           borderRadius: 10,
           padding: '1.5rem 2rem',
-          maxWidth: 420,
+          maxWidth: 480,
           width: '90%',
           maxHeight: '80vh',
           overflowY: 'auto',
@@ -76,7 +133,7 @@ function KeyboardShortcutsHelp({ show, onClose }) {
           marginBottom: '1rem',
         }}>
           <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
-            Keyboard Shortcuts
+            Help
           </h3>
           <button
             onClick={onClose}
@@ -94,6 +151,38 @@ function KeyboardShortcutsHelp({ show, onClose }) {
           </button>
         </div>
 
+        {/* Classification shortcuts */}
+        {classes && classes.length > 0 && (
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{
+              fontWeight: 700,
+              fontSize: '0.85rem',
+              color: '#334155',
+              borderBottom: '1px solid #e2e8f0',
+              paddingBottom: '0.3rem',
+              marginBottom: '0.4rem',
+            }}>
+              Classification Shortcuts
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+              {classes.map(cls => {
+                const hotkey = classHotkeys.get(cls.id);
+                if (!hotkey) return null;
+                return (
+                  <div key={cls.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    fontSize: '0.82rem', color: '#475569', padding: '2px 0',
+                  }}>
+                    <kbd style={kbdStyle}>{hotkey}</kbd>
+                    <span>{cls.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Keyboard shortcuts table */}
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <tbody>
             {SHORTCUTS.map((item, i) => {
@@ -129,22 +218,7 @@ function KeyboardShortcutsHelp({ show, onClose }) {
                               margin: '0 2px',
                             }}>+</span>
                           )}
-                          <kbd style={{
-                            display: 'inline-block',
-                            padding: '2px 7px',
-                            fontSize: '0.78rem',
-                            fontFamily: 'inherit',
-                            fontWeight: 600,
-                            color: '#334155',
-                            background: '#f1f5f9',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: 4,
-                            boxShadow: '0 1px 0 #cbd5e1',
-                            minWidth: 22,
-                            textAlign: 'center',
-                          }}>
-                            {k}
-                          </kbd>
+                          <kbd style={kbdStyle}>{k}</kbd>
                         </span>
                       ))}
                     </span>
