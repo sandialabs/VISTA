@@ -106,12 +106,30 @@ describe('ImageGallery', () => {
   });
 
   describe('Regular Images', () => {
-    test('renders regular images with proper thumbnail URLs', () => {
+    test('renders regular images with proper thumbnail URLs (medium view)', () => {
       renderImageGallery();
       
       const image = screen.getByAltText('test-image.jpg');
       expect(image).toBeInTheDocument();
       expect(image.src).toContain('/api/images/img-1/thumbnail?width=400&height=400');
+    });
+
+    test('uses small thumbnail resolution in small view mode', () => {
+      renderImageGallery();
+
+      fireEvent.click(screen.getByTitle('Small thumbnails'));
+
+      const image = screen.getByAltText('test-image.jpg');
+      expect(image.src).toContain('/api/images/img-1/thumbnail?width=200&height=200');
+    });
+
+    test('uses large thumbnail resolution in large view mode', () => {
+      renderImageGallery();
+
+      fireEvent.click(screen.getByTitle('Large thumbnails'));
+
+      const image = screen.getByAltText('test-image.jpg');
+      expect(image.src).toContain('/api/images/img-1/thumbnail?width=600&height=600');
     });
 
     test('displays image filename and size', () => {

@@ -15,6 +15,16 @@ function formatFileSize(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+const THUMBNAIL_RESOLUTION = {
+  small: 200,
+  medium: 400,
+  large: 600,
+};
+
+function getThumbnailResolution(viewMode) {
+  return THUMBNAIL_RESOLUTION[viewMode] || 400;
+}
+
 function GalleryGridView({
   images,
   viewMode,
@@ -25,6 +35,7 @@ function GalleryGridView({
   onRestore,
   onImageLoadStatusChange,
 }) {
+  const thumbSize = getThumbnailResolution(viewMode);
   return (
     <div className={`gallery-grid view-${viewMode}`}>
       {images.map(image => (
@@ -60,7 +71,7 @@ function GalleryGridView({
             }}
           >
             <img
-              src={image.deleted_at ? DELETED_IMAGE_SVG : `/api/images/${image.id}/thumbnail?width=400&height=400`}
+              src={image.deleted_at ? DELETED_IMAGE_SVG : `/api/images/${image.id}/thumbnail?width=${thumbSize}&height=${thumbSize}`}
               alt={image.filename || 'Image'}
               loading="lazy"
               onLoad={() => {
