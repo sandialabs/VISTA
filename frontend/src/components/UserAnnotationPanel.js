@@ -14,7 +14,8 @@ function UserAnnotationPanel({
   selectedAnnotationId,
   onSelectAnnotation,
   hoveredAnnotationId,
-  onHoverAnnotation
+  onHoverAnnotation,
+  embedded,
 }) {
   const [localAnnotations, setLocalAnnotations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -109,66 +110,46 @@ function UserAnnotationPanel({
   };
 
   return (
-    <div className="user-annotation-panel" style={{
+    <div className="user-annotation-panel" style={embedded ? { padding: '4px 6px' } : {
       background: 'var(--bg-primary, #ffffff)',
       borderRadius: 'var(--radius-md, 8px)',
       border: '1px solid var(--border-light, #e2e8f0)',
-      padding: '0.75rem',
-      marginBottom: '0.75rem',
+      padding: '0.5rem',
+      marginBottom: '0.5rem',
     }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: '0.5rem',
-      }}>
-        <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600 }}>
-          Annotations
-        </h4>
-        <span style={{
-          fontSize: '0.75rem',
-          color: 'var(--gray-500, #64748b)',
+      {/* Only show heading when not embedded (tab already shows count) */}
+      {!embedded && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: '4px',
         }}>
-          {loading ? '...' : `${annotations.length} annotation${annotations.length !== 1 ? 's' : ''}`}
-        </span>
-      </div>
+          <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>Annotations</span>
+          <span style={{ fontSize: '0.68rem', color: 'var(--gray-500, #64748b)' }}>
+            {loading ? '...' : `${annotations.length}`}
+          </span>
+        </div>
+      )}
 
       {error && (
         <div style={{
-          padding: '0.4rem 0.6rem',
-          marginBottom: '0.5rem',
-          background: '#fef2f2',
-          border: '1px solid #fecaca',
-          borderRadius: '4px',
-          fontSize: '0.8rem',
-          color: '#dc2626',
+          padding: '3px 6px', marginBottom: '4px',
+          background: '#fef2f2', border: '1px solid #fecaca',
+          borderRadius: '3px', fontSize: '0.72rem', color: '#dc2626',
         }}>
           {error}
-          <button
-            onClick={() => setError(null)}
-            style={{
-              float: 'right',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              color: '#dc2626',
-            }}
-            aria-label="Dismiss error"
-          >
-            x
-          </button>
+          <button onClick={() => setError(null)} style={{
+            float: 'right', background: 'none', border: 'none',
+            cursor: 'pointer', fontSize: '0.8rem', color: '#dc2626',
+          }} aria-label="Dismiss error">x</button>
         </div>
       )}
 
       {!loading && annotations.length === 0 && (
         <div style={{
-          fontSize: '0.8rem',
-          color: 'var(--gray-400, #94a3b8)',
-          textAlign: 'center',
-          padding: '0.5rem',
+          fontSize: '0.72rem', color: 'var(--gray-400, #94a3b8)',
+          textAlign: 'center', padding: '0.3rem',
         }}>
-          No annotations yet. Use the Annotate tool to draw bounding boxes.
+          No annotations yet. Press B to draw.
         </div>
       )}
 

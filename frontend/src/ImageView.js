@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import './App.css';
 
@@ -13,6 +13,8 @@ import OverlayControls from './components/OverlayControls';
 import MLDebugOutputs from './components/MLDebugOutputs';
 import CalibrationManager from './components/CalibrationManager';
 import MeasurementList from './components/MeasurementList';
+import MeasurementPanel from './components/MeasurementPanel';
+import AnnotationMeasurementTabs from './components/AnnotationMeasurementTabs';
 import ReviewPanel from './components/ReviewPanel';
 import ImageGroupPanel from './components/ImageGroupPanel';
 import { loadGalleryState, applyGalleryFilters, sortImages } from './utils/galleryState';
@@ -76,8 +78,28 @@ function ImageView() {
   });
 
   // Custom hooks for measurements and annotations
+  // Use refs to break circular dependency between the two hooks
+  const selectMeasurementRef = useRef(null);
   const measurementHook = useMeasurements(imageId, setImage, setError);
-  const annotationHook = useAnnotations(imageId, projectId, setError);
+  const annotationHook = useAnnotations(imageId, projectId, setError, {
+    measurements: measurementHook.measurements,
+    selectedMeasurementId: measurementHook.selectedMeasurementId,
+    onSelectMeasurement: (...args) => selectMeasurementRef.current?.(...args),
+    onDeleteMeasurement: measurementHook.handleDeleteMeasurement,
+  });
+
+  // Cross-deselection: selecting one type clears the other
+  const handleSelectAnnotation = useCallback((id) => {
+    annotationHook.setSelectedAnnotationId(id);
+    if (id != null) measurementHook.setSelectedMeasurementId(null);
+  }, [annotationHook.setSelectedAnnotationId, measurementHook.setSelectedMeasurementId]);
+
+  const handleSelectMeasurement = useCallback((id) => {
+    measurementHook.setSelectedMeasurementId(id);
+    if (id != null) annotationHook.setSelectedAnnotationId(null);
+  }, [measurementHook.setSelectedMeasurementId, annotationHook.setSelectedAnnotationId]);
+
+  selectMeasurementRef.current = handleSelectMeasurement;
 
   // ML analysis selection handler
   const handleMLAnalysisSelect = useCallback((data) => {
@@ -332,6 +354,14 @@ function ImageView() {
     }
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
+  // Sync: when entering measure mode via toolbar, clear standalone measurementActive
+  // When entering other modes, ensure no conflict with measurement tool
+  useEffect(() => {
+    if (annotationHook.measureMode) {
+      measurementHook.setMeasurementActive(false);
+    }
+  }, [annotationHook.measureMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Keyboard navigation and help toggle
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -386,18 +416,6 @@ function ImageView() {
             <div className="image-view-sidebar" style={{ width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` }}>
               {image && <ReviewPanel imageId={imageId} />}
               {image && (
-                <UserAnnotationPanel
-                  imageId={imageId} projectId={projectId}
-                  bboxClasses={annotationHook.bboxClasses}
-                  annotations={annotationHook.userAnnotations}
-                  onAnnotationsChange={annotationHook.loadUserAnnotations}
-                  selectedAnnotationId={annotationHook.selectedAnnotationId}
-                  onSelectAnnotation={annotationHook.setSelectedAnnotationId}
-                  hoveredAnnotationId={annotationHook.hoveredAnnotationId}
-                  onHoverAnnotation={annotationHook.setHoveredAnnotationId}
-                />
-              )}
-              {image && annotationHook.bboxClasses.length > 0 && (
                 <AnnotationToolbar
                   interactionMode={annotationHook.interactionMode}
                   onModeChange={annotationHook.setInteractionMode}
@@ -408,6 +426,27 @@ function ImageView() {
                   onToggleShowAnnotations={() => annotationHook.setShowUserAnnotations(prev => !prev)}
                   selectedAnnotationId={annotationHook.selectedAnnotationId}
                   onDeleteSelected={annotationHook.handleDeleteSelected}
+                />
+              )}
+              {image && (
+                <AnnotationMeasurementTabs
+                  interactionMode={annotationHook.interactionMode}
+                  imageId={imageId} projectId={projectId}
+                  bboxClasses={annotationHook.bboxClasses}
+                  annotations={annotationHook.userAnnotations}
+                  onAnnotationsChange={annotationHook.loadUserAnnotations}
+                  selectedAnnotationId={annotationHook.selectedAnnotationId}
+                  onSelectAnnotation={handleSelectAnnotation}
+                  hoveredAnnotationId={annotationHook.hoveredAnnotationId}
+                  onHoverAnnotation={annotationHook.setHoveredAnnotationId}
+                  measurements={measurementHook.measurements}
+                  calibration={measurementHook.calibration}
+                  selectedMeasurementId={measurementHook.selectedMeasurementId}
+                  onSelectMeasurement={handleSelectMeasurement}
+                  onDeleteMeasurement={measurementHook.handleDeleteMeasurement}
+                  onRenameMeasurement={measurementHook.handleRenameMeasurement}
+                  onToggleVisibility={measurementHook.handleToggleVisibility}
+                  visibleMeasurementIds={measurementHook.visibleMeasurementIds}
                 />
               )}
               {annotationHook.selectedAnnotationId && (
@@ -431,17 +470,6 @@ function ImageView() {
               <ImageMetadata imageId={imageId} image={image} setImage={setImage} loading={loading} setLoading={setLoading} setError={setError} />
               {image && (
                 <CalibrationManager projectId={projectId} imageId={imageId} image={image} onCalibrationChange={measurementHook.setCalibration} />
-              )}
-              {image && measurementHook.measurements.length > 0 && (
-                <MeasurementList
-                  measurements={measurementHook.measurements} calibration={measurementHook.calibration}
-                  onDeleteMeasurement={measurementHook.handleDeleteMeasurement}
-                  onRenameMeasurement={measurementHook.handleRenameMeasurement}
-                  onToggleVisibility={measurementHook.handleToggleVisibility}
-                  visibleMeasurementIds={measurementHook.visibleMeasurementIds}
-                  selectedMeasurementId={measurementHook.selectedMeasurementId}
-                  onSelectMeasurement={measurementHook.setSelectedMeasurementId}
-                />
               )}
               {image && (
                 <MLAnalysisPanel key={imageId} imageId={imageId} onSelect={handleMLAnalysisSelect} autoSelectLatest={autoSelectLatest} onAutoSelectChange={setAutoSelectLatest} />
@@ -473,7 +501,8 @@ function ImageView() {
                 activeClassColor={annotationHook.bboxClasses.find(c => c.id === annotationHook.activeClassId)?.color || '#FF9800'}
                 selectedAnnotationId={annotationHook.selectedAnnotationId}
                 hoveredAnnotationId={annotationHook.hoveredAnnotationId}
-                onSelectAnnotation={annotationHook.setSelectedAnnotationId}
+                onSelectAnnotation={handleSelectAnnotation}
+                onSelectMeasurement={handleSelectMeasurement}
                 onAnnotationCreated={annotationHook.handleAnnotationCreated}
                 onAnnotationUpdate={annotationHook.handleAnnotationUpdate}
                 onToggleAnnotationMode={() => annotationHook.setAnnotationMode(prev => !prev)}

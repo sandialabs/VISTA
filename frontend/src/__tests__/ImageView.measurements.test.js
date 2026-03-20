@@ -69,13 +69,17 @@ jest.mock('../components/OverlayControls', () => {
 // Mock annotation hook to avoid unhandled fetch calls
 jest.mock('../hooks/useAnnotations', () => {
   return () => ({
-    annotationMode: false, setAnnotationMode: jest.fn(),
+    interactionMode: 'pan', setInteractionMode: jest.fn(),
+    annotationMode: false, selectMode: false, measureMode: false,
+    setAnnotationMode: jest.fn(),
     userAnnotations: [], selectedAnnotationId: null,
-    setSelectedAnnotationId: jest.fn(), showUserAnnotations: true,
+    setSelectedAnnotationId: jest.fn(), hoveredAnnotationId: null,
+    setHoveredAnnotationId: jest.fn(), showUserAnnotations: true,
     setShowUserAnnotations: jest.fn(), bboxClasses: [],
     activeClassId: null, setActiveClassId: jest.fn(),
     loadBBoxClasses: jest.fn(), loadUserAnnotations: jest.fn(),
     handleAnnotationCreated: jest.fn(), handleAnnotationUpdate: jest.fn(),
+    handleDeleteSelected: jest.fn(),
   });
 });
 
@@ -110,7 +114,17 @@ jest.mock('../components/ImageGroupPanel', () => {
 });
 
 jest.mock('../components/MeasurementList', () => {
-  return function MockMeasurementList({
+  return function MockMeasurementList() {
+    return <div>MeasurementList</div>;
+  };
+});
+
+jest.mock('../components/MeasurementPanel', () => {
+  return function MockMeasurementPanel() { return <div>MeasurementPanel</div>; };
+});
+
+jest.mock('../components/AnnotationMeasurementTabs', () => {
+  return function MockAnnotationMeasurementTabs({
     onDeleteMeasurement,
     onRenameMeasurement,
     onToggleVisibility,
@@ -118,8 +132,8 @@ jest.mock('../components/MeasurementList', () => {
     visibleMeasurementIds
   }) {
     return (
-      <div data-testid="measurement-list">
-        MeasurementList - {measurements?.length || 0} measurements
+      <div data-testid="measurement-panel">
+        AnnotationMeasurementTabs - {measurements?.length || 0} measurements
         <span data-testid="visible-count">Visible: {visibleMeasurementIds?.length || 0}</span>
         {onDeleteMeasurement && (
           <button onClick={() => onDeleteMeasurement('test-measurement-id')}>
@@ -406,7 +420,7 @@ describe('ImageView - Measurement Handlers', () => {
   });
 
   describe('Initial state when no measurements exist', () => {
-    test('does not render MeasurementList when no measurements', async () => {
+    test('renders MeasurementPanel with 0 measurements when no measurements', async () => {
       const mockImage = {
         id: 'test-image-id',
         filename: 'test.jpg',
@@ -420,7 +434,7 @@ describe('ImageView - Measurement Handlers', () => {
         expect(screen.getByText('test.jpg')).toBeInTheDocument();
       });
 
-      expect(screen.queryByTestId('measurement-list')).not.toBeInTheDocument();
+      expect(screen.getByText(/0 measurements/)).toBeInTheDocument();
     });
 
     test('handles null metadata gracefully', async () => {
@@ -437,7 +451,7 @@ describe('ImageView - Measurement Handlers', () => {
         expect(screen.getByText('test.jpg')).toBeInTheDocument();
       });
 
-      expect(screen.queryByTestId('measurement-list')).not.toBeInTheDocument();
+      expect(screen.getByText(/0 measurements/)).toBeInTheDocument();
     });
   });
 });

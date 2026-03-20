@@ -4,20 +4,27 @@ import { useState, useCallback, useEffect } from 'react';
  * Custom hook encapsulating user annotation state and handlers.
  *
  * Interaction modes:
- *   'pan'    -- default: left-click pans the image
- *   'select' -- left-click selects/resizes existing annotations
- *   'draw'   -- left-click draws new bounding boxes
+ *   'pan'     -- default: left-click pans the image
+ *   'select'  -- left-click selects/resizes existing annotations
+ *   'draw'    -- left-click draws new bounding boxes
+ *   'measure' -- left-click draws measurement lines
  *
  * Hotkeys (active when not focused on an input):
  *   V / S         Enter select mode
  *   B / D         Enter draw mode (with active class)
+ *   M             Enter measure mode
  *   1-9           Select bbox class N and enter draw mode
  *   Tab           Select next annotation on current image
  *   Shift+Tab     Select previous annotation
  *   Delete/Bksp   Delete selected annotation
  *   Escape        Deselect annotation -> exit mode -> pan
  */
-function useAnnotations(imageId, projectId, setError) {
+function useAnnotations(imageId, projectId, setError, {
+  measurements = [],
+  selectedMeasurementId = null,
+  onSelectMeasurement = null,
+  onDeleteMeasurement = null,
+} = {}) {
   const [interactionMode, setInteractionMode] = useState('pan');
   const [userAnnotations, setUserAnnotations] = useState([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
@@ -29,6 +36,7 @@ function useAnnotations(imageId, projectId, setError) {
   // Derived booleans for backward compatibility
   const annotationMode = interactionMode === 'draw';
   const selectMode = interactionMode === 'select';
+  const measureMode = interactionMode === 'measure';
 
   const setAnnotationMode = useCallback((val) => {
     if (typeof val === 'function') {
@@ -153,35 +161,63 @@ function useAnnotations(imageId, projectId, setError) {
         return;
       }
 
-      // Delete / Backspace: delete selected annotation
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedAnnotationId) {
-        e.preventDefault();
-        handleDeleteSelected();
+      // M: enter measure mode
+      if (e.key === 'm' && !e.ctrlKey && !e.metaKey) {
+        setInteractionMode('measure');
         return;
       }
 
-      // Tab / Shift+Tab: cycle through annotations
-      if (e.key === 'Tab' && userAnnotations.length > 0) {
-        e.preventDefault();
-        // Switch to select mode when tabbing through annotations
-        if (interactionMode !== 'select') {
-          setInteractionMode('select');
+      // Delete / Backspace: delete selected annotation or measurement
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedAnnotationId) {
+          e.preventDefault();
+          handleDeleteSelected();
+          return;
         }
-        const currentIdx = userAnnotations.findIndex(a => a.id === selectedAnnotationId);
-        let nextIdx;
-        if (e.shiftKey) {
-          nextIdx = currentIdx <= 0 ? userAnnotations.length - 1 : currentIdx - 1;
-        } else {
-          nextIdx = currentIdx < 0 || currentIdx >= userAnnotations.length - 1 ? 0 : currentIdx + 1;
+        if (selectedMeasurementId && onDeleteMeasurement) {
+          e.preventDefault();
+          onDeleteMeasurement(selectedMeasurementId);
+          return;
         }
-        setSelectedAnnotationId(userAnnotations[nextIdx].id);
-        return;
       }
 
-      // Escape: deselect annotation -> exit mode -> pan
+      // Tab / Shift+Tab: cycle through annotations and measurements
+      {
+        const selectableItems = [
+          ...userAnnotations.map(a => ({ type: 'annotation', id: a.id })),
+          ...(measurements || []).map(m => ({ type: 'measurement', id: m.id })),
+        ];
+        if (e.key === 'Tab' && selectableItems.length > 0) {
+          e.preventDefault();
+          if (interactionMode !== 'select') {
+            setInteractionMode('select');
+          }
+          const currentId = selectedAnnotationId || selectedMeasurementId;
+          const currentIdx = selectableItems.findIndex(item => item.id === currentId);
+          let nextIdx;
+          if (e.shiftKey) {
+            nextIdx = currentIdx <= 0 ? selectableItems.length - 1 : currentIdx - 1;
+          } else {
+            nextIdx = currentIdx < 0 || currentIdx >= selectableItems.length - 1 ? 0 : currentIdx + 1;
+          }
+          const next = selectableItems[nextIdx];
+          if (next.type === 'annotation') {
+            setSelectedAnnotationId(next.id);
+            if (onSelectMeasurement) onSelectMeasurement(null);
+          } else {
+            if (onSelectMeasurement) onSelectMeasurement(next.id);
+            setSelectedAnnotationId(null);
+          }
+          return;
+        }
+      }
+
+      // Escape: deselect annotation/measurement -> exit mode -> pan
       if (e.key === 'Escape') {
         if (selectedAnnotationId) {
           setSelectedAnnotationId(null);
+        } else if (selectedMeasurementId && onSelectMeasurement) {
+          onSelectMeasurement(null);
         } else if (interactionMode !== 'pan') {
           setInteractionMode('pan');
         }
@@ -190,13 +226,15 @@ function useAnnotations(imageId, projectId, setError) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [bboxClasses, userAnnotations, selectedAnnotationId, interactionMode, handleDeleteSelected]);
+  }, [bboxClasses, userAnnotations, selectedAnnotationId, interactionMode, handleDeleteSelected,
+      measurements, selectedMeasurementId, onSelectMeasurement, onDeleteMeasurement]);
 
   return {
     interactionMode,
     setInteractionMode,
     annotationMode,
     selectMode,
+    measureMode,
     setAnnotationMode,
     userAnnotations,
     selectedAnnotationId,

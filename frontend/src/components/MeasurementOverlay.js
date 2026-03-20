@@ -47,7 +47,7 @@ export default function MeasurementOverlay({
         top: 0,
         width: containerSize.width,
         height: containerSize.height,
-        pointerEvents: 'none'
+        pointerEvents: onSelectMeasurement ? 'auto' : 'none'
       }}
     >
       <svg
@@ -87,7 +87,18 @@ export default function MeasurementOverlay({
           }
 
           return (
-            <g key={m.id} opacity={opacity}>
+            <g key={m.id} opacity={opacity}
+              style={{ cursor: onSelectMeasurement ? 'pointer' : 'default' }}
+              onClick={onSelectMeasurement ? (e) => { e.stopPropagation(); onSelectMeasurement(m.id); } : undefined}
+            >
+              {/* Invisible wider hit area for easier clicking */}
+              {onSelectMeasurement && (
+                <line
+                  x1={m.displayX1} y1={m.displayY1}
+                  x2={m.displayX2} y2={m.displayY2}
+                  stroke="transparent" strokeWidth={14}
+                />
+              )}
               <line
                 x1={m.displayX1}
                 y1={m.displayY1}
