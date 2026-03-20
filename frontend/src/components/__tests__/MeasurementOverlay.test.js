@@ -74,8 +74,11 @@ describe('MeasurementOverlay', () => {
     it('renders lines for each measurement', () => {
       const { container } = render(<MeasurementOverlay {...defaultProps} />);
 
+      // Each measurement has a transparent hit-area line + visible line when onSelectMeasurement is provided
       const lines = container.querySelectorAll('line');
-      expect(lines).toHaveLength(2);
+      expect(lines).toHaveLength(4);
+      const visibleLines = Array.from(lines).filter(l => l.getAttribute('stroke') !== 'transparent');
+      expect(visibleLines).toHaveLength(2);
     });
 
     it('renders endpoint circles for each measurement', () => {
@@ -120,7 +123,8 @@ describe('MeasurementOverlay', () => {
       );
 
       const lines = container.querySelectorAll('line');
-      expect(lines).toHaveLength(2);
+      const visibleLines = Array.from(lines).filter(l => l.getAttribute('stroke') !== 'transparent');
+      expect(visibleLines).toHaveLength(2);
     });
 
     it('filters measurements by visibleMeasurementIds', () => {
@@ -132,7 +136,8 @@ describe('MeasurementOverlay', () => {
       );
 
       const lines = container.querySelectorAll('line');
-      expect(lines).toHaveLength(1);
+      const visibleLines = Array.from(lines).filter(l => l.getAttribute('stroke') !== 'transparent');
+      expect(visibleLines).toHaveLength(1);
     });
 
     it('shows no measurements when visibleMeasurementIds is empty array', () => {
@@ -154,12 +159,13 @@ describe('MeasurementOverlay', () => {
       );
 
       const lines = container.querySelectorAll('line');
+      const visibleLines = Array.from(lines).filter(l => l.getAttribute('stroke') !== 'transparent');
 
-      // First line (selected) should have width 3
-      expect(lines[0].getAttribute('stroke-width')).toBe('3');
+      // First visible line (selected) should have width 3
+      expect(visibleLines[0].getAttribute('stroke-width')).toBe('3');
 
-      // Second line (not selected) should have width 2
-      expect(lines[1].getAttribute('stroke-width')).toBe('2');
+      // Second visible line (not selected) should have width 2
+      expect(visibleLines[1].getAttribute('stroke-width')).toBe('2');
     });
 
     it('shows tooltip only for selected measurement', () => {
@@ -305,7 +311,8 @@ describe('MeasurementOverlay', () => {
       const { container } = render(<MeasurementOverlay {...defaultProps} />);
 
       const lines = container.querySelectorAll('line');
-      expect(lines[0].getAttribute('stroke')).toBe('#3b82f6');
+      const visibleLines = Array.from(lines).filter(l => l.getAttribute('stroke') !== 'transparent');
+      expect(visibleLines[0].getAttribute('stroke')).toBe('#3b82f6');
     });
 
     it('circles have correct fill and stroke', () => {
@@ -318,8 +325,17 @@ describe('MeasurementOverlay', () => {
   });
 
   describe('pointer events', () => {
-    it('disables pointer events on container', () => {
+    it('enables pointer events when onSelectMeasurement is provided', () => {
       const { container } = render(<MeasurementOverlay {...defaultProps} />);
+
+      const overlayDiv = container.firstChild;
+      expect(overlayDiv).toHaveStyle({ pointerEvents: 'auto' });
+    });
+
+    it('disables pointer events when onSelectMeasurement is not provided', () => {
+      const { container } = render(
+        <MeasurementOverlay {...defaultProps} onSelectMeasurement={null} />
+      );
 
       const overlayDiv = container.firstChild;
       expect(overlayDiv).toHaveStyle({ pointerEvents: 'none' });
