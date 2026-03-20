@@ -2,9 +2,10 @@ import React from 'react';
 
 /**
  * AnnotationToolbar
- * Three interaction modes: Pan, Select, Draw.
+ * Four interaction modes: Pan, Select, Draw, Measure.
  * Number keys 1-9 select a class and enter draw mode (handled in useAnnotations).
- * V/S enters select mode, B/D enters draw mode, Escape returns to pan.
+ * V/S enters select mode, B/D enters draw mode, M enters measure mode,
+ * Escape returns to pan.
  */
 function AnnotationToolbar({
   interactionMode,
@@ -60,6 +61,20 @@ function AnnotationToolbar({
         </svg>
       ),
     },
+    {
+      mode: 'measure',
+      label: 'Measure',
+      hint: 'M',
+      icon: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <line x1="3" y1="21" x2="21" y2="3"/>
+          <line x1="3" y1="21" x2="3" y2="16"/>
+          <line x1="3" y1="21" x2="8" y2="21"/>
+          <line x1="21" y1="3" x2="21" y2="8"/>
+          <line x1="21" y1="3" x2="16" y2="3"/>
+        </svg>
+      ),
+    },
   ];
 
   return (
@@ -67,168 +82,122 @@ function AnnotationToolbar({
       background: 'var(--bg-primary, #ffffff)',
       borderRadius: 'var(--radius-md, 8px)',
       border: '1px solid var(--border-light, #e2e8f0)',
-      padding: '0.75rem',
-      marginBottom: '0.75rem',
+      padding: '0.5rem',
+      marginBottom: '0.5rem',
     }}>
-      <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', fontWeight: 600 }}>
-        Annotation Tools
-      </h4>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {/* Header row: title + show toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--gray-700, #334155)' }}>Tools</span>
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: '4px',
+            fontSize: '0.7rem', cursor: 'pointer', userSelect: 'none',
+            color: 'var(--gray-500, #64748b)',
+          }}>
+            <input
+              type="checkbox"
+              checked={showUserAnnotations}
+              onChange={onToggleShowAnnotations}
+              style={{ cursor: 'pointer', width: 12, height: 12 }}
+            />
+            Show
+          </label>
+        </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-        {/* Mode buttons */}
-        <div style={{ display: 'flex', gap: '4px' }}>
+        {/* Mode buttons - 2x2 grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px' }}>
           {modeButtons.map(({ mode, label, hint, icon }) => {
             const isActive = interactionMode === mode;
+            const isDisabled = mode === 'draw' && bboxClasses.length === 0;
             return (
               <button
                 key={mode}
-                onClick={() => onModeChange(mode)}
-                title={`${label} mode (${hint})`}
+                onClick={() => !isDisabled && onModeChange(mode)}
+                disabled={isDisabled}
+                title={isDisabled ? `${label} mode requires bbox classes` : `${label} mode (${hint})`}
                 style={{
-                  flex: 1,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '4px',
-                  padding: '0.35rem 0.5rem',
+                  gap: '3px',
+                  padding: '0.25rem 0.4rem',
                   border: isActive
                     ? '2px solid var(--primary-color, #2563eb)'
                     : '1px solid var(--border-light, #e2e8f0)',
                   borderRadius: 'var(--radius-sm, 6px)',
                   background: isActive ? '#eff6ff' : 'var(--bg-secondary, #f8fafc)',
-                  color: isActive ? 'var(--primary-color, #2563eb)' : 'var(--gray-700, #334155)',
+                  color: isDisabled ? 'var(--gray-400, #94a3b8)'
+                    : isActive ? 'var(--primary-color, #2563eb)' : 'var(--gray-700, #334155)',
                   fontWeight: isActive ? 700 : 500,
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  cursor: isDisabled ? 'not-allowed' : 'pointer',
+                  opacity: isDisabled ? 0.5 : 1,
                   transition: 'all 100ms',
                 }}
               >
                 {icon}
                 {label}
-                <span style={{
-                  fontSize: '0.6rem',
-                  opacity: 0.5,
-                  fontWeight: 400,
-                  marginLeft: '2px',
-                }}>
-                  {hint}
-                </span>
+                <span style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 400 }}>{hint}</span>
               </button>
             );
           })}
         </div>
 
-        {/* Active class indicator + class selector (visible in draw mode) */}
+        {/* Active class selector (visible in draw mode) - compact */}
         {interactionMode === 'draw' && bboxClasses.length > 0 && (
-          <div>
-            <label style={{
-              fontSize: '0.75rem',
-              color: 'var(--gray-500, #64748b)',
-              display: 'block',
-              marginBottom: '4px',
-            }}>
-              Drawing class (press 1-{Math.min(9, bboxClasses.length)} or click)
-            </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-              {bboxClasses.map((cls, idx) => {
-                const isActive = activeClassId === cls.id;
-                const hotkey = idx < 9 ? idx + 1 : null;
-                return (
-                  <button
-                    key={cls.id}
-                    onClick={() => handleClassClick(cls.id)}
-                    title={`${cls.name}${hotkey ? ` (${hotkey})` : ''}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '3px 8px',
-                      fontSize: '0.78rem',
-                      fontWeight: isActive ? 700 : 500,
-                      border: isActive
-                        ? `2px solid ${cls.color || '#4CAF50'}`
-                        : '1px solid var(--border-light, #e2e8f0)',
-                      borderRadius: '4px',
-                      background: isActive ? `${cls.color}18` : 'var(--bg-secondary, #f8fafc)',
-                      cursor: 'pointer',
-                      transition: 'all 100ms',
-                    }}
-                  >
-                    <span style={{
-                      display: 'inline-block',
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      backgroundColor: cls.color || '#4CAF50',
-                      border: '1px solid #ccc',
-                      flexShrink: 0,
-                    }} />
-                    {hotkey && (
-                      <span style={{
-                        fontSize: '0.65rem',
-                        fontWeight: 700,
-                        color: 'var(--gray-400, #94a3b8)',
-                        minWidth: 12,
-                        textAlign: 'center',
-                      }}>
-                        {hotkey}
-                      </span>
-                    )}
-                    {cls.name}
-                  </button>
-                );
-              })}
-            </div>
-            {activeClass && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '4px 8px',
-                marginTop: '4px',
-                background: `${activeClass.color}12`,
-                borderRadius: '4px',
-                fontSize: '0.78rem',
-              }}>
-                <span style={{
-                  display: 'inline-block',
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  backgroundColor: activeClass.color || '#4CAF50',
-                  border: '1px solid #ccc',
-                }} />
-                Drawing: <strong>{activeClass.name}</strong>
-              </div>
-            )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+            {bboxClasses.map((cls, idx) => {
+              const isActive = activeClassId === cls.id;
+              const hotkey = idx < 9 ? idx + 1 : null;
+              return (
+                <button
+                  key={cls.id}
+                  onClick={() => handleClassClick(cls.id)}
+                  title={`${cls.name}${hotkey ? ` (${hotkey})` : ''}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    padding: '2px 6px',
+                    fontSize: '0.72rem',
+                    fontWeight: isActive ? 700 : 500,
+                    border: isActive
+                      ? `2px solid ${cls.color || '#4CAF50'}`
+                      : '1px solid var(--border-light, #e2e8f0)',
+                    borderRadius: '3px',
+                    background: isActive ? `${cls.color}18` : 'var(--bg-secondary, #f8fafc)',
+                    cursor: 'pointer',
+                    transition: 'all 100ms',
+                  }}
+                >
+                  <span style={{
+                    display: 'inline-block', width: 8, height: 8,
+                    borderRadius: '50%', backgroundColor: cls.color || '#4CAF50',
+                    flexShrink: 0,
+                  }} />
+                  {hotkey && (
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'var(--gray-400, #94a3b8)' }}>
+                      {hotkey}
+                    </span>
+                  )}
+                  {cls.name}
+                </button>
+              );
+            })}
           </div>
         )}
 
-        {/* Select mode hint */}
-        {interactionMode === 'select' && (
-          <div style={{
-            fontSize: '0.75rem',
-            color: 'var(--gray-500, #64748b)',
-            padding: '4px 8px',
-            background: 'var(--bg-secondary, #f8fafc)',
-            borderRadius: '4px',
-          }}>
-            Click a box to select it. Tab/Shift+Tab to cycle.
-            {selectedAnnotationId && ' Delete/Backspace to remove.'}
-          </div>
-        )}
-
-        {/* Delete selected button (when something is selected) */}
+        {/* Delete selected - compact inline */}
         {selectedAnnotationId && onDeleteSelected && (
           <button
             onClick={onDeleteSelected}
             style={{
-              padding: '0.3rem 0.6rem',
+              padding: '2px 8px',
               border: '1px solid #fca5a5',
-              borderRadius: 'var(--radius-sm, 6px)',
+              borderRadius: '3px',
               background: '#fef2f2',
               color: '#dc2626',
-              fontSize: '0.8rem',
+              fontSize: '0.72rem',
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -236,24 +205,6 @@ function AnnotationToolbar({
             Delete Selected (Del)
           </button>
         )}
-
-        {/* Show/hide annotations */}
-        <label style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.4rem',
-          fontSize: '0.8rem',
-          cursor: 'pointer',
-          userSelect: 'none',
-        }}>
-          <input
-            type="checkbox"
-            checked={showUserAnnotations}
-            onChange={onToggleShowAnnotations}
-            style={{ cursor: 'pointer' }}
-          />
-          Show annotations
-        </label>
       </div>
     </div>
   );

@@ -107,211 +107,135 @@ function ReviewPanel({ imageId, readOnly = false }) {
       background: 'var(--bg-primary, #ffffff)',
       borderRadius: 'var(--radius-md, 8px)',
       border: '1px solid var(--border-light, #e2e8f0)',
-      padding: '0.75rem',
-      marginBottom: '0.75rem',
+      padding: '0.5rem',
+      marginBottom: '0.5rem',
     }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: '0.5rem',
-      }}>
-        <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600 }}>
-          Review Status
-        </h4>
-        <span style={{
-          display: 'inline-block',
-          padding: '2px 8px',
-          borderRadius: '12px',
-          fontSize: '0.75rem',
-          fontWeight: 600,
-          color: '#fff',
-          backgroundColor: statusColor,
-        }}>
-          {loading ? '...' : statusLabel}
-        </span>
-      </div>
-
       {error && (
         <div style={{
-          padding: '0.4rem 0.6rem',
-          marginBottom: '0.5rem',
-          background: '#fef2f2',
-          border: '1px solid #fecaca',
-          borderRadius: '4px',
-          fontSize: '0.8rem',
-          color: '#dc2626',
+          padding: '3px 6px', marginBottom: '4px',
+          background: '#fef2f2', border: '1px solid #fecaca',
+          borderRadius: '3px', fontSize: '0.72rem', color: '#dc2626',
         }}>
           {error}
-          <button
-            onClick={() => setError(null)}
-            style={{
-              float: 'right',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              color: '#dc2626',
-            }}
-            aria-label="Dismiss error"
-          >
-            x
-          </button>
+          <button onClick={() => setError(null)} style={{
+            float: 'right', background: 'none', border: 'none',
+            cursor: 'pointer', fontSize: '0.8rem', color: '#dc2626',
+          }} aria-label="Dismiss error">x</button>
         </div>
       )}
 
-      {/* Action buttons */}
-      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
+      {/* Compact single row: status badge + action buttons + revert */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <span style={{
+          display: 'inline-block', padding: '1px 6px',
+          borderRadius: '8px', fontSize: '0.68rem', fontWeight: 600,
+          color: '#fff', backgroundColor: statusColor, whiteSpace: 'nowrap',
+        }}>
+          {loading ? '...' : statusLabel}
+        </span>
         <button
           onClick={() => submitReview('pass')}
           disabled={submitting || loading || readOnly}
+          title="Pass (P)"
           style={{
-            flex: 1,
-            padding: '0.5rem 0.75rem',
+            flex: 1, padding: '3px 0',
             border: currentStatus === 'pass' ? '2px solid #16a34a' : '1px solid var(--border-light, #e2e8f0)',
-            borderRadius: 'var(--radius-sm, 6px)',
+            borderRadius: '4px',
             background: currentStatus === 'pass' ? '#f0fdf4' : 'var(--bg-secondary, #f8fafc)',
-            color: '#16a34a',
-            fontWeight: 600,
-            fontSize: '0.85rem',
+            color: '#16a34a', fontWeight: 600, fontSize: '0.75rem',
             cursor: submitting ? 'wait' : 'pointer',
-            transition: 'all 150ms',
           }}
-          title="Mark image as passed inspection"
         >
           Pass
         </button>
         <button
           onClick={() => submitReview('reject_pending')}
           disabled={submitting || loading || readOnly}
+          title="Reject (R)"
           style={{
-            flex: 1,
-            padding: '0.5rem 0.75rem',
+            flex: 1, padding: '3px 0',
             border: currentStatus === 'reject_pending' ? '2px solid #f59e0b' : '1px solid var(--border-light, #e2e8f0)',
-            borderRadius: 'var(--radius-sm, 6px)',
+            borderRadius: '4px',
             background: currentStatus === 'reject_pending' ? '#fffbeb' : 'var(--bg-secondary, #f8fafc)',
-            color: '#d97706',
-            fontWeight: 600,
-            fontSize: '0.85rem',
+            color: '#d97706', fontWeight: 600, fontSize: '0.75rem',
             cursor: submitting ? 'wait' : 'pointer',
-            transition: 'all 150ms',
           }}
-          title="Reject image (requires secondary review)"
         >
           Reject
         </button>
+        {currentStatus !== 'unreviewed' && reviews.length > 0 && (
+          <button
+            onClick={() => revokeReview(reviews[0].id)}
+            disabled={submitting}
+            title="Revert to unreviewed"
+            style={{
+              padding: '3px 6px', border: '1px solid var(--border-light, #e2e8f0)',
+              borderRadius: '4px', background: 'transparent',
+              color: 'var(--gray-500, #64748b)', fontSize: '0.68rem',
+              cursor: submitting ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            Revert
+          </button>
+        )}
       </div>
 
-      {/* Secondary review confirmation (only when status is reject_pending) */}
+      {/* Secondary review confirmation (only when reject_pending) */}
       {currentStatus === 'reject_pending' && (
-        <div style={{
-          padding: '0.5rem',
-          background: '#fffbeb',
-          border: '1px solid #fde68a',
-          borderRadius: 'var(--radius-sm, 6px)',
-          marginBottom: '0.5rem',
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: '4px',
+          fontSize: '0.72rem', cursor: 'pointer', userSelect: 'none',
+          padding: '3px 6px', marginTop: '4px',
+          background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '3px',
         }}>
-          <label style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.85rem',
-            cursor: 'pointer',
-            userSelect: 'none',
-          }}>
-            <input
-              type="checkbox"
-              checked={false}
-              onChange={() => {
-                submitReview('reject_confirmed');
-              }}
-              disabled={submitting || readOnly}
-              style={{ cursor: 'pointer' }}
-            />
-            <span style={{ fontWeight: 500 }}>
-              Secondary Review: Confirm Rejection
-            </span>
-          </label>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#92400e',
-            marginTop: '0.25rem',
-            paddingLeft: '1.5rem',
-          }}>
-            A senior team member should confirm this rejection.
-          </div>
-        </div>
-      )}
-
-      {/* Reset to unreviewed */}
-      {currentStatus !== 'unreviewed' && reviews.length > 0 && !readOnly && (
-        <button
-          onClick={() => revokeReview(reviews[0].id)}
-          disabled={submitting}
-          style={{
-            width: '100%',
-            padding: '0.3rem',
-            border: '1px solid var(--border-light, #e2e8f0)',
-            borderRadius: 'var(--radius-sm, 6px)',
-            background: 'transparent',
-            color: 'var(--gray-500, #64748b)',
-            fontSize: '0.75rem',
-            cursor: submitting ? 'wait' : 'pointer',
-            marginBottom: '0.5rem',
-          }}
-          title="Revert review status to unreviewed"
-        >
-          Revert
-        </button>
+          <input
+            type="checkbox" checked={false}
+            onChange={() => submitReview('reject_confirmed')}
+            disabled={submitting || readOnly}
+            style={{ cursor: 'pointer', width: 12, height: 12 }}
+          />
+          Confirm rejection (secondary review)
+        </label>
       )}
 
       {/* Review history toggle */}
       {reviews.length > 0 && (
-        <div>
+        <div style={{ marginTop: '3px' }}>
           <button
             onClick={() => setShowHistory(!showHistory)}
             style={{
-              background: 'none',
-              border: 'none',
+              background: 'none', border: 'none',
               color: 'var(--primary-color, #2563eb)',
-              fontSize: '0.8rem',
-              cursor: 'pointer',
-              padding: 0,
-              textDecoration: 'underline',
+              fontSize: '0.68rem', cursor: 'pointer',
+              padding: 0, textDecoration: 'underline',
             }}
           >
-            {showHistory ? 'Hide' : 'Show'} review history ({reviews.length})
+            {showHistory ? 'Hide' : 'Show'} history ({reviews.length})
           </button>
 
           {showHistory && (
-            <div style={{ marginTop: '0.4rem', maxHeight: '150px', overflowY: 'auto' }}>
+            <div style={{ marginTop: '3px', maxHeight: '120px', overflowY: 'auto' }}>
               {reviews.map((review) => (
-                <div
-                  key={review.id}
-                  style={{
-                    padding: '0.3rem 0.5rem',
-                    borderBottom: '1px solid var(--border-light, #e2e8f0)',
-                    fontSize: '0.75rem',
-                  }}
-                >
+                <div key={review.id} style={{
+                  padding: '2px 4px',
+                  borderBottom: '1px solid var(--border-light, #e2e8f0)',
+                  fontSize: '0.68rem',
+                }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{
-                      fontWeight: 600,
-                      color: STATUS_COLORS[review.status] || '#94a3b8',
-                    }}>
+                    <span style={{ fontWeight: 600, color: STATUS_COLORS[review.status] || '#94a3b8' }}>
                       {STATUS_LABELS[review.status] || review.status}
                     </span>
                     <span style={{ color: 'var(--gray-400, #94a3b8)' }}>
                       {new Date(review.created_at).toLocaleString()}
                     </span>
                   </div>
-                  <div style={{ color: 'var(--gray-500, #64748b)', marginTop: '2px' }}>
-                    By: {review.reviewer_email?.split('@')[0] || 'Unknown User'}
-                  </div>
+                  <span style={{ color: 'var(--gray-500, #64748b)' }}>
+                    {review.reviewer_email?.split('@')[0] || 'Unknown'}
+                  </span>
                   {review.notes && (
-                    <div style={{ color: 'var(--gray-600, #475569)', marginTop: '2px' }}>
+                    <span style={{ color: 'var(--gray-600, #475569)', marginLeft: '6px' }}>
                       {review.notes}
-                    </div>
+                    </span>
                   )}
                 </div>
               ))}

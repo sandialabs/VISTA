@@ -24,7 +24,7 @@ function ImageDisplay({
   measurementActive, setMeasurementActive, onSaveMeasurement, selectedMeasurementId,
   visibleMeasurementIds, userAnnotations, showUserAnnotations, annotationMode,
   selectMode, interactionMode, activeClassColor, selectedAnnotationId,
-  hoveredAnnotationId, onSelectAnnotation, onAnnotationCreated,
+  hoveredAnnotationId, onSelectAnnotation, onSelectMeasurement, onAnnotationCreated,
   onAnnotationUpdate, onToggleAnnotationMode
 }) {
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -118,16 +118,19 @@ function ImageDisplay({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
+  const measureMode = interactionMode === 'measure';
+
   // Pan: start on plain left-click (only in pan mode, or middle-click in any mode)
   const handlePanMouseDown = useCallback((e) => {
     if (annotationMode) return;
+    if (measureMode && e.button === 0) return; // let measure mode handle left clicks
     if (selectMode && e.button === 0) return; // let select mode handle left clicks
     if (e.button !== 0 || e.ctrlKey) return;
     if (e.target.closest(PAN_EXCLUDE_SELECTOR)) return;
     e.preventDefault();
     panStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
     setIsPanning(true);
-  }, [annotationMode, selectMode]);
+  }, [annotationMode, selectMode, measureMode]);
 
   useEffect(() => {
     if (!isPanning) return;
@@ -214,13 +217,14 @@ function ImageDisplay({
         <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
           <MeasurementOverlay measurements={measurements} naturalSize={naturalSize} containerSize={displaySize}
             calibration={calibration} selectedMeasurementId={selectedMeasurementId}
-            visibleMeasurementIds={visibleMeasurementIds} zoomLevel={zoomLevel} />
+            visibleMeasurementIds={visibleMeasurementIds} zoomLevel={zoomLevel}
+            onSelectMeasurement={selectMode ? onSelectMeasurement : undefined} />
         </div>
       )}
       {showOverlays && image && userAnnotations?.length > 0 && showUserAnnotations && displaySize.width > 0 && (
         <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0,
           zIndex: (selectedAnnotationId && selectMode) ? 1002 : undefined,
-          pointerEvents: annotationMode ? 'none' : undefined }}>
+          pointerEvents: (annotationMode || measureMode) ? 'none' : undefined }}>
           <UserAnnotationOverlay annotations={userAnnotations} naturalSize={naturalSize} containerSize={displaySize}
             opacity={overlayOptions?.opacity || 0.7} selectedAnnotationId={selectedAnnotationId}
             hoveredAnnotationId={hoveredAnnotationId}
@@ -232,11 +236,12 @@ function ImageDisplay({
           active={annotationMode} leftClickEnabled={annotationMode} activeClassColor={activeClassColor || '#FF9800'}
           onAnnotationCreated={onAnnotationCreated} onCancel={() => {}} />
       )}
-      {image && displaySize.width > 0 && naturalSize.width > 0 && (
+      {image && (measureMode || measurementActive) && displaySize.width > 0 && naturalSize.width > 0 && (
         <MeasurementTool containerSize={displaySize} naturalSize={naturalSize} zoomLevel={zoomLevel}
           calibration={calibration} onSaveMeasurement={onSaveMeasurement}
           onCancel={() => setMeasurementActive && setMeasurementActive(false)}
-          existingMeasurementCount={measurements ? measurements.length : 0} leftClickEnabled={!!measurementActive} />
+          existingMeasurementCount={measurements ? measurements.length : 0}
+          leftClickEnabled={measureMode || !!measurementActive} />
       )}
       </div>
     </div>
@@ -249,6 +254,7 @@ function ImageDisplay({
           position: 'relative',
           cursor: isPanning ? 'grabbing'
             : annotationMode ? 'crosshair'
+            : measureMode ? 'crosshair'
             : selectMode ? 'default'
             : 'grab'
         }} onMouseDown={handlePanMouseDown}>
@@ -267,11 +273,15 @@ function ImageDisplay({
             letterSpacing: '0.5px',
             pointerEvents: 'none',
             userSelect: 'none',
-            background: interactionMode === 'draw' ? '#2563eb' : '#7c3aed',
+            background: interactionMode === 'draw' ? '#2563eb'
+              : interactionMode === 'measure' ? '#d97706'
+              : '#7c3aed',
             color: '#fff',
             boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
           }}>
-            {interactionMode === 'draw' ? 'DRAW MODE' : 'SELECT MODE'}
+            {interactionMode === 'draw' ? 'DRAW MODE'
+              : interactionMode === 'measure' ? 'MEASURE MODE'
+              : 'SELECT MODE'}
           </div>
         )}
         {isSideBySide ? (
@@ -301,19 +311,6 @@ function ImageDisplay({
           </button>
         )}
         <button className="btn btn-secondary control-btn" onClick={handleResetZoom}>Reset</button>
-        {image && !image.deleted_at && setMeasurementActive && (
-          <button className={`btn control-btn ${measurementActive ? 'btn-warning' : 'btn-secondary'}`}
-            onClick={() => setMeasurementActive(!measurementActive)}>
-            {measurementActive ? 'Done Measuring' : 'Measure'}
-          </button>
-        )}
-        {measurementActive && <span className="measure-hint">Left-click to draw. Right-click also works.</span>}
-        {interactionMode && interactionMode !== 'pan' && (
-          <span className="measure-hint" style={{ fontWeight: 600 }}>
-            {interactionMode === 'draw' && 'DRAW: Left-click and drag to draw a bounding box. Press Esc to exit.'}
-            {interactionMode === 'select' && 'SELECT: Click a box to select it. Tab to cycle. Delete to remove.'}
-          </span>
-        )}
         <button className="btn btn-success control-btn" onClick={handleDownload}>Download</button>
         {image && !image.deleted_at && (
           <button className="btn btn-danger control-btn" onClick={() => setShowDeleteModal(true)}>Delete</button>

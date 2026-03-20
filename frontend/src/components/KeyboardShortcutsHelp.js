@@ -1,11 +1,16 @@
 import React, { useEffect } from 'react';
 
 const SHORTCUTS = [
+  { section: 'Modes' },
+  { keys: ['V'], desc: 'Select mode -- click a box to select, Tab/Shift+Tab to cycle' },
+  { keys: ['B'], desc: 'Draw mode -- click and drag to draw a bounding box' },
+  { keys: ['M'], desc: 'Measure mode -- click to place measurement points' },
+  { keys: ['Esc'], desc: 'Deselect / exit mode / return to pan' },
   { section: 'Annotation' },
   { keys: ['1-9'], desc: 'Select bbox class and enter draw mode' },
-  { keys: ['Tab'], desc: 'Select next annotation' },
-  { keys: ['Shift', 'Tab'], desc: 'Select previous annotation' },
-  { keys: ['Esc'], desc: 'Deselect annotation / exit draw mode' },
+  { keys: ['Tab'], desc: 'Cycle to next annotation or measurement' },
+  { keys: ['Shift', 'Tab'], desc: 'Cycle to previous annotation or measurement' },
+  { keys: ['Delete'], desc: 'Delete selected annotation or measurement' },
   { section: 'Review' },
   { keys: ['p'], desc: 'Pass review' },
   { keys: ['r'], desc: 'Reject review' },
