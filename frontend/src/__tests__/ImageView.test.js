@@ -71,6 +71,9 @@ jest.mock('../components/AnnotationToolbar', () => {
 jest.mock('../components/AnnotationReviewControls', () => {
   return function MockAnnotationReviewControls() { return <div>AnnotationReviewControls</div>; };
 });
+jest.mock('../components/AnnotationMeasurementTabs', () => {
+  return function MockAnnotationMeasurementTabs() { return <div>AnnotationMeasurementTabs</div>; };
+});
 jest.mock('../components/KeyboardShortcutsHelp', () => {
   return function MockKeyboardShortcutsHelp() { return null; };
 });
@@ -82,19 +85,6 @@ jest.mock('../components/MLDebugOutputs', () => {
 });
 jest.mock('../components/CalibrationManager', () => {
   return function MockCalibrationManager() { return <div>CalibrationManager</div>; };
-});
-
-// Mock hooks that make their own fetch calls
-jest.mock('../hooks/useAnnotations', () => {
-  return () => ({
-    annotationMode: false, setAnnotationMode: jest.fn(),
-    userAnnotations: [], selectedAnnotationId: null,
-    setSelectedAnnotationId: jest.fn(), showUserAnnotations: true,
-    setShowUserAnnotations: jest.fn(), bboxClasses: [],
-    activeClassId: null, setActiveClassId: jest.fn(),
-    loadBBoxClasses: jest.fn(), loadUserAnnotations: jest.fn(),
-    handleAnnotationCreated: jest.fn(), handleAnnotationUpdate: jest.fn(),
-  });
 });
 
 // Mock data
