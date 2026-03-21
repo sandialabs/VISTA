@@ -31,6 +31,13 @@ __all__ = [
     "create_image_review", "get_image_review", "get_reviews_for_image",
     "get_latest_review_for_image", "delete_image_review",
     "get_review_status_for_project", "get_review_status_for_images",
+    "get_image_group", "get_image_group_by_identifier",
+    "get_or_create_image_group", "create_image_group", "update_image_group",
+    "delete_image_group", "list_image_groups", "count_image_groups",
+    "get_image_counts_for_groups", "get_aggregate_review_statuses_for_groups",
+    "count_images_for_group", "assign_images_to_group", "remove_images_from_group",
+    "get_aggregate_review_status_for_group", "count_ungrouped_images",
+    "has_image_groups",
 ]
 
 import uuid
