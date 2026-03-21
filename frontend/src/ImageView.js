@@ -86,15 +86,18 @@ function ImageView() {
   });
 
   // Cross-deselection: selecting one type clears the other
+  const { setSelectedAnnotationId } = annotationHook;
+  const { setSelectedMeasurementId } = measurementHook;
+
   const handleSelectAnnotation = useCallback((id) => {
-    annotationHook.setSelectedAnnotationId(id);
-    if (id != null) measurementHook.setSelectedMeasurementId(null);
-  }, [annotationHook.setSelectedAnnotationId, measurementHook.setSelectedMeasurementId]);
+    setSelectedAnnotationId(id);
+    if (id != null) setSelectedMeasurementId(null);
+  }, [setSelectedAnnotationId, setSelectedMeasurementId]);
 
   const handleSelectMeasurement = useCallback((id) => {
-    measurementHook.setSelectedMeasurementId(id);
-    if (id != null) annotationHook.setSelectedAnnotationId(null);
-  }, [measurementHook.setSelectedMeasurementId, annotationHook.setSelectedAnnotationId]);
+    setSelectedMeasurementId(id);
+    if (id != null) setSelectedAnnotationId(null);
+  }, [setSelectedMeasurementId, setSelectedAnnotationId]);
 
   selectMeasurementRef.current = handleSelectMeasurement;
 
