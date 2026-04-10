@@ -49,3 +49,40 @@ def test_create_and_list_image_classifications(client):
     assert lr.status_code == 200
     items = lr.json()
     assert isinstance(items, list) and len(items) >= 1
+
+
+def test_delete_classification(client):
+    """Any project member can delete a classification via the API."""
+    # Setup: project, image, class, classification
+    pr = client.post("/api/projects/", json={"name": "DelTest", "description": None, "meta_group_id": "g"})
+    assert pr.status_code == 201
+    pid = pr.json()["id"]
+
+    img_bytes = _make_png_bytes()
+    ur = client.post(f"/api/projects/{pid}/images", files={"file": ("d.png", img_bytes, "image/png")})
+    assert ur.status_code == 201
+    image_id = ur.json()["id"]
+
+    cr = client.post(f"/api/projects/{pid}/classes", json={"name": "label", "description": None, "project_id": pid})
+    assert cr.status_code == 201
+    class_id = cr.json()["id"]
+
+    clr = client.post(f"/api/images/{image_id}/classifications", json={"image_id": image_id, "class_id": class_id})
+    assert clr.status_code == 201
+    classification_id = clr.json()["id"]
+
+    # Delete the classification
+    dr = client.delete(f"/api/classifications/{classification_id}")
+    assert dr.status_code == 204
+
+    # Verify it's gone
+    lr = client.get(f"/api/images/{image_id}/classifications")
+    assert lr.status_code == 200
+    assert len(lr.json()) == 0
+
+
+def test_delete_classification_not_found(client):
+    """Deleting a non-existent classification returns 404."""
+    fake_id = str(uuid.uuid4())
+    dr = client.delete(f"/api/classifications/{fake_id}")
+    assert dr.status_code == 404

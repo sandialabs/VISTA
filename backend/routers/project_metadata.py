@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 import utils.crud as crud
 from core import schemas
 from core.database import get_db
-from utils.dependencies import get_current_user, get_project_or_403
+from utils.dependencies import get_current_user, get_project_or_403, get_project_or_403_writable
 
 router = APIRouter(
     tags=["Project Metadata"],
@@ -18,8 +18,8 @@ async def create_project_metadata(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    # Check if the user has access to the project
-    await get_project_or_403(project_id, db, current_user)
+    # Check if the user has access to the project (and that it's not archived)
+    await get_project_or_403_writable(project_id, db, current_user)
     
     # Create the metadata create object
     metadata_create = schemas.ProjectMetadataCreate(
@@ -68,8 +68,8 @@ async def update_project_metadata(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    # Check if the user has access to the project
-    await get_project_or_403(project_id, db, current_user)
+    # Check if the user has access to the project (and that it's not archived)
+    await get_project_or_403_writable(project_id, db, current_user)
     
     # Ensure the key in the path matches the one in the request body
     if key != metadata.key:
@@ -95,8 +95,8 @@ async def delete_project_metadata(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    # Check if the user has access to the project
-    await get_project_or_403(project_id, db, current_user)
+    # Check if the user has access to the project (and that it's not archived)
+    await get_project_or_403_writable(project_id, db, current_user)
     
     # Delete the metadata
     success = await crud.delete_project_metadata_by_key(db=db, project_id=project_id, key=key)
@@ -140,8 +140,8 @@ async def update_project_metadata_dict(
     Update project metadata using a dictionary. This will create or update metadata entries for each key-value pair in the dictionary.
     This is a convenience endpoint for clients that want to work with metadata as a simple key-value dictionary.
     """
-    # Check if the user has access to the project
-    await get_project_or_403(project_id, db, current_user)
+    # Check if the user has access to the project (and that it's not archived)
+    await get_project_or_403_writable(project_id, db, current_user)
     
     # Create or update each metadata entry
     for key, value in metadata_dict.items():

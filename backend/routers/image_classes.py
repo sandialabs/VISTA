@@ -5,8 +5,7 @@ from typing import List
 import utils.crud as crud
 from core import schemas
 from core.database import get_db
-from core.group_auth_helper import is_user_in_group
-from utils.dependencies import get_current_user, get_project_or_403, get_image_or_403
+from utils.dependencies import get_current_user, get_user_context, UserContext, get_project_or_403, get_project_or_403_writable, get_image_or_403, get_image_or_403_writable
 
 router = APIRouter(
     tags=["Image Classes"],
@@ -20,8 +19,8 @@ async def create_image_class(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    # Check if the user has access to the project
-    await get_project_or_403(project_id, db, current_user)
+    # Check if the user has access to the project (and that it's not archived)
+    await get_project_or_403_writable(project_id, db, current_user)
     
     # Ensure the project_id in the path matches the one in the request body
     if project_id != image_class.project_id:
@@ -73,8 +72,8 @@ async def update_image_class(
     if db_class is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image class not found")
     
-    # Check if the user has access to the project
-    await get_project_or_403(db_class.project_id, db, current_user)
+    # Check if the user has access to the project (and that it's not archived)
+    await get_project_or_403_writable(db_class.project_id, db, current_user)
     
     # Update the image class
     updated_class = await crud.update_image_class(
@@ -96,8 +95,8 @@ async def delete_image_class(
     if db_class is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image class not found")
     
-    # Check if the user has access to the project
-    await get_project_or_403(db_class.project_id, db, current_user)
+    # Check if the user has access to the project (and that it's not archived)
+    await get_project_or_403_writable(db_class.project_id, db, current_user)
     
     # Delete the image class
     success = await crud.delete_image_class(db=db, class_id=class_id)
@@ -121,8 +120,8 @@ async def classify_image(
     print(f"Classification request received for image_id: {image_id}")
     print(f"Request body: {classification}")
     
-    # Check if the user has access to the image
-    db_image = await get_image_or_403(image_id, db, current_user)
+    # Check if the user has access to the image (and that the project isn't archived)
+    db_image = await get_image_or_403_writable(image_id, db, current_user)
     
     # Ensure the image_id in the path matches the one in the request body
     # Convert both to strings for comparison to handle different UUID object types
@@ -187,30 +186,24 @@ async def list_image_classifications(
 async def delete_classification(
     classification_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    user_context: UserContext = Depends(get_user_context),
 ):
     # Get the classification
     db_classification = await crud.get_image_classification(db=db, classification_id=classification_id)
     if db_classification is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classification not found")
-    
-    # Check if the user has access to the image
-    await get_image_or_403(db_classification.image_id, db, current_user)
-    
-    # Only allow the user who created the classification or admin users to delete it
-    is_admin = is_user_in_group(current_user.email, "admin")
-    if (not current_user.id or str(db_classification.created_by_id) != str(current_user.id)) and not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this classification",
-        )
-    
+
+    # Check if the user has access to the image's project (and that it's not archived)
+    await get_image_or_403_writable(db_classification.image_id, db, user_context.user)
+
     # Delete the classification
-    success = await crud.delete_image_classification(db=db, classification_id=classification_id)
+    success = await crud.delete_image_classification(
+        db=db, classification_id=classification_id, deleted_by=user_context.email
+    )
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete classification",
         )
-    
+
     return None

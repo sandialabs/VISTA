@@ -291,6 +291,13 @@ function Project() {
         
         {!loading && (
           <div className="project-content">
+            {/* Archived project notice */}
+            {project?.is_archived && (
+              <div className="archived-project-notice">
+                <strong>This project is archived.</strong> It is read-only. Unarchive it from the dashboard to make changes.
+              </div>
+            )}
+
             {/* Review Status Summary + group search */}
             <div className="review-summary-row">
               <ReviewStatusSummary projectId={id} />
@@ -327,7 +334,8 @@ function Project() {
               </div>
             )}
             
-            {/* Quick Upload Section */}
+            {/* Quick Upload Section - hidden for archived projects */}
+            {!project?.is_archived && (
             <div className="upload-section">
               <ImageUploader
                 projectId={id}
@@ -335,8 +343,10 @@ function Project() {
                 setError={setError}
               />
             </div>
+            )}
             
-            {/* Management Sections */}
+            {/* Management Sections - hidden for archived projects */}
+            {!project?.is_archived && (
             <div className="management-sections">
               <div className="metadata-section">
                 <MetadataManager 
@@ -375,9 +385,10 @@ function Project() {
                 <CollectionManager projectId={id} />
               </div>
             </div>
+            )}
             
-            {/* Image Deletion Controls - only relevant for the flat gallery view */}
-            {!hasGroups && (
+            {/* Image Deletion Controls - only relevant for the flat gallery view and non-archived projects */}
+            {!hasGroups && !project?.is_archived && (
             <div className="deletion-controls-section" style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e9ecef' }}>
               <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: '600', color: '#333' }}>Image View Options</h3>
               <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>

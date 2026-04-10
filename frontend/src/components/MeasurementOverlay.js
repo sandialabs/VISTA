@@ -32,9 +32,12 @@ export default function MeasurementOverlay({
     if (!calibration || !calibration.pixels_per_mm) {
       return `${measurement.distance_pixels.toFixed(1)} px`;
     }
+    if (calibration.unit === 'inches') {
+      const inches = measurement.distance_pixels / calibration.pixels_per_inch;
+      return `${inches.toFixed(3)}"`;
+    }
     const mm = measurement.distance_pixels / calibration.pixels_per_mm;
-    const inches = measurement.distance_pixels / calibration.pixels_per_inch;
-    return `${mm.toFixed(2)} mm (${inches.toFixed(3)}")`;
+    return `${mm.toFixed(2)} mm`;
   };
 
   if (!transformedMeasurements.length) return null;

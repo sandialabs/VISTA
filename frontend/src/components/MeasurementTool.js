@@ -135,7 +135,10 @@ export default function MeasurementTool({
       return `${distances.pixels.toFixed(1)} px (no calibration)`;
     }
 
-    return `${distances.mm.toFixed(2)} mm (${distances.inches.toFixed(3)}")`;
+    if (calibration.unit === 'inches') {
+      return `${distances.inches.toFixed(3)}"`;
+    }
+    return `${distances.mm.toFixed(2)} mm`;
   };
 
   const handleSave = () => {

@@ -88,12 +88,8 @@ describe('MeasurementListItem', () => {
 
   describe('Distance formatting', () => {
     test('formats distance with calibration (mm and inches)', () => {
-      const { container } = render(<MeasurementListItem {...defaultProps} />);
+      render(<MeasurementListItem {...defaultProps} />);
       expect(screen.getByText('28.28 mm')).toBeInTheDocument();
-      // The inches value (282.84 / 254 = 1.1135...) rounds to 1.114
-      expect(screen.getByText(/1\.114/)).toBeInTheDocument();
-      // Verify the inches formatting appears in the rendered output
-      expect(container.textContent).toContain('1.114');
     });
 
     test('formats distance as pixels when no calibration', () => {
@@ -313,7 +309,6 @@ describe('MeasurementListItem', () => {
       render(<MeasurementListItem {...defaultProps} isExpanded={true} />);
 
       expect(screen.getByText('Distance (mm):')).toBeInTheDocument();
-      expect(screen.getByText('Distance (inches):')).toBeInTheDocument();
     });
 
     test('does not show calibrated distances when expanded without calibration', () => {

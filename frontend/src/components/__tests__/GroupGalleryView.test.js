@@ -131,6 +131,29 @@ describe('GroupGalleryView', () => {
     });
   });
 
+  test('uses fetched display_name when location state is missing', async () => {
+    mockLocation.state = null;
+    const mockGroup = { id: 'grp-1', identifier: 'GRP-001', display_name: 'Turbine Blade A' };
+    global.fetch = jest.fn((url) => {
+      if (url === '/api/groups/grp-1') {
+        return Promise.resolve({ ok: true, json: async () => mockGroup });
+      }
+      if (url.startsWith('/api/projects/proj-1/images')) {
+        return Promise.resolve({ ok: true, json: async () => mockImages });
+      }
+      if (url === '/api/projects/proj-1') {
+        return Promise.resolve({ ok: true, json: async () => mockProject });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    render(<BrowserRouter><GroupGalleryView /></BrowserRouter>);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Turbine Blade A').length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText('grp-1')).not.toBeInTheDocument();
+  });
+
   test('shows error on fetch failure', async () => {
     global.fetch = jest.fn((url) => {
       if (url.startsWith('/api/projects/proj-1/images')) {

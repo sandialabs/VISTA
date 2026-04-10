@@ -12,7 +12,7 @@ from core.database import get_db
 from core.config import settings
 from core.group_auth_helper import is_user_in_group
 from utils.dependencies import get_current_user
-from utils.dependencies import get_project_or_403
+from utils.dependencies import get_project_or_403, get_project_or_403_writable, get_image_or_403_writable
 from utils.boto3_client import upload_file_to_s3, get_presigned_download_url, delete_file_from_s3
 from utils.serialization import to_data_instance_schema
 from utils.file_security import get_content_disposition_header
@@ -39,7 +39,7 @@ async def upload_image_to_project(
     The image is associated with the project and the uploading user.
     Optionally accepts group_identifier to assign the image to a group (find-or-create).
     """
-    db_project = await get_project_or_403(project_id, db, current_user)
+    db_project = await get_project_or_403_writable(project_id, db, current_user)
     # Capture scalar values before any blocking IO to avoid MissingGreenlet
     # errors when SQLAlchemy tries to lazy-load expired attributes.
     db_project_id = db_project.id
@@ -558,12 +558,9 @@ async def delete_image(
 ):
     if len(body.reason or "") < settings.IMAGE_DELETE_REASON_MIN_CHARS:
         raise HTTPException(status_code=400, detail=f"Reason must be at least {settings.IMAGE_DELETE_REASON_MIN_CHARS} characters")
-    db_image = await crud.get_data_instance(db=db, image_id=image_id)
-    if not db_image or db_image.project_id != project_id:
+    db_image = await get_image_or_403_writable(image_id, db, current_user)
+    if db_image.project_id != project_id:
         raise HTTPException(status_code=404, detail="Image not found")
-    is_member = is_user_in_group(current_user.email, db_image.project.meta_group_id)
-    if not is_member:
-        raise HTTPException(status_code=403, detail="Forbidden")
     retention_days = settings.IMAGE_DELETE_RETENTION_DAYS
     actor_user_id = current_user.id
     if not db_image.deleted_at:
@@ -590,16 +587,13 @@ async def restore_deleted_image(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    db_image = await crud.get_data_instance(db=db, image_id=image_id)
-    if not db_image or db_image.project_id != project_id:
+    db_image = await get_image_or_403_writable(image_id, db, current_user)
+    if db_image.project_id != project_id:
         raise HTTPException(status_code=404, detail="Image not found")
     if not db_image.deleted_at:
         return to_data_instance_schema(db_image)
     if db_image.storage_deleted:
         raise HTTPException(status_code=409, detail="Image permanently deleted")
-    is_member = is_user_in_group(current_user.email, db_image.project.meta_group_id)
-    if not is_member:
-        raise HTTPException(status_code=403, detail="Forbidden")
     from datetime import datetime, timezone
     retention_deadline = db_image.pending_hard_delete_at
     if retention_deadline and datetime.now(timezone.utc) > retention_deadline:
@@ -640,18 +634,8 @@ async def update_image_metadata(
     It allows adding or modifying a key-value pair in the image's metadata.
     The changes are persisted to the database and caches are invalidated.
     """
-    db_image = await crud.get_data_instance(db=db, image_id=image_id)
-    if db_image is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    
-    # Check access permissions
-    is_member = is_user_in_group(current_user.email, db_image.project.meta_group_id)
-    if not is_member:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{current_user.email}' does not have access to image '{image_id}'",
-        )
-    
+    db_image = await get_image_or_403_writable(image_id, db, current_user)
+
     # Update the metadata
     current_metadata = db_image.metadata_json or {}
     current_metadata[metadata.key] = metadata.value
@@ -702,18 +686,8 @@ async def delete_image_metadata(
     It first retrieves the image, checks permissions, and then removes the metadata.
     The database is updated, and relevant caches are cleared.
     """
-    db_image = await crud.get_data_instance(db=db, image_id=image_id)
-    if db_image is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    
-    # Check access permissions
-    is_member = is_user_in_group(current_user.email, db_image.project.meta_group_id)
-    if not is_member:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{current_user.email}' does not have access to image '{image_id}'",
-        )
-    
+    db_image = await get_image_or_403_writable(image_id, db, current_user)
+
     # Update the metadata
     current_metadata = db_image.metadata_json or {}
     if key in current_metadata:

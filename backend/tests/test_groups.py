@@ -405,6 +405,80 @@ class TestUngroupedCount:
         assert resp.json()["count"] == 0
 
 
+class TestGroupArchiveProtection:
+    """Test that group mutations are blocked on archived projects."""
+
+    def test_create_group_blocked_on_archived_project(self, client, _setup_project):
+        project_id = _setup_project
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.post(
+            f"/api/projects/{project_id}/groups",
+            json={"identifier": "BLOCKED"},
+        )
+        assert resp.status_code == 403
+        assert "archived" in resp.json()["detail"].lower()
+
+    def test_update_group_blocked_on_archived_project(self, client, _setup_project):
+        project_id = _setup_project
+        group = client.post(
+            f"/api/projects/{project_id}/groups",
+            json={"identifier": "BEFORE"},
+        ).json()
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.patch(
+            f"/api/groups/{group['id']}",
+            json={"display_name": "Updated"},
+        )
+        assert resp.status_code == 403
+        assert "archived" in resp.json()["detail"].lower()
+
+    def test_delete_group_blocked_on_archived_project(self, client, _setup_project):
+        project_id = _setup_project
+        group = client.post(
+            f"/api/projects/{project_id}/groups",
+            json={"identifier": "DEL"},
+        ).json()
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.delete(f"/api/groups/{group['id']}")
+        assert resp.status_code == 403
+        assert "archived" in resp.json()["detail"].lower()
+
+    def test_assign_images_blocked_on_archived_project(self, client, _setup_project_and_images):
+        project_id, img1, img2 = _setup_project_and_images
+        group = client.post(
+            f"/api/projects/{project_id}/groups",
+            json={"identifier": "ASSIGN"},
+        ).json()
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.post(f"/api/groups/{group['id']}/images", json=[img1])
+        assert resp.status_code == 403
+        assert "archived" in resp.json()["detail"].lower()
+
+    def test_remove_images_blocked_on_archived_project(self, client, _setup_project_and_images):
+        project_id, img1, img2 = _setup_project_and_images
+        group = client.post(
+            f"/api/projects/{project_id}/groups",
+            json={"identifier": "REMOVE"},
+        ).json()
+        client.post(f"/api/groups/{group['id']}/images", json=[img1])
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.request("DELETE", f"/api/groups/{group['id']}/images", json=[img1])
+        assert resp.status_code == 403
+        assert "archived" in resp.json()["detail"].lower()
+
+    def test_read_groups_allowed_on_archived_project(self, client, _setup_project):
+        """Read-only group operations should still work on archived projects."""
+        project_id = _setup_project
+        client.post(
+            f"/api/projects/{project_id}/groups",
+            json={"identifier": "READABLE"},
+        )
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.get(f"/api/projects/{project_id}/groups")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+
 class TestUploadWithGroupIdentifier:
     """Test that upload with group_identifier creates/assigns the group."""
 

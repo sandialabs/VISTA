@@ -9,7 +9,7 @@ import utils.crud as crud
 from core import schemas, models
 from core.config import settings
 from core.database import get_db
-from utils.dependencies import get_current_user, get_project_or_403
+from utils.dependencies import get_current_user, get_project_or_403, get_project_or_403_writable
 from utils.cache_manager import get_cache
 
 router = APIRouter(tags=["Groups"])
@@ -27,6 +27,19 @@ async def _get_group_or_403(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
     # Verify project access
     await get_project_or_403(group.project_id, db, current_user)
+    return group
+
+
+async def _get_group_or_403_writable(
+    group_id: uuid.UUID,
+    db: AsyncSession,
+    current_user: schemas.User,
+) -> models.ImageGroup:
+    group = await crud.get_image_group(db, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    # Verify project access and that the project is not archived
+    await get_project_or_403_writable(group.project_id, db, current_user)
     return group
 
 
@@ -102,7 +115,7 @@ async def create_group(
     current_user: schemas.User = Depends(get_current_user),
 ):
     """Create a new image group in a project."""
-    await get_project_or_403(project_id, db, current_user)
+    await get_project_or_403_writable(project_id, db, current_user)
     existing = await crud.get_image_group_by_identifier(db, project_id, body.identifier)
     if existing:
         raise HTTPException(
@@ -149,7 +162,7 @@ async def update_group(
     current_user: schemas.User = Depends(get_current_user),
 ):
     """Update a group's identifier or display_name."""
-    group = await _get_group_or_403(group_id, db, current_user)
+    group = await _get_group_or_403_writable(group_id, db, current_user)
     if body.identifier is not None and body.identifier != group.identifier:
         existing = await crud.get_image_group_by_identifier(db, group.project_id, body.identifier)
         if existing:
@@ -172,7 +185,7 @@ async def delete_group(
     current_user: schemas.User = Depends(get_current_user),
 ):
     """Delete a group. Optionally also soft-deletes its images."""
-    group = await _get_group_or_403(group_id, db, current_user)
+    group = await _get_group_or_403_writable(group_id, db, current_user)
     project_id = group.project_id
     await crud.delete_image_group(
         db, group,
@@ -195,7 +208,7 @@ async def assign_images_to_group(
     current_user: schemas.User = Depends(get_current_user),
 ):
     """Assign a list of images to this group."""
-    group = await _get_group_or_403(group_id, db, current_user)
+    group = await _get_group_or_403_writable(group_id, db, current_user)
     count = await crud.assign_images_to_group(db, group.id, image_ids, project_id=group.project_id, assigned_by=current_user.email)
     _invalidate_project_image_cache(group.project_id)
     return {"assigned": count}
@@ -212,7 +225,7 @@ async def remove_images_from_group(
     current_user: schemas.User = Depends(get_current_user),
 ):
     """Remove a list of images from this group (sets group_id to NULL)."""
-    group = await _get_group_or_403(group_id, db, current_user)
+    group = await _get_group_or_403_writable(group_id, db, current_user)
     count = await crud.remove_images_from_group(db, group.id, image_ids, project_id=group.project_id, removed_by=current_user.email)
     _invalidate_project_image_cache(group.project_id)
     return {"removed": count}

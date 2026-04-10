@@ -14,7 +14,7 @@ const STATUS_COLORS = {
   reject_confirmed: '#dc2626',
 };
 
-function ReviewPanel({ imageId }) {
+function ReviewPanel({ imageId, readOnly = false }) {
   const [reviews, setReviews] = useState([]);
   const [currentStatus, setCurrentStatus] = useState('unreviewed');
   const [loading, setLoading] = useState(true);
@@ -135,7 +135,7 @@ function ReviewPanel({ imageId }) {
         </span>
         <button
           onClick={() => submitReview('pass')}
-          disabled={submitting || loading}
+          disabled={submitting || loading || readOnly}
           title="Pass (P)"
           style={{
             flex: 1, padding: '3px 0',
@@ -150,7 +150,7 @@ function ReviewPanel({ imageId }) {
         </button>
         <button
           onClick={() => submitReview('reject_pending')}
-          disabled={submitting || loading}
+          disabled={submitting || loading || readOnly}
           title="Reject (R)"
           style={{
             flex: 1, padding: '3px 0',
@@ -191,7 +191,7 @@ function ReviewPanel({ imageId }) {
           <input
             type="checkbox" checked={false}
             onChange={() => submitReview('reject_confirmed')}
-            disabled={submitting}
+            disabled={submitting || readOnly}
             style={{ cursor: 'pointer', width: 12, height: 12 }}
           />
           Confirm rejection (secondary review)

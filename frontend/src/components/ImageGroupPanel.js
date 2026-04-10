@@ -9,7 +9,7 @@ import React, { useState, useEffect } from 'react';
  *   groupId    - current group_id (may be null)
  *   onGroupChanged - called when the group assignment changes
  */
-function ImageGroupPanel({ imageId, projectId, groupId, onGroupChanged }) {
+function ImageGroupPanel({ imageId, projectId, groupId, onGroupChanged, readOnly = false }) {
   const [groups, setGroups] = useState([]);
   const [currentGroup, setCurrentGroup] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -75,7 +75,7 @@ function ImageGroupPanel({ imageId, projectId, groupId, onGroupChanged }) {
     <div className="card" style={{ marginBottom: '16px' }}>
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 style={{ margin: 0, fontSize: '0.95rem' }}>Group Assignment</h3>
-        {!editing && (
+        {!editing && !readOnly && (
           <button
             className="btn btn-secondary"
             style={{ fontSize: '0.8rem', padding: '2px 8px' }}

@@ -162,9 +162,10 @@ async def get_accessible_projects_for_user(
     user: User,
     skip: int = 0,
     limit: int = 100,
+    include_archived: bool = False,
 ) -> List[models.Project]:
     """Return projects the user can access based on group membership."""
-    all_projects = await crud.get_all_projects(db, skip, limit)
+    all_projects = await crud.get_all_projects(db, skip, limit, include_archived=include_archived)
     return [p for p in all_projects if is_user_in_group(user.email, p.meta_group_id)]
 
 
@@ -180,6 +181,19 @@ async def get_project_or_403(
     return db_project
 
 
+async def get_project_or_403_writable(
+    project_id: uuid.UUID, db: AsyncSession, current_user: User,
+) -> models.Project:
+    """Get a project; raise 404/403 as appropriate; also raise 403 if archived."""
+    db_project = await get_project_or_403(project_id, db, current_user)
+    if db_project.is_archived:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This project is archived and read-only. Unarchive it to make changes.",
+        )
+    return db_project
+
+
 async def get_image_or_403(
     image_id: uuid.UUID, db: AsyncSession, current_user: User,
 ) -> models.DataInstance:
@@ -189,6 +203,19 @@ async def get_image_or_403(
         raise HTTPException(status_code=404, detail="Image not found")
     if not is_user_in_group(current_user.email, db_image.project.meta_group_id):
         raise HTTPException(status_code=403, detail="Access forbidden")
+    return db_image
+
+
+async def get_image_or_403_writable(
+    image_id: uuid.UUID, db: AsyncSession, current_user: User,
+) -> models.DataInstance:
+    """Get an image; raise 404/403 as appropriate; also raise 403 if the project is archived."""
+    db_image = await get_image_or_403(image_id, db, current_user)
+    if db_image.project.is_archived:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This project is archived and read-only. Unarchive it to make changes.",
+        )
     return db_image
 
 

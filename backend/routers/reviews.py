@@ -10,6 +10,7 @@ from utils.dependencies import (
     get_user_context,
     UserContext,
     get_image_or_403,
+    get_image_or_403_writable,
     get_project_or_403,
 )
 
@@ -30,7 +31,7 @@ async def create_review(
     user_context: UserContext = Depends(get_user_context),
 ):
     """Mark an image as pass or reject (creates a new review record)."""
-    db_image = await get_image_or_403(image_id, db, user_context.user)
+    db_image = await get_image_or_403_writable(image_id, db, user_context.user)
 
     review_create = schemas.ImageReviewCreate(
         image_id=image_id,
@@ -98,8 +99,8 @@ async def delete_review(
             status_code=status.HTTP_404_NOT_FOUND, detail="Review not found"
         )
 
-    # Ensure user has access to the image's project
-    await get_image_or_403(db_review.image_id, db, user_context.user)
+    # Ensure user has access to the image's project (and project isn't archived)
+    await get_image_or_403_writable(db_review.image_id, db, user_context.user)
 
     success = await crud.delete_image_review(
         db=db, review_id=review_id, deleted_by=user_context.email

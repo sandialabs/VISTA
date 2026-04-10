@@ -149,17 +149,48 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit,
 });
 
 // Memoized ProjectItem component to prevent unnecessary re-renders
-const ProjectItem = memo(function ProjectItem({ project }) {
+const ProjectItem = memo(function ProjectItem({ project, currentUser, onArchiveToggle }) {
+  const canArchive = currentUser && (!project.created_by || project.created_by === currentUser.email);
+  const [archiving, setArchiving] = React.useState(false);
+
+  const handleArchiveToggle = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const action = project.is_archived ? 'unarchive' : 'archive';
+    const message = project.is_archived
+      ? `Unarchive "${project.name}"? This will restore full editing access.`
+      : `Archive "${project.name}"? The project will become read-only and hidden from the default view.`;
+    if (!window.confirm(message)) return;
+    setArchiving(true);
+    try {
+      const resp = await fetch(`/api/projects/${project.id}/${action}`, { method: 'PATCH' });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || `Failed to ${action} project`);
+        return;
+      }
+      const updated = await resp.json();
+      onArchiveToggle(updated);
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   return (
-    <div className="project-card">
-      <Link 
-        to={`/project/${project.id}`} 
+    <div className={`project-card${project.is_archived ? ' project-card-archived' : ''}`}>
+      <Link
+        to={`/project/${project.id}`}
         style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
       >
         <div className="project-card-header">
-          <h3 className="project-card-title">{project.name}</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <h3 className="project-card-title" style={{ margin: 0 }}>{project.name}</h3>
+            {project.is_archived && (
+              <span className="archived-badge">Archived</span>
+            )}
+          </div>
           <div className="project-card-meta">
-            ID: {project.id} • Group: {project.meta_group_id}
+            ID: {project.id} &bull; Group: {project.meta_group_id}
           </div>
         </div>
         <div className="project-card-body">
@@ -168,6 +199,18 @@ const ProjectItem = memo(function ProjectItem({ project }) {
           </p>
         </div>
       </Link>
+      {canArchive && (
+        <div className="project-card-footer">
+          <button
+            className={`btn btn-sm ${project.is_archived ? 'btn-secondary' : 'btn-warning'}`}
+            onClick={handleArchiveToggle}
+            disabled={archiving}
+            title={project.is_archived ? 'Unarchive this project' : 'Archive this project'}
+          >
+            {archiving ? '...' : project.is_archived ? 'Unarchive' : 'Archive'}
+          </button>
+        </div>
+      )}
     </div>
   );
 });
@@ -187,11 +230,7 @@ function App() {
   const [toast, setToast] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  // const [newProject, setNewProject] = useState({  // Commented out - not currently used
-  //   name: '',
-  //   description: '',
-  //   meta_group_id: ''
-  // });
+  const [showArchived, setShowArchived] = useState(false);
   
   // Function to show a toast notification
   const showToast = (message, type = 'error') => {
@@ -203,12 +242,11 @@ function App() {
     setToast(null);
   };
 
+  // Fetch the current user once on mount
   useEffect(() => {
-    // Fetch the current user
     fetch('/api/users/me')
       .then(response => {
         if (!response.ok) {
-          // If we get a 401, it's expected when authentication is disabled
           if (response.status === 401) {
             console.log("Authentication is disabled or user is not logged in");
             return null;
@@ -225,9 +263,13 @@ function App() {
       .catch(err => {
         console.error("Failed to fetch current user:", err);
       });
+  }, []);
 
-    // Fetch projects from the API
-    fetch('/api/projects/')
+  // Fetch projects from the API (runs on mount and when archive toggle changes)
+  useEffect(() => {
+    setLoading(true);
+    const url = showArchived ? '/api/projects/?include_archived=true' : '/api/projects/';
+    fetch(url)
       .then(response => {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -243,16 +285,16 @@ function App() {
         showToast(`Failed to fetch projects: ${err.message}`, 'error');
         setLoading(false);
       });
-  }, []); // Empty dependency array means this effect runs once on mount
+  }, [showArchived]);
 
   // Log component renders for debugging
   console.log("App render count:", ++renderCount);
-  
+
   // Handle project creation form submission
   const handleCreateProject = useCallback((projectData) => {
     console.log("Creating project:", projectData);
     setLoading(true);
-    
+
     fetch('/api/projects/', {
       method: 'POST',
       headers: {
@@ -262,11 +304,9 @@ function App() {
     })
       .then(response => {
         if (!response.ok) {
-          // Parse the error response
           return response.json().then(errorData => {
             throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
           }).catch(jsonError => {
-            // If parsing JSON fails, use a generic error message
             throw new Error(`HTTP error! status: ${response.status}`);
           });
         }
@@ -274,12 +314,9 @@ function App() {
       })
       .then(data => {
         console.log("Project created successfully:", data);
-        // Add the new project to the projects list
         setProjects(prev => [...prev, data]);
-        // Close modal
         setShowModal(false);
         setLoading(false);
-        // Show success toast
         showToast(`Project "${data.name}" created successfully!`, 'success');
       })
       .catch(err => {
@@ -289,8 +326,22 @@ function App() {
       });
   }, []);
 
+  // Handle archive/unarchive toggle from ProjectItem
+  const handleArchiveToggle = useCallback((updatedProject) => {
+    setProjects(prev => {
+      // If the project was just archived and we are not showing archived, remove it
+      if (updatedProject.is_archived && !showArchived) {
+        return prev.filter(p => p.id !== updatedProject.id);
+      }
+      // Otherwise update it in place
+      return prev.map(p => p.id === updatedProject.id ? updatedProject : p);
+    });
+  }, [showArchived]);
 
-  const HomePage = () => (
+  const HomePage = () => {
+    const visibleProjects = projects;
+
+    return (
     <div className="App">
       <header className="App-header">
         <div className="header-content">
@@ -347,43 +398,63 @@ function App() {
           </div>
         )}
         
-        {!loading && projects.length === 0 && (
-          <div className="card text-center">
-            <div className="card-content">
-              <div style={{ fontSize: '4rem', marginBottom: 'var(--space-4)' }}>+</div>
-              <h3 style={{ marginBottom: 'var(--space-4)', color: 'var(--gray-600)' }}>
-                No projects yet
-              </h3>
-              <p style={{ color: 'var(--gray-500)', marginBottom: 'var(--space-6)' }}>
-                Get started by creating your first image management project
-              </p>
-              <button 
-                className="btn btn-primary btn-large"
-                onClick={() => setShowModal(true)}
-              >
-                Create Your First Project
-              </button>
-            </div>
-          </div>
-        )}
-        
-        {!loading && projects.length > 0 && (
+        {!loading && (
           <>
             <div className="flex justify-between items-center mb-6">
               <h2 style={{ margin: 0, color: 'var(--gray-900)', fontSize: '1.5rem', fontWeight: '600' }}>
-                Your Projects ({projects.length})
+                Your Projects ({visibleProjects.length})
               </h2>
-              <div className="flex gap-4">
+              <div className="flex gap-4 items-center">
+                <label className="archive-toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={showArchived}
+                    onChange={e => setShowArchived(e.target.checked)}
+                    className="archive-toggle-input"
+                  />
+                  <span className="archive-toggle-track">
+                    <span className="archive-toggle-thumb"></span>
+                  </span>
+                  <span style={{ fontSize: '0.875rem', color: 'var(--gray-600)' }}>
+                    Show archived
+                  </span>
+                </label>
                 <span style={{ fontSize: '0.875rem', color: 'var(--gray-500)' }}>
-                  {projects.length} {projects.length === 1 ? 'project' : 'projects'} total
+                  {visibleProjects.length} {visibleProjects.length === 1 ? 'project' : 'projects'} shown
                 </span>
               </div>
             </div>
-            <div className="projects-grid">
-              {projects.map(project => (
-                <ProjectItem key={project.id} project={project} />
-              ))}
-            </div>
+            {visibleProjects.length === 0 ? (
+              <div className="card text-center">
+                <div className="card-content">
+                  <h3 style={{ marginBottom: 'var(--space-4)', color: 'var(--gray-600)' }}>
+                    {showArchived ? 'No projects yet' : 'No active projects'}
+                  </h3>
+                  <p style={{ color: 'var(--gray-500)', marginBottom: 'var(--space-6)' }}>
+                    {showArchived
+                      ? 'Get started by creating your first image management project'
+                      : 'All projects may be archived. Toggle "Show archived" above, or create a new project.'}
+                  </p>
+                  <button
+                    className="btn btn-primary btn-large"
+                    onClick={() => setShowModal(true)}
+                  >
+                    Create New Project
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="projects-grid">
+                {visibleProjects.map(project => (
+                  <ProjectItem
+                    key={project.id}
+                    project={project}
+                    currentUser={currentUser}
+                    onArchiveToggle={handleArchiveToggle}
+                  />
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -398,6 +469,7 @@ function App() {
       )}
     </div>
   );
+  };
 
   return (
     <>

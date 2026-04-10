@@ -81,6 +81,26 @@ function GroupedImagesPage({ projectId, projectName, onBack, search }) {
     navigate(`/project/${projectId}/ungrouped`);
   };
 
+  const [deletingGroupId, setDeletingGroupId] = useState(null);
+
+  const handleDeleteGroup = async (e, group) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete empty group "${group.display_name || group.identifier}"?`)) {
+      return;
+    }
+    setDeletingGroupId(group.id);
+    try {
+      const resp = await fetch(`/api/groups/${group.id}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
+      setGroups(prev => prev.filter(g => g.id !== group.id));
+      setTotal(prev => prev - 1);
+    } catch (err) {
+      setError(`Failed to delete group: ${err.message}`);
+    } finally {
+      setDeletingGroupId(null);
+    }
+  };
+
   const statusLabel = (status) => {
     if (!status) return null;
     const map = {
@@ -130,6 +150,21 @@ function GroupedImagesPage({ projectId, projectName, onBack, search }) {
                 <span className="group-row-count">
                   {group.image_count} {group.image_count === 1 ? 'image' : 'images'}
                 </span>
+                {group.image_count === 0 && (
+                  <button
+                    className="btn btn-small btn-danger"
+                    disabled={deletingGroupId === group.id}
+                    onClick={(e) => handleDeleteGroup(e, group)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }
+                    }}
+                  >
+                    {deletingGroupId === group.id ? 'Deleting...' : 'Delete'}
+                  </button>
+                )}
                 <span className="group-row-arrow">&#8250;</span>
               </div>
             </div>

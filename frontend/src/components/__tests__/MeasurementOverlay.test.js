@@ -208,7 +208,7 @@ describe('MeasurementOverlay', () => {
   });
 
   describe('distance formatting', () => {
-    it('formats distance with calibration (mm and inches)', () => {
+    it('formats distance with calibration (mm only)', () => {
       const { container } = render(
         <MeasurementOverlay
           {...defaultProps}
@@ -218,12 +218,11 @@ describe('MeasurementOverlay', () => {
 
       const texts = container.querySelectorAll('text');
       const distanceText = Array.from(texts).find(t =>
-        t.textContent.includes('mm') && t.textContent.includes('"')
+        t.textContent.includes('mm')
       );
 
       expect(distanceText).toBeInTheDocument();
       expect(distanceText.textContent).toContain('10.00 mm');
-      expect(distanceText.textContent).toContain('0.394"');
     });
 
     it('formats distance in pixels when no calibration', () => {

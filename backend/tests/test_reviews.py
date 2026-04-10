@@ -159,3 +159,34 @@ class TestReviewAPI:
         fake_id = str(uuid.uuid4())
         resp = client.post(f"/api/images/{fake_id}/reviews", json={"status": "pass"})
         assert resp.status_code == 404
+
+    def test_create_review_blocked_on_archived_project(self, client, _setup_project_and_image):
+        """Creating a review should be rejected when the project is archived."""
+        project_id, image_id = _setup_project_and_image
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.post(f"/api/images/{image_id}/reviews", json={"status": "pass"})
+        assert resp.status_code == 403
+        assert "archived" in resp.json()["detail"].lower()
+
+    def test_delete_review_blocked_on_archived_project(self, client, _setup_project_and_image):
+        """Deleting a review should be rejected when the project is archived."""
+        project_id, image_id = _setup_project_and_image
+        # Create a review while project is still active
+        resp = client.post(f"/api/images/{image_id}/reviews", json={"status": "pass"})
+        assert resp.status_code == 201
+        review_id = resp.json()["id"]
+        # Archive the project
+        client.patch(f"/api/projects/{project_id}/archive")
+        # Attempt to delete the review
+        resp = client.delete(f"/api/reviews/{review_id}")
+        assert resp.status_code == 403
+        assert "archived" in resp.json()["detail"].lower()
+
+    def test_read_reviews_allowed_on_archived_project(self, client, _setup_project_and_image):
+        """Reading reviews should still work when the project is archived."""
+        project_id, image_id = _setup_project_and_image
+        client.post(f"/api/images/{image_id}/reviews", json={"status": "pass"})
+        client.patch(f"/api/projects/{project_id}/archive")
+        resp = client.get(f"/api/images/{image_id}/reviews")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1

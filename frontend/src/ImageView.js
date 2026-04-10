@@ -42,6 +42,7 @@ function ImageView() {
   const [sidebarWidth, setSidebarWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [projectArchived, setProjectArchived] = useState(null);
 
   // Navigation settings - restore from localStorage
   const [skipDeletedImages, setSkipDeletedImages] = useState(() => {
@@ -255,6 +256,18 @@ function ImageView() {
     annotationHook.loadBBoxClasses();
   }, [imageId, projectId, loadImageData, loadClasses, annotationHook.loadBBoxClasses]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch project archive status (only when projectId changes, not on every image navigation)
+  useEffect(() => {
+    if (projectId) {
+      fetch(`/api/projects/${projectId}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data) setProjectArchived(!!data.is_archived);
+        })
+        .catch(() => {});
+    }
+  }, [projectId]);
+
   // Load project images for navigation once we know the current image's group
   useEffect(() => {
     if (image && projectId) {
@@ -413,6 +426,11 @@ function ImageView() {
       </header>
 
       <div className="container" style={{ maxWidth: '100%', padding: 'var(--space-4)' }}>
+        {projectArchived === true && (
+          <div className="archived-project-notice">
+            <strong>This project is archived.</strong> It is read-only. Classifications, comments, reviews, and other edits are disabled.
+          </div>
+        )}
         {error && (
           <div className="alert alert-error">
             {error}
@@ -423,7 +441,7 @@ function ImageView() {
         <div className="image-view-container">
           <div className="image-view-main">
             <div className="image-view-sidebar" style={{ width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` }}>
-              {image && <ReviewPanel imageId={imageId} />}
+              {image && <ReviewPanel imageId={imageId} readOnly={projectArchived !== false} />}
               {image && (
                 <AnnotationToolbar
                   interactionMode={annotationHook.interactionMode}
@@ -472,11 +490,12 @@ function ImageView() {
                   onGroupChanged={(newGroupId) => {
                     setImage(prev => prev ? { ...prev, group_id: newGroupId } : prev);
                   }}
+                  readOnly={projectArchived !== false}
                 />
               )}
-              <CompactImageClassifications imageId={imageId} classes={classes} loading={loading} setLoading={setLoading} setError={setError} />
-              <ImageComments imageId={imageId} loading={loading} setLoading={setLoading} setError={setError} />
-              <ImageMetadata imageId={imageId} image={image} setImage={setImage} loading={loading} setLoading={setLoading} setError={setError} />
+              <CompactImageClassifications imageId={imageId} classes={classes} loading={loading} setLoading={setLoading} setError={setError} readOnly={projectArchived !== false} />
+              <ImageComments imageId={imageId} loading={loading} setLoading={setLoading} setError={setError} readOnly={projectArchived !== false} />
+              <ImageMetadata imageId={imageId} image={image} setImage={setImage} loading={loading} setLoading={setLoading} setError={setError} readOnly={projectArchived !== false} />
               {image && (
                 <CalibrationManager projectId={projectId} imageId={imageId} image={image} onCalibrationChange={measurementHook.setCalibration} />
               )}
@@ -519,7 +538,9 @@ function ImageView() {
             </div>
           </div>
 
-          <ImageDeletionControls projectId={projectId} image={image} setImage={setImage} refreshProjectImages={loadProjectImages} />
+          {projectArchived === false && (
+            <ImageDeletionControls projectId={projectId} image={image} setImage={setImage} refreshProjectImages={loadProjectImages} />
+          )}
           <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--bg-secondary, #f8f9fa)', borderRadius: '6px', border: '1px solid var(--border-color, #dee2e6)' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
               <input type="checkbox" checked={skipDeletedImages} onChange={(e) => setSkipDeletedImages(e.target.checked)} style={{ cursor: 'pointer' }} />

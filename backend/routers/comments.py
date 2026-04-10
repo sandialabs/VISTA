@@ -5,7 +5,7 @@ from typing import List
 import utils.crud as crud
 from core import schemas
 from core.database import get_db
-from utils.dependencies import get_current_user, get_user_context, UserContext, get_image_or_403
+from utils.dependencies import get_current_user, get_user_context, UserContext, get_image_or_403, get_image_or_403_writable
 
 router = APIRouter(
     tags=["Comments"],
@@ -22,8 +22,8 @@ async def create_comment(
     print(f"Comment text: {comment.text}")
     print(f"Current user: {user_context.user}")
     
-    # Check if the user has access to the image
-    await get_image_or_403(image_id, db, user_context.user)
+    # Check if the user has access to the image (and project isn't archived)
+    await get_image_or_403_writable(image_id, db, user_context.user)
     
     # Set up the comment create object - automatic user ID resolution handled by get_user_context
     comment_create = schemas.ImageCommentCreate(
@@ -77,8 +77,8 @@ async def update_comment(
     if db_comment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
     
-    # Check if the user has access to the image
-    await get_image_or_403(db_comment.image_id, db, current_user)
+    # Check if the user has access to the image (and project isn't archived)
+    await get_image_or_403_writable(db_comment.image_id, db, current_user)
     
     # Only allow the author of the comment to update it (admin check removed since groups field is gone)
     if not current_user.id or str(db_comment.author_id) != str(current_user.id):
@@ -108,8 +108,8 @@ async def delete_comment(
     if db_comment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
     
-    # Check if the user has access to the image
-    await get_image_or_403(db_comment.image_id, db, user_context.user)
+    # Check if the user has access to the image (and project isn't archived)
+    await get_image_or_403_writable(db_comment.image_id, db, user_context.user)
     
     # Only allow the author of the comment to delete it (admin check removed since groups field is gone)
     if not user_context.id or str(db_comment.author_id) != str(user_context.id):

@@ -197,4 +197,94 @@ describe('GroupedImagesPage', () => {
       expect(screen.getByText(/HTTP error 500/)).toBeInTheDocument();
     });
   });
+
+  describe('delete empty groups', () => {
+    const groupsWithEmpty = [
+      { id: 'g1', identifier: 'SN001', display_name: 'Serial 001', image_count: 3, aggregate_review_status: null },
+      { id: 'g-empty', identifier: 'EMPTY', display_name: 'Empty Group', image_count: 0, aggregate_review_status: null },
+    ];
+
+    test('shows delete button only on groups with zero images', async () => {
+      mockFetchResponses({ groups: groupsWithEmpty });
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('Serial 001')).toBeInTheDocument();
+      });
+
+      // The empty group row should have a Delete button
+      const buttons = screen.getAllByRole('button', { name: 'Delete' });
+      expect(buttons).toHaveLength(1);
+      // The non-empty group should not
+      const nonEmptyRow = screen.getByText('Serial 001').closest('.group-row');
+      expect(nonEmptyRow.querySelector('.btn-danger')).toBeNull();
+    });
+
+    test('deletes empty group after confirmation', async () => {
+      jest.spyOn(window, 'confirm').mockReturnValue(true);
+      mockFetchResponses({ groups: groupsWithEmpty });
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('Empty Group')).toBeInTheDocument();
+      });
+
+      // Mock the DELETE call
+      global.fetch.mockImplementation((url, opts) => {
+        if (opts?.method === 'DELETE') {
+          return Promise.resolve({ ok: true });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      expect(window.confirm).toHaveBeenCalledWith('Delete empty group "Empty Group"?');
+
+      await waitFor(() => {
+        expect(screen.queryByText('Empty Group')).not.toBeInTheDocument();
+      });
+
+      // The non-empty group should still be there
+      expect(screen.getByText('Serial 001')).toBeInTheDocument();
+    });
+
+    test('does not delete when confirmation is cancelled', async () => {
+      jest.spyOn(window, 'confirm').mockReturnValue(false);
+      mockFetchResponses({ groups: groupsWithEmpty });
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('Empty Group')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      // Group should still be present
+      expect(screen.getByText('Empty Group')).toBeInTheDocument();
+    });
+
+    test('shows error when delete request fails', async () => {
+      jest.spyOn(window, 'confirm').mockReturnValue(true);
+      mockFetchResponses({ groups: groupsWithEmpty });
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('Empty Group')).toBeInTheDocument();
+      });
+
+      global.fetch.mockImplementation((url, opts) => {
+        if (opts?.method === 'DELETE') {
+          return Promise.resolve({ ok: false, status: 500 });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed to delete group/)).toBeInTheDocument();
+      });
+    });
+  });
 });

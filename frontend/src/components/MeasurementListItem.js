@@ -33,14 +33,10 @@ export default function MeasurementListItem({
     if (distances.mm === null) {
       return `${measurement.distance_pixels.toFixed(1)} px`;
     }
-    return (
-      <div>
-        <div>{distances.mm.toFixed(2)} mm</div>
-        <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-          {distances.inches.toFixed(3)}"
-        </div>
-      </div>
-    );
+    if (calibration.unit === 'inches') {
+      return `${distances.inches.toFixed(3)}"`;
+    }
+    return `${distances.mm.toFixed(2)} mm`;
   };
 
   return (
@@ -234,22 +230,18 @@ export default function MeasurementListItem({
                 {(() => {
                   const distances = calculateDistances();
                   if (distances.mm === null) return null;
+                  const useInches = calibration.unit === 'inches';
                   return (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#6b7280' }}>Distance (mm):</span>
-                        <span style={{ fontFamily: 'monospace' }}>
-                          {distances.mm.toFixed(4)} mm
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#6b7280' }}>Distance (inches):</span>
-                        <span style={{ fontFamily: 'monospace' }}>
-                          {distances.inches.toFixed(6)}"
-                        </span>
-                      </div>
-                    </>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#6b7280' }}>
+                        Distance ({useInches ? 'inches' : 'mm'}):
+                      </span>
+                      <span style={{ fontFamily: 'monospace' }}>
+                        {useInches
+                          ? `${distances.inches.toFixed(6)}"`
+                          : `${distances.mm.toFixed(4)} mm`}
+                      </span>
+                    </div>
                   );
                 })()}
 

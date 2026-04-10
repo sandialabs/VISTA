@@ -70,7 +70,6 @@ describe('CalibrationManager', () => {
 
       await waitFor(() => {
         expect(screen.getByText('10.00 px/mm')).toBeInTheDocument();
-        expect(screen.getByText('254.00 px/inch')).toBeInTheDocument();
       });
     });
 
@@ -138,7 +137,7 @@ describe('CalibrationManager', () => {
       });
     });
 
-    it('shows "Revert to Project Default" button', async () => {
+    it('shows "Clear Image Override" button', async () => {
       const imageWithOverride = {
         metadata: {
           calibration_override: imageCalibration
@@ -148,7 +147,7 @@ describe('CalibrationManager', () => {
       render(<CalibrationManager {...defaultProps} image={imageWithOverride} />);
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Revert to Project Default' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Clear Image Override' })).toBeInTheDocument();
       });
     });
   });
@@ -379,7 +378,7 @@ describe('CalibrationManager', () => {
     };
 
     it('clears override when confirmed', async () => {
-      window.confirm = jest.fn(() => true);
+      jest.spyOn(window, 'confirm').mockReturnValue(true);
 
       global.fetch.mockResolvedValue({ ok: true });
 
@@ -392,10 +391,10 @@ describe('CalibrationManager', () => {
       render(<CalibrationManager {...defaultProps} image={imageWithOverride} />);
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Revert to Project Default' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Clear Image Override' })).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'Revert to Project Default' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Clear Image Override' }));
 
       await waitFor(() => {
         expect(global.fetch).toHaveBeenCalledWith(
@@ -406,7 +405,7 @@ describe('CalibrationManager', () => {
     });
 
     it('does not clear override when cancelled', async () => {
-      window.confirm = jest.fn(() => false);
+      jest.spyOn(window, 'confirm').mockReturnValue(false);
 
       const imageWithOverride = {
         metadata: {
@@ -417,10 +416,10 @@ describe('CalibrationManager', () => {
       render(<CalibrationManager {...defaultProps} image={imageWithOverride} />);
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Revert to Project Default' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Clear Image Override' })).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'Revert to Project Default' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Clear Image Override' }));
 
       expect(global.fetch).not.toHaveBeenCalled();
     });
@@ -490,6 +489,317 @@ describe('CalibrationManager', () => {
         expect(body.value.pixels_per_mm).toBe(10); // 254 / 25.4
         expect(body.value.unit).toBe('inches');
       });
+    });
+  });
+
+  describe('metadata-based calibration rules', () => {
+    const ruleCalibration = {
+      pixels_per_mm: 15,
+      pixels_per_inch: 381,
+      unit: 'mm'
+    };
+    const projectCalibration = {
+      pixels_per_mm: 10,
+      pixels_per_inch: 254,
+      unit: 'mm'
+    };
+
+    it('uses metadata rule when image metadata matches a project rule', async () => {
+      const imageWithMetadata = {
+        metadata: { camera: 'a47' }
+      };
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_rules: [
+            { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration }
+          ]
+        })
+      });
+
+      render(<CalibrationManager {...defaultProps} image={imageWithMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('15.00 px/mm')).toBeInTheDocument();
+        expect(screen.getByText('Using metadata rule: camera = a47')).toBeInTheDocument();
+      });
+
+      expect(defaultProps.onCalibrationChange).toHaveBeenCalledWith(ruleCalibration);
+    });
+
+    it('metadata rule takes priority over project default', async () => {
+      const imageWithMetadata = {
+        metadata: { camera: 'a47' }
+      };
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_default: projectCalibration,
+          calibration_rules: [
+            { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration }
+          ]
+        })
+      });
+
+      render(<CalibrationManager {...defaultProps} image={imageWithMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('15.00 px/mm')).toBeInTheDocument();
+        expect(screen.getByText('Using metadata rule: camera = a47')).toBeInTheDocument();
+      });
+    });
+
+    it('image override takes priority over metadata rule', async () => {
+      const imageCalibration = { pixels_per_mm: 20, pixels_per_inch: 508, unit: 'mm' };
+      const imageWithOverrideAndMetadata = {
+        metadata: {
+          calibration_override: imageCalibration,
+          camera: 'a47'
+        }
+      };
+
+      render(<CalibrationManager {...defaultProps} image={imageWithOverrideAndMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('20.00 px/mm')).toBeInTheDocument();
+        expect(screen.getByText('Using image-specific calibration')).toBeInTheDocument();
+      });
+
+      // Should not fetch project data when image has override
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('falls back to project default when no metadata rule matches', async () => {
+      const imageWithMetadata = {
+        metadata: { camera: 'other-camera' }
+      };
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_default: projectCalibration,
+          calibration_rules: [
+            { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration }
+          ]
+        })
+      });
+
+      render(<CalibrationManager {...defaultProps} image={imageWithMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('10.00 px/mm')).toBeInTheDocument();
+        expect(screen.getByText('Using project default calibration')).toBeInTheDocument();
+      });
+    });
+
+    it('ignores rules when image has no metadata', async () => {
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_default: projectCalibration,
+          calibration_rules: [
+            { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration }
+          ]
+        })
+      });
+
+      render(<CalibrationManager {...defaultProps} image={{}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Using project default calibration')).toBeInTheDocument();
+      });
+    });
+
+    it('saves a new metadata calibration rule', async () => {
+      const imageWithMetadata = {
+        metadata: { camera: 'a47' }
+      };
+
+      global.fetch
+        .mockResolvedValueOnce({ ok: false }) // Initial load (no calibration)
+        .mockResolvedValueOnce({ // Fetch current rules before saving
+          ok: true,
+          json: () => Promise.resolve({ calibration_rules: [] })
+        })
+        .mockResolvedValueOnce({ ok: true }) // Save rule
+        .mockResolvedValueOnce({ // Reload after save
+          ok: true,
+          json: () => Promise.resolve({
+            calibration_rules: [
+              { metadata_key: 'camera', metadata_value: 'a47', calibration: { pixels_per_mm: 12, pixels_per_inch: 304.8, unit: 'mm' } }
+            ]
+          })
+        });
+
+      render(<CalibrationManager {...defaultProps} image={imageWithMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Set Calibration' })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set Calibration' }));
+
+      const input = screen.getByRole('spinbutton');
+      fireEvent.change(input, { target: { value: '12' } });
+
+      // Select metadata key in the form
+      const select = screen.getByRole('combobox');
+      fireEvent.change(select, { target: { value: 'camera' } });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save for camera = a47' }));
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/projects/project-123/metadata',
+          expect.objectContaining({
+            method: 'POST',
+            body: expect.stringContaining('calibration_rules')
+          })
+        );
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Metadata calibration rule saved/)).toBeInTheDocument();
+      });
+    });
+
+    it('shows Remove Metadata Rule button when a rule is matched', async () => {
+      const imageWithMetadata = {
+        metadata: { camera: 'a47' }
+      };
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_rules: [
+            { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration }
+          ]
+        })
+      });
+
+      render(<CalibrationManager {...defaultProps} image={imageWithMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Remove Metadata Rule' })).toBeInTheDocument();
+      });
+    });
+
+    it('does not show Remove Metadata Rule button for project default', async () => {
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_default: projectCalibration
+        })
+      });
+
+      render(<CalibrationManager {...defaultProps} image={{}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Using project default calibration')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole('button', { name: 'Remove Metadata Rule' })).not.toBeInTheDocument();
+    });
+
+    it('deletes a metadata rule after confirmation', async () => {
+      const imageWithMetadata = {
+        metadata: { camera: 'a47' }
+      };
+
+      jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+      global.fetch
+        .mockResolvedValueOnce({ // Initial load
+          ok: true,
+          json: () => Promise.resolve({
+            calibration_rules: [
+              { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration }
+            ]
+          })
+        })
+        .mockResolvedValueOnce({ // Fetch rules before delete
+          ok: true,
+          json: () => Promise.resolve({
+            calibration_rules: [
+              { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration },
+              { metadata_key: 'lens', metadata_value: '50mm', calibration: projectCalibration }
+            ]
+          })
+        })
+        .mockResolvedValueOnce({ ok: true }) // Save updated rules
+        .mockResolvedValueOnce({ // Reload after delete
+          ok: true,
+          json: () => Promise.resolve({
+            calibration_rules: [
+              { metadata_key: 'lens', metadata_value: '50mm', calibration: projectCalibration }
+            ]
+          })
+        });
+
+      render(<CalibrationManager {...defaultProps} image={imageWithMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Remove Metadata Rule' })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Remove Metadata Rule' }));
+
+      expect(window.confirm).toHaveBeenCalledWith(
+        'Remove calibration rule for camera = a47?'
+      );
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/projects/project-123/metadata',
+          expect.objectContaining({
+            method: 'POST',
+            body: expect.stringContaining('calibration_rules')
+          })
+        );
+      });
+
+      // Verify the saved rules don't include the deleted one
+      const saveCall = global.fetch.mock.calls.find(
+        ([url, opts]) => url === '/api/projects/project-123/metadata' && opts?.method === 'POST'
+      );
+      const savedBody = JSON.parse(saveCall[1].body);
+      expect(savedBody.value).toHaveLength(1);
+      expect(savedBody.value[0].metadata_key).toBe('lens');
+
+      await waitFor(() => {
+        expect(screen.getByText(/Metadata rule removed/)).toBeInTheDocument();
+      });
+    });
+
+    it('does not delete when confirmation is cancelled', async () => {
+      const imageWithMetadata = {
+        metadata: { camera: 'a47' }
+      };
+
+      jest.spyOn(window, 'confirm').mockReturnValue(false);
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_rules: [
+            { metadata_key: 'camera', metadata_value: 'a47', calibration: ruleCalibration }
+          ]
+        })
+      });
+
+      render(<CalibrationManager {...defaultProps} image={imageWithMetadata} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Remove Metadata Rule' })).toBeInTheDocument();
+      });
+
+      global.fetch.mockClear();
+      fireEvent.click(screen.getByRole('button', { name: 'Remove Metadata Rule' }));
+
+      expect(window.confirm).toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
     });
   });
 });

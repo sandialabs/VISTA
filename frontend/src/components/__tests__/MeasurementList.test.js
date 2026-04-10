@@ -181,8 +181,6 @@ describe('MeasurementList', () => {
 
     const mmElements = screen.getAllByText(/10.00 mm/);
     expect(mmElements.length).toBe(2);
-    const inchElements = screen.getAllByText(/0.394"/);
-    expect(inchElements.length).toBe(2);
   });
 
   test('formats distances as pixels when no calibration', () => {

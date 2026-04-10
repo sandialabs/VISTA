@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const MM_PER_INCH = 25.4;
 
@@ -10,8 +10,11 @@ export default function CalibrationEditForm({
   isLoading,
   onSaveProjectDefault,
   onSaveImageOverride,
+  onSaveMetadataRule,
+  imageMetadataKeys,
   onCancel
 }) {
+  const [selectedMetaKey, setSelectedMetaKey] = useState('');
   return (
     <div>
       <div style={{ marginBottom: '12px' }}>
@@ -115,6 +118,57 @@ export default function CalibrationEditForm({
           {isLoading ? 'Saving...' : 'Save for This Image Only'}
         </button>
       </div>
+
+      {onSaveMetadataRule && imageMetadataKeys && imageMetadataKeys.length > 0 && (
+        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+          <div style={{ fontSize: '13px', fontWeight: '500', marginBottom: '6px', color: '#374151' }}>
+            Save for Matching Metadata
+          </div>
+          <select
+            value={selectedMetaKey}
+            onChange={e => setSelectedMetaKey(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '6px',
+              border: '1px solid #d1d5db',
+              borderRadius: '4px',
+              fontSize: '13px',
+              marginBottom: '6px'
+            }}
+          >
+            <option value="">Select metadata key...</option>
+            {imageMetadataKeys.map(({ key, value }) => (
+              <option key={key} value={key}>{key} = {String(value)}</option>
+            ))}
+          </select>
+          {selectedMetaKey && (() => {
+            const selectedEntry = imageMetadataKeys.find(e => e.key === selectedMetaKey);
+            return (
+              <button
+                onClick={() => {
+                  if (selectedEntry) onSaveMetadataRule(selectedEntry.key, selectedEntry.value);
+                }}
+                disabled={isLoading || !editPixelsPerUnit}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  background: '#7c3aed',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: editPixelsPerUnit && !isLoading ? 'pointer' : 'not-allowed',
+                  opacity: editPixelsPerUnit && !isLoading ? 1 : 0.5
+                }}
+              >
+                {isLoading
+                  ? 'Saving...'
+                  : `Save for ${selectedMetaKey} = ${selectedEntry?.value}`}
+              </button>
+            );
+          })()}
+        </div>
+      )}
 
       <button
         onClick={onCancel}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-function ImageComments({ imageId, loading, setLoading, setError }) {
+function ImageComments({ imageId, loading, setLoading, setError, readOnly = false }) {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [editingComment, setEditingComment] = useState(null);
@@ -213,11 +213,12 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
                         </div>
                       </div>
                     ) : (
-                      <div onClick={() => setEditingComment(comment)} style={{ cursor: 'pointer' }}>
+                      <div onClick={() => { if (!readOnly) setEditingComment(comment); }} style={{ cursor: readOnly ? 'default' : 'pointer' }}>
                         {comment.text}
                       </div>
                     )}
                   </div>
+                  {!readOnly && (
                   <div className="comment-actions">
                     {(!editingComment || editingComment.id !== comment.id) && (
                       <button
@@ -227,13 +228,14 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
                         Edit
                       </button>
                     )}
-                    <button 
+                    <button
                       className="btn btn-small btn-danger"
                       onClick={() => handleDeleteComment(comment.id)}
                     >
                       Delete
                     </button>
                   </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -242,27 +244,29 @@ function ImageComments({ imageId, loading, setLoading, setError }) {
           )}
         </div>
         
+        {!readOnly && (
         <form id="add-comment-form" className="form" onSubmit={handleAddComment}>
           <h3>Add Comment</h3>
           <div className="form-group">
             <label htmlFor="comment-text">Comment:</label>
-            <textarea 
-              id="comment-text" 
-              name="comment-text" 
-              rows="3" 
+            <textarea
+              id="comment-text"
+              name="comment-text"
+              rows="3"
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               required
             ></textarea>
           </div>
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="btn btn-primary"
             disabled={loading}
           >
             Add Comment
           </button>
         </form>
+        )}
       </div>
 
     </div>

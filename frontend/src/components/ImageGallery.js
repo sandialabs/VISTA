@@ -6,6 +6,7 @@ import GalleryDebugPanel from './GalleryDebugPanel';
 import BulkDeleteModal from './BulkDeleteModal';
 import BulkMetadataModal from './BulkMetadataModal';
 import { loadGalleryStateWithDefaults, saveGalleryState, filterBySearch, filterByReviewStatus, sortImages } from '../utils/galleryState';
+import { isUserMetadataKey } from '../utils/metadataKeys';
 
 function ImageGallery({ projectId, galleryKey, images, loading, onImageUpdated, refreshProjectImages }) {
   const navigate = useNavigate();
@@ -80,7 +81,7 @@ function ImageGallery({ projectId, galleryKey, images, loading, onImageUpdated, 
       const meta = image.metadata || image.metadata_;
       if (meta) {
         Object.keys(meta).forEach(key => {
-          if (key !== 'measurements') keys.add(key);
+          if (isUserMetadataKey(key)) keys.add(key);
         });
       }
     });

@@ -38,6 +38,7 @@ __all__ = [
     "count_images_for_group", "assign_images_to_group", "remove_images_from_group",
     "get_aggregate_review_status_for_group", "count_ungrouped_images",
     "has_image_groups",
+    "archive_project", "unarchive_project",
 ]
 
 import uuid
@@ -263,7 +264,7 @@ async def get_projects_by_group_ids(db: AsyncSession, group_ids: List[str], skip
     )
     return result.scalars().all()
 
-async def get_all_projects(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[models.Project]:
+async def get_all_projects(db: AsyncSession, skip: int = 0, limit: int = 100, include_archived: bool = True) -> List[models.Project]:
     """
     Get all projects in the database.
     
@@ -271,25 +272,56 @@ async def get_all_projects(db: AsyncSession, skip: int = 0, limit: int = 100) ->
         db: Database session
         skip: Number of records to skip
         limit: Maximum number of records to return
+        include_archived: If False, exclude archived projects
         
     Returns:
         List of all projects
     """
+    query = select(models.Project)
+    if not include_archived:
+        query = query.where(models.Project.is_archived.is_(False))
     result = await db.execute(
-        select(models.Project)
+        query
         .offset(skip)
         .limit(limit)
     )
     return result.scalars().all()
 
 async def create_project(db: AsyncSession, project: schemas.ProjectCreate, created_by: Optional[str] = None) -> models.Project:
-    db_project = models.Project(**project.model_dump())
+    db_project = models.Project(**project.model_dump(), created_by=created_by)
     db.add(db_project)
     await db.commit()
     await db.refresh(db_project)
     
     log_db_operation("CREATE", "projects", db_project.id, created_by or "system", {"name": project.name, "meta_group_id": project.meta_group_id})
     return db_project
+
+
+async def archive_project(db: AsyncSession, project_id: uuid.UUID, archived_by: Optional[str] = None) -> Optional[models.Project]:
+    """Archive a project, making it read-only and hidden by default."""
+    from datetime import datetime, timezone
+    project = await get_project(db, project_id)
+    if project is None:
+        return None
+    project.is_archived = True
+    project.archived_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(project)
+    log_db_operation("ARCHIVE", "projects", project_id, archived_by or "system", {})
+    return project
+
+
+async def unarchive_project(db: AsyncSession, project_id: uuid.UUID, unarchived_by: Optional[str] = None) -> Optional[models.Project]:
+    """Unarchive a project, restoring full access."""
+    project = await get_project(db, project_id)
+    if project is None:
+        return None
+    project.is_archived = False
+    project.archived_at = None
+    await db.commit()
+    await db.refresh(project)
+    log_db_operation("UNARCHIVE", "projects", project_id, unarchived_by or "system", {})
+    return project
 
 # DataInstance CRUD operations
 async def get_data_instance(db: AsyncSession, image_id: uuid.UUID) -> Optional[models.DataInstance]:
@@ -602,10 +634,9 @@ async def create_comment(db: AsyncSession, comment: schemas.ImageCommentCreate, 
     
     log_db_operation("CREATE", "image_comments", db_comment.id, created_by or "system", {"image_id": str(comment.image_id), "text_length": len(comment.text)})
     
-    # Explicitly load the comment without the relationship
-    # to avoid the MissingGreenlet error
     result = await db.execute(
         select(models.ImageComment)
+        .options(selectinload(models.ImageComment.author))
         .where(models.ImageComment.id == db_comment.id)
     )
     return result.scalars().first()
