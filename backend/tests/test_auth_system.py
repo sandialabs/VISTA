@@ -135,19 +135,37 @@ class TestGroupAuth:
         """Test mock user group membership."""
         with patch.object(settings, 'DEBUG', False):
             with patch.object(settings, 'SKIP_HEADER_CHECK', False):
-                with patch.object(settings, 'MOCK_USER_EMAIL', 'mock@example.com'):
-                    with patch.object(settings, 'MOCK_USER_GROUPS_JSON', '["admin", "users"]'):
-                        assert core_is_user_in_group("mock@example.com", "admin") is True
-                        assert core_is_user_in_group("mock@example.com", "users") is True
-                        assert core_is_user_in_group("mock@example.com", "nonexistent") is False
+                with patch.object(settings, 'VISTA_AUTH_BACKEND', 'demo'):
+                    with patch.object(settings, 'MOCK_USER_EMAIL', 'mock@example.com'):
+                        with patch.object(settings, 'MOCK_USER_GROUPS_JSON', '["admin", "users"]'):
+                            assert core_is_user_in_group("mock@example.com", "admin") is True
+                            assert core_is_user_in_group("mock@example.com", "users") is True
+                            assert core_is_user_in_group("mock@example.com", "nonexistent") is False
 
     def test_case_insensitive_email(self):
         """Test that email comparison is case insensitive."""
         with patch.object(settings, 'DEBUG', False):
             with patch.object(settings, 'SKIP_HEADER_CHECK', False):
-                with patch.object(settings, 'MOCK_USER_EMAIL', 'Mock@Example.COM'):
-                    with patch.object(settings, 'MOCK_USER_GROUPS_JSON', '["admin"]'):
-                        assert core_is_user_in_group("mock@example.com", "admin") is True
+                with patch.object(settings, 'VISTA_AUTH_BACKEND', 'demo'):
+                    with patch.object(settings, 'MOCK_USER_EMAIL', 'Mock@Example.COM'):
+                        with patch.object(settings, 'MOCK_USER_GROUPS_JSON', '["admin"]'):
+                            assert core_is_user_in_group("mock@example.com", "admin") is True
+
+    def test_unconfigured_backend_raises(self):
+        """Without VISTA_AUTH_BACKEND set, checks raise NotImplementedError."""
+        with patch.object(settings, 'DEBUG', False):
+            with patch.object(settings, 'SKIP_HEADER_CHECK', False):
+                with patch.object(settings, 'VISTA_AUTH_BACKEND', None):
+                    with pytest.raises(NotImplementedError):
+                        core_is_user_in_group("admin@example.com", "admin")
+
+    def test_demo_backend_refused_in_production(self):
+        """Demo backend is refused when ENV=production."""
+        with patch.object(settings, 'DEBUG', False):
+            with patch.object(settings, 'SKIP_HEADER_CHECK', False):
+                with patch.object(settings, 'ENV', 'production'):
+                    with patch.object(settings, 'VISTA_AUTH_BACKEND', 'demo'):
+                        assert core_is_user_in_group("admin@example.com", "admin") is False
 
 
 class TestGroupAuthHelper:

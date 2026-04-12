@@ -15,6 +15,7 @@ from pathlib import Path
 from core.database import create_db_and_tables
 from core.migrations import run_migrations  # legacy no-op
 from core.config import settings as _app_settings
+from core.group_auth import run_auth_startup_self_test
 from utils.boto3_client import boto3_client, ensure_bucket_exists
 from middleware.cors_debug import add_cors_middleware, debug_exception_middleware
 from middleware.security_headers import SecurityHeadersMiddleware
@@ -86,6 +87,11 @@ async def lifespan(app: FastAPI):
     if settings.FAST_TEST_MODE:
         logger.info("FAST_TEST_MODE enabled: skipping DB table creation and S3 bucket checks.")
     else:
+        # Fail closed on unsafe production config and on an unconfigured
+        # or stub group-auth backend. Runs before anything else so startup
+        # aborts with a clear error instead of serving requests.
+        settings.validate_production_safety()
+        run_auth_startup_self_test()
         # NOTE: Database migrations are NOT run automatically on startup.
         # Run migrations manually using: ./start.sh -m or alembic upgrade head
         logger.info("Database migrations should be run manually via './start.sh -m' or 'alembic upgrade head'")

@@ -203,17 +203,37 @@ project's group to access it.
 
 ### Customizing Group Membership
 
-Edit `backend/core/group_auth.py` and replace `_check_group_membership`:
+`core.group_auth._check_group_membership` is **fail-closed** -- it raises
+`NotImplementedError` until you configure a backend. You must set
+`VISTA_AUTH_BACKEND` (see `.env.example`):
+
+- `demo` -- hardcoded example mapping. Development and tests only; refused
+  at startup when `ENV=production`.
+- `custom` -- your real auth integration.
+
+For production, set `VISTA_AUTH_BACKEND=custom`, edit
+`backend/core/group_auth.py`, and replace the `custom` branch of
+`_check_group_membership`:
 
 ```python
 def _check_group_membership(user_email: str, group_id: str) -> bool:
-    # Example: query LDAP
-    response = requests.get(
-        f"{settings.AUTH_SERVER_URL}/api/user/{user_email}/groups",
-        headers={"Authorization": f"Bearer {settings.AUTH_API_TOKEN}"}
-    )
-    return group_id in response.json().get("groups", [])
+    backend = (settings.VISTA_AUTH_BACKEND or "").strip().lower()
+    if backend == "custom":
+        # Example: query LDAP
+        response = requests.get(
+            f"{settings.AUTH_SERVER_URL}/api/user/{user_email}/groups",
+            headers={"Authorization": f"Bearer {settings.AUTH_API_TOKEN}"},
+        )
+        return group_id in response.json().get("groups", [])
+    # ... leave the demo / fallthrough branches intact
 ```
+
+On startup, `run_auth_startup_self_test()` verifies the stub was replaced
+and that the hardcoded demo emails (`admin@example.com`,
+`scientist@example.com`, `user@example.com`) do **not** resolve as members
+of the demo groups. If they do, the app refuses to start -- this catches
+deployments that forgot to replace the helper, or that accidentally named a
+real user after one of the demo emails.
 
 Membership checks are cached for 5 minutes by default (configurable in
 `backend/core/group_auth_helper.py`).
@@ -244,11 +264,13 @@ Membership checks are cached for 5 minutes by default (configurable in
 ## Deployment Checklist
 
 **Backend:**
+- [ ] `ENV=production`
 - [ ] `DEBUG=false`, `SKIP_HEADER_CHECK=false`
+- [ ] `VISTA_AUTH_BACKEND=custom`
 - [ ] `PROXY_SHARED_SECRET` set (matches proxy config)
 - [ ] `alembic upgrade head` run
 - [ ] Production database and S3/MinIO configured
-- [ ] Custom `_check_group_membership` implemented
+- [ ] Custom `_check_group_membership` implemented (startup self-test passes)
 
 **Reverse Proxy:**
 - [ ] OAuth2/SAML/LDAP configured for `/api/` (browser users)

@@ -141,9 +141,21 @@ oauth2-proxy --config oauth2-proxy.cfg
 
 Projects belong to groups (`meta_group_id`). Users must be members of a project's group to access it.
 
+`core.group_auth._check_group_membership` is **fail-closed**: it raises
+`NotImplementedError` until `VISTA_AUTH_BACKEND` is set. Supported values:
+
+- `demo` -- hardcoded example mapping. Development/tests only; refused when `ENV=production`.
+- `custom` -- your real integration (LDAP, OIDC, database, etc.).
+
+On startup, `run_auth_startup_self_test()` verifies that, for non-demo
+backends, the hardcoded demo emails (`admin@example.com`,
+`scientist@example.com`, `user@example.com`) do NOT resolve as members of
+the demo groups. If any do, the app refuses to start.
+
 ### Implementing Group Membership
 
-Edit `backend/core/group_auth.py` and implement `_check_group_membership`:
+Set `VISTA_AUTH_BACKEND=custom`, then edit `backend/core/group_auth.py` and
+replace the `custom` branch of `_check_group_membership`:
 
 ```python
 import requests
