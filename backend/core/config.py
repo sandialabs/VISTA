@@ -123,6 +123,8 @@ class Settings(BaseSettings):
             errors.append("DEBUG=true is not allowed when ENV=production")
         if self.SKIP_HEADER_CHECK:
             errors.append("SKIP_HEADER_CHECK=true is not allowed when ENV=production")
+        if self.FAST_TEST_MODE:
+            errors.append("FAST_TEST_MODE=true is not allowed when ENV=production")
         if (self.VISTA_AUTH_BACKEND or "").strip().lower() == "demo":
             errors.append(
                 "VISTA_AUTH_BACKEND=demo is not allowed when ENV=production. "

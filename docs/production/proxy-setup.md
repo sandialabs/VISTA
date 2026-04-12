@@ -213,16 +213,29 @@ project's group to access it.
 
 For production, set `VISTA_AUTH_BACKEND=custom`, edit
 `backend/core/group_auth.py`, and replace the `custom` branch of
-`_check_group_membership`:
+`_check_group_membership`.
+
+VISTA ships with `AUTH_SERVER_URL` on `core.config.Settings`. Any
+additional knobs the example below references (e.g. an API token) must
+be added by the integrator -- either as new `Settings` fields or via
+`os.getenv()`. They are not pre-defined.
 
 ```python
+import os
+import requests
+from core.config import settings
+
 def _check_group_membership(user_email: str, group_id: str) -> bool:
     backend = (settings.VISTA_AUTH_BACKEND or "").strip().lower()
     if backend == "custom":
-        # Example: query LDAP
+        # Example: query an external auth service.
+        # VISTA_AUTH_API_TOKEN is an integrator-owned env var; add it
+        # to your deployment environment.
         response = requests.get(
             f"{settings.AUTH_SERVER_URL}/api/user/{user_email}/groups",
-            headers={"Authorization": f"Bearer {settings.AUTH_API_TOKEN}"},
+            headers={
+                "Authorization": f"Bearer {os.environ['VISTA_AUTH_API_TOKEN']}",
+            },
         )
         return group_id in response.json().get("groups", [])
     # ... leave the demo / fallthrough branches intact

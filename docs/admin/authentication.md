@@ -155,9 +155,16 @@ the demo groups. If any do, the app refuses to start.
 ### Implementing Group Membership
 
 Set `VISTA_AUTH_BACKEND=custom`, then edit `backend/core/group_auth.py` and
-replace the `custom` branch of `_check_group_membership`:
+replace the `custom` branch of `_check_group_membership`.
+
+VISTA ships with only `AUTH_SERVER_URL` in `core.config.Settings`. The
+examples below reference additional environment variables (LDAP URL,
+bind DN, API tokens, etc.) that **you must add yourself** -- either as
+new fields on `Settings` or via `os.getenv()`. Do not copy the examples
+verbatim expecting those knobs to already exist.
 
 ```python
+import os
 import requests
 from core.config import settings
 
@@ -167,24 +174,27 @@ def _check_group_membership(user_email: str, group_id: str) -> bool:
     Implement based on your auth system.
     """
     # Example 1: LDAP/Active Directory
+    # Add LDAP_URL, LDAP_BIND_DN, LDAP_BIND_PASSWORD, LDAP_BASE_DN,
+    # LDAP_GROUPS_DN to your environment / Settings class first.
     import ldap
-    conn = ldap.initialize(settings.LDAP_URL)
-    conn.simple_bind_s(settings.LDAP_BIND_DN, settings.LDAP_BIND_PASSWORD)
+    conn = ldap.initialize(os.environ["LDAP_URL"])
+    conn.simple_bind_s(os.environ["LDAP_BIND_DN"], os.environ["LDAP_BIND_PASSWORD"])
     result = conn.search_s(
-        settings.LDAP_BASE_DN,
+        os.environ["LDAP_BASE_DN"],
         ldap.SCOPE_SUBTREE,
-        f"(&(mail={user_email})(memberOf=cn={group_id},{settings.LDAP_GROUPS_DN}))"
+        f"(&(mail={user_email})(memberOf=cn={group_id},{os.environ['LDAP_GROUPS_DN']}))",
     )
     return len(result) > 0
-    
+
     # Example 2: External API
+    # settings.AUTH_SERVER_URL already exists; supply your own token env var.
     response = requests.get(
         f"{settings.AUTH_SERVER_URL}/api/users/{user_email}/groups",
-        headers={"Authorization": f"Bearer {settings.AUTH_API_TOKEN}"}
+        headers={"Authorization": f"Bearer {os.environ['VISTA_AUTH_API_TOKEN']}"},
     )
     user_groups = response.json().get("groups", [])
     return group_id in user_groups
-    
+
     # Example 3: Database
     from core.database import get_db
     # Query user_groups table

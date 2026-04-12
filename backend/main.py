@@ -84,14 +84,15 @@ logger = setup_logging()
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     logger.info("Application startup...")
+    # Fail closed on unsafe production config and on an unconfigured or
+    # stub group-auth backend. Runs unconditionally (including under
+    # FAST_TEST_MODE) so a production deployment cannot silently skip the
+    # guards by flipping FAST_TEST_MODE=true.
+    settings.validate_production_safety()
+    run_auth_startup_self_test()
     if settings.FAST_TEST_MODE:
         logger.info("FAST_TEST_MODE enabled: skipping DB table creation and S3 bucket checks.")
     else:
-        # Fail closed on unsafe production config and on an unconfigured
-        # or stub group-auth backend. Runs before anything else so startup
-        # aborts with a clear error instead of serving requests.
-        settings.validate_production_safety()
-        run_auth_startup_self_test()
         # NOTE: Database migrations are NOT run automatically on startup.
         # Run migrations manually using: ./start.sh -m or alembic upgrade head
         logger.info("Database migrations should be run manually via './start.sh -m' or 'alembic upgrade head'")

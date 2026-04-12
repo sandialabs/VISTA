@@ -124,6 +124,7 @@ class TestProductionSafetyValidator:
         with patch.object(settings, "ENV", "production"), \
              patch.object(settings, "DEBUG", True), \
              patch.object(settings, "SKIP_HEADER_CHECK", False), \
+             patch.object(settings, "FAST_TEST_MODE", False), \
              patch.object(settings, "VISTA_AUTH_BACKEND", "custom"), \
              patch.object(settings, "PROXY_SHARED_SECRET", "secret"):
             with pytest.raises(RuntimeError, match="DEBUG=true"):
@@ -133,15 +134,28 @@ class TestProductionSafetyValidator:
         with patch.object(settings, "ENV", "production"), \
              patch.object(settings, "DEBUG", False), \
              patch.object(settings, "SKIP_HEADER_CHECK", True), \
+             patch.object(settings, "FAST_TEST_MODE", False), \
              patch.object(settings, "VISTA_AUTH_BACKEND", "custom"), \
              patch.object(settings, "PROXY_SHARED_SECRET", "secret"):
             with pytest.raises(RuntimeError, match="SKIP_HEADER_CHECK"):
+                settings.validate_production_safety()
+
+    def test_production_with_fast_test_mode_raises(self):
+        """FAST_TEST_MODE=true must not bypass production guards."""
+        with patch.object(settings, "ENV", "production"), \
+             patch.object(settings, "DEBUG", False), \
+             patch.object(settings, "SKIP_HEADER_CHECK", False), \
+             patch.object(settings, "FAST_TEST_MODE", True), \
+             patch.object(settings, "VISTA_AUTH_BACKEND", "custom"), \
+             patch.object(settings, "PROXY_SHARED_SECRET", "secret"):
+            with pytest.raises(RuntimeError, match="FAST_TEST_MODE"):
                 settings.validate_production_safety()
 
     def test_production_with_demo_backend_raises(self):
         with patch.object(settings, "ENV", "production"), \
              patch.object(settings, "DEBUG", False), \
              patch.object(settings, "SKIP_HEADER_CHECK", False), \
+             patch.object(settings, "FAST_TEST_MODE", False), \
              patch.object(settings, "VISTA_AUTH_BACKEND", "demo"), \
              patch.object(settings, "PROXY_SHARED_SECRET", "secret"):
             with pytest.raises(RuntimeError, match="demo is not allowed"):
@@ -151,6 +165,7 @@ class TestProductionSafetyValidator:
         with patch.object(settings, "ENV", "production"), \
              patch.object(settings, "DEBUG", False), \
              patch.object(settings, "SKIP_HEADER_CHECK", False), \
+             patch.object(settings, "FAST_TEST_MODE", False), \
              patch.object(settings, "VISTA_AUTH_BACKEND", "custom"), \
              patch.object(settings, "PROXY_SHARED_SECRET", None):
             with pytest.raises(RuntimeError, match="PROXY_SHARED_SECRET"):
@@ -160,6 +175,7 @@ class TestProductionSafetyValidator:
         with patch.object(settings, "ENV", "production"), \
              patch.object(settings, "DEBUG", False), \
              patch.object(settings, "SKIP_HEADER_CHECK", False), \
+             patch.object(settings, "FAST_TEST_MODE", False), \
              patch.object(settings, "VISTA_AUTH_BACKEND", "custom"), \
              patch.object(settings, "PROXY_SHARED_SECRET", "super-secret"):
             settings.validate_production_safety()
