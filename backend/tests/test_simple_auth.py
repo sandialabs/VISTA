@@ -29,37 +29,39 @@ def test_debug_mode_auth():
 
 
 def test_production_mode_auth():
-    """Test group membership in production mode"""
+    """Test group membership in production mode (demo backend)."""
     clear_cache()
-    
+
     # In production mode, should check actual group membership
     with patch.object(settings, 'DEBUG', False):
         with patch.object(settings, 'SKIP_HEADER_CHECK', False):
-            with patch.object(settings, 'MOCK_USER_EMAIL', 'mock@example.com'):
-                with patch.object(settings, 'MOCK_USER_GROUPS_JSON', '["admin", "users"]'):
-                    # Mock user should have admin access
-                    assert is_user_in_group("mock@example.com", "admin") is True
-                    assert is_user_in_group("mock@example.com", "users") is True
-                    assert is_user_in_group("mock@example.com", "nonexistent") is False
-                    
-                    # Unknown user should not have access
-                    assert is_user_in_group("unknown@example.com", "admin") is False
+            with patch.object(settings, 'VISTA_AUTH_BACKEND', 'demo'):
+                with patch.object(settings, 'MOCK_USER_EMAIL', 'mock@example.com'):
+                    with patch.object(settings, 'MOCK_USER_GROUPS_JSON', '["admin", "users"]'):
+                        # Mock user should have admin access
+                        assert is_user_in_group("mock@example.com", "admin") is True
+                        assert is_user_in_group("mock@example.com", "users") is True
+                        assert is_user_in_group("mock@example.com", "nonexistent") is False
+
+                        # Unknown user should not have access
+                        assert is_user_in_group("unknown@example.com", "admin") is False
 
 
 def test_group_membership():
-    """Test group membership checks"""
+    """Test group membership checks against the demo backend."""
     clear_cache()
-    
+
     with patch.object(settings, 'DEBUG', False):
         with patch.object(settings, 'SKIP_HEADER_CHECK', False):
-            # Test admin user (from dev mapping)
-            assert is_user_in_group("admin@example.com", "admin") is True
-            assert is_user_in_group("admin@example.com", "data-scientists") is True
-            assert is_user_in_group("admin@example.com", "nonexistent-group") is False
-            
-            # Test regular user (from dev mapping)
-            assert is_user_in_group("user@example.com", "project-alpha-group") is True
-            assert is_user_in_group("user@example.com", "admin") is False
+            with patch.object(settings, 'VISTA_AUTH_BACKEND', 'demo'):
+                # Test admin user (from dev mapping)
+                assert is_user_in_group("admin@example.com", "admin") is True
+                assert is_user_in_group("admin@example.com", "data-scientists") is True
+                assert is_user_in_group("admin@example.com", "nonexistent-group") is False
+
+                # Test regular user (from dev mapping)
+                assert is_user_in_group("user@example.com", "project-alpha-group") is True
+                assert is_user_in_group("user@example.com", "admin") is False
 
 
 if __name__ == "__main__":

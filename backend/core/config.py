@@ -8,6 +8,18 @@ class Settings(BaseSettings):
     APP_NAME: str = "Data Management API"
     DEBUG: bool = False
     PORT: int = 8000
+    # Deployment environment: "development", "staging", or "production".
+    # When set to "production", the app refuses to start with DEBUG=true or
+    # SKIP_HEADER_CHECK=true, or with VISTA_AUTH_BACKEND=demo.
+    ENV: str = "development"
+    # Group-auth backend selector. Must be set explicitly to enable group
+    # membership checks. Supported values:
+    #   - "demo": hardcoded example email->group mapping. Development/testing only.
+    #   - "custom": a project-specific implementation is wired into
+    #     core.group_auth._check_group_membership. Fail-closed by default.
+    # Any other value (including unset) causes _check_group_membership to
+    # raise NotImplementedError, preventing accidental prod-bypass.
+    VISTA_AUTH_BACKEND: Optional[str] = None
     # When enabled, avoid any external calls and heavy startup work (for tests)
     FAST_TEST_MODE: bool = False
     SKIP_HEADER_CHECK: bool = False
@@ -91,6 +103,43 @@ class Settings(BaseSettings):
     def MOCK_USER_GROUPS(self):
         import json
         return json.loads(self.MOCK_USER_GROUPS_JSON)
+
+    @property
+    def is_production(self) -> bool:
+        return (self.ENV or "").strip().lower() == "production"
+
+    def validate_production_safety(self) -> None:
+        """Refuse to run in production with unsafe debug/bypass flags or
+        a demo auth backend. Raises RuntimeError with an explicit message.
+
+        Called from application startup; kept as a method (not a field
+        validator) so tests can monkey-patch individual flags without
+        tripping startup-time checks.
+        """
+        if not self.is_production:
+            return
+        errors = []
+        if self.DEBUG:
+            errors.append("DEBUG=true is not allowed when ENV=production")
+        if self.SKIP_HEADER_CHECK:
+            errors.append("SKIP_HEADER_CHECK=true is not allowed when ENV=production")
+        if self.FAST_TEST_MODE:
+            errors.append("FAST_TEST_MODE=true is not allowed when ENV=production")
+        if (self.VISTA_AUTH_BACKEND or "").strip().lower() == "demo":
+            errors.append(
+                "VISTA_AUTH_BACKEND=demo is not allowed when ENV=production. "
+                "Set VISTA_AUTH_BACKEND=custom and implement "
+                "core.group_auth._check_group_membership."
+            )
+        if not self.PROXY_SHARED_SECRET:
+            errors.append(
+                "PROXY_SHARED_SECRET must be set when ENV=production"
+            )
+        if errors:
+            raise RuntimeError(
+                "Refusing to start in production with unsafe config:\n  - "
+                + "\n  - ".join(errors)
+            )
 
     def patch(self, updates: dict):
         """Return a shallow patched copy of settings with provided overrides.

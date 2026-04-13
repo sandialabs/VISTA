@@ -184,6 +184,13 @@ In debug/test mode (`DEBUG=true` or `SKIP_HEADER_CHECK=true`), the dependency fa
 - **Group-Based Access**: Projects belong to groups (`meta_group_id`), users must be members to access
 - **API Keys**: Alternative authentication via `ApiKey` model for programmatic access
 
+**Group-auth backend (fail-closed).** `core/group_auth.py:_check_group_membership` raises `NotImplementedError` by default. Integrators MUST set `VISTA_AUTH_BACKEND`:
+
+- `demo` -- hardcoded example email/group mapping. Development and tests only; refused when `ENV=production`.
+- `custom` -- integrator has replaced `_check_group_membership` with a real auth-system lookup.
+
+Startup calls `run_auth_startup_self_test()` and `settings.validate_production_safety()`. Startup fails if: `VISTA_AUTH_BACKEND` is unset or unknown; `ENV=production` with `DEBUG=true`, `SKIP_HEADER_CHECK=true`, `VISTA_AUTH_BACKEND=demo`, or missing `PROXY_SHARED_SECRET`; or a non-demo backend still grants any of the hardcoded demo emails (`admin@example.com`, `scientist@example.com`, `user@example.com`) access to the demo groups.
+
 ### Caching Strategy
 
 The application implements multi-layer caching for performance:
