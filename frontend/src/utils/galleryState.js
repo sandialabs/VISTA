@@ -184,7 +184,7 @@ function sortImages(images, sortBy) {
   return [...images].sort((a, b) => {
     switch (sortBy) {
       case 'name':
-        return (a.filename || '').localeCompare(b.filename || '');
+        return (a.filename || '').localeCompare(b.filename || '', undefined, { numeric: true, sensitivity: 'base' });
       case 'size':
         return (b.size_bytes || 0) - (a.size_bytes || 0);
       case 'date':

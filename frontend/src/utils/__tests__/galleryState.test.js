@@ -236,6 +236,22 @@ describe('galleryState utilities', () => {
       expect(result.map(i => i.id)).toEqual(['img-1', 'img-2', 'img-3']);
     });
 
+    test('sorts by name using natural order for numeric filenames', () => {
+      const numericImages = [
+        { id: 'a', filename: 'image10.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+        { id: 'b', filename: 'image2.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+        { id: 'c', filename: 'image1.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+        { id: 'd', filename: 'image20.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+      ];
+      const result = sortImages(numericImages, 'name');
+      expect(result.map(i => i.filename)).toEqual([
+        'image1.jpg',
+        'image2.jpg',
+        'image10.jpg',
+        'image20.jpg',
+      ]);
+    });
+
     test('sorts by size descending', () => {
       const result = sortImages(mockImages, 'size');
       expect(result.map(i => i.id)).toEqual(['img-2', 'img-3', 'img-1']);
