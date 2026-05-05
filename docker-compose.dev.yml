@@ -122,6 +122,7 @@ services:
       - CHECK_MOCK_MEMBERSHIP=true
       - MOCK_USER_EMAIL=test@example.com
       - MOCK_USER_GROUPS_JSON=["admin-group", "data-scientists", "project-alpha-group"]
+      - VISTA_AUTH_BACKEND=demo
       # Python settings
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
