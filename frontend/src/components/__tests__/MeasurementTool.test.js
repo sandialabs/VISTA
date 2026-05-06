@@ -349,4 +349,78 @@ describe('MeasurementTool', () => {
       expect(screen.getByText('Save Measurement')).toBeInTheDocument();
     });
   });
+
+  describe('context menu prevention', () => {
+    const getOverlay = (container) => {
+      const overlay = container.querySelector('div[style*="cursor"]');
+      overlay.getBoundingClientRect = jest.fn(() => ({
+        left: 0, top: 0, width: 800, height: 600
+      }));
+      return overlay;
+    };
+
+    it('prevents context menu on the overlay div', () => {
+      const { container } = render(<MeasurementTool {...defaultProps} />);
+      const overlay = getOverlay(container);
+
+      const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      overlay.dispatchEvent(contextMenuEvent);
+
+      expect(contextMenuEvent.defaultPrevented).toBe(true);
+    });
+
+    it('prevents context menu on document while drawing', () => {
+      const { container } = render(<MeasurementTool {...defaultProps} />);
+      const overlay = getOverlay(container);
+
+      fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 2 });
+
+      const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.dispatchEvent(contextMenuEvent);
+
+      expect(contextMenuEvent.defaultPrevented).toBe(true);
+    });
+
+    it('prevents context menu on document while save dialog is open', () => {
+      const { container } = render(<MeasurementTool {...defaultProps} />);
+      const overlay = getOverlay(container);
+
+      fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 2 });
+      fireEvent.mouseUp(overlay, { clientX: 200, clientY: 100 });
+
+      expect(screen.getByText('Save Measurement')).toBeInTheDocument();
+
+      const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.dispatchEvent(contextMenuEvent);
+
+      expect(contextMenuEvent.defaultPrevented).toBe(true);
+    });
+
+    it('does not prevent context menu on document when idle (not drawing, no dialog)', () => {
+      render(<MeasurementTool {...defaultProps} />);
+
+      const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.dispatchEvent(contextMenuEvent);
+
+      expect(contextMenuEvent.defaultPrevented).toBe(false);
+    });
+
+    it('stops preventing context menu after save dialog is dismissed', () => {
+      const { container } = render(<MeasurementTool {...defaultProps} />);
+      const overlay = getOverlay(container);
+
+      fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 2 });
+      fireEvent.mouseUp(overlay, { clientX: 200, clientY: 100 });
+
+      const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+      fireEvent.click(cancelButton);
+
+      expect(screen.queryByText('Save Measurement')).not.toBeInTheDocument();
+
+      const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.dispatchEvent(contextMenuEvent);
+
+      expect(contextMenuEvent.defaultPrevented).toBe(false);
+    });
+  });
 });

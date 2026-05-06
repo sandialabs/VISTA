@@ -10,18 +10,21 @@ export default function MeasurementSaveDialog({
   onCancel
 }) {
   return (
-    <div style={{
-      position: 'fixed',
-      top: '50%',
-      left: '50%',
-      transform: 'translate(-50%, -50%)',
-      background: 'white',
-      padding: '24px',
-      borderRadius: '8px',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-      minWidth: '350px',
-      zIndex: 2000
-    }}>
+    <div
+      onContextMenu={(e) => e.preventDefault()}
+      style={{
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        background: 'white',
+        padding: '24px',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+        minWidth: '350px',
+        zIndex: 2000
+      }}
+    >
       <h3 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>Save Measurement</h3>
 
       <div style={{ marginBottom: '16px' }}>

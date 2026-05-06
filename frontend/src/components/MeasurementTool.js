@@ -205,6 +205,13 @@ export default function MeasurementTool({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  useEffect(() => {
+    if (!isDrawing && !showSaveDialog) return;
+    const preventDefault = (e) => e.preventDefault();
+    document.addEventListener('contextmenu', preventDefault);
+    return () => document.removeEventListener('contextmenu', preventDefault);
+  }, [isDrawing, showSaveDialog]);
+
   // Show calibration error immediately when measure mode is active without calibration
   if (!calibration && leftClickEnabled) {
     return (
