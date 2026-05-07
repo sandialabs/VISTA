@@ -11,7 +11,6 @@ export default function MeasurementSaveDialog({
 }) {
   return (
     <div
-      onContextMenu={(e) => e.preventDefault()}
       style={{
         position: 'fixed',
         top: '50%',
