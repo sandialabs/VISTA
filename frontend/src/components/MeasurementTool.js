@@ -79,7 +79,7 @@ export default function MeasurementTool({
     };
 
     const distance = calculateDistance(finalLine);
-    if (distance < 5) {
+    if (distance < 1) {
       setDrawingLine(null);
       setIsDrawing(false);
       return;

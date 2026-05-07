@@ -88,7 +88,7 @@ describe('MeasurementTool', () => {
       expect(line).not.toBeInTheDocument();
     });
 
-    it('discards measurements shorter than 5 pixels', () => {
+    it('discards measurements shorter than 1 pixel', () => {
       const { container } = render(<MeasurementTool {...defaultProps} />);
 
       const overlay = container.querySelector('div[style*="cursor"]');
@@ -101,10 +101,9 @@ describe('MeasurementTool', () => {
         height: 600
       }));
 
-      // Draw a very short line (2 pixels)
+      // Click without dragging (0-pixel line)
       fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 2 });
-      fireEvent.mouseMove(overlay, { clientX: 102, clientY: 100 });
-      fireEvent.mouseUp(overlay, { clientX: 102, clientY: 100 });
+      fireEvent.mouseUp(overlay, { clientX: 100, clientY: 100 });
 
       // Save dialog should not appear
       expect(screen.queryByText('Save Measurement')).not.toBeInTheDocument();
