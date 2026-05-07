@@ -368,7 +368,7 @@ describe('MeasurementTool', () => {
       expect(contextMenuEvent.defaultPrevented).toBe(true);
     });
 
-    it('prevents context menu on document while drawing', () => {
+    it('blocks the first contextmenu event on document after right-click measurement starts', () => {
       const { container } = render(<MeasurementTool {...defaultProps} />);
       const overlay = getOverlay(container);
 
@@ -380,19 +380,19 @@ describe('MeasurementTool', () => {
       expect(contextMenuEvent.defaultPrevented).toBe(true);
     });
 
-    it('prevents context menu on document while save dialog is open', () => {
+    it('blocks only the first contextmenu per gesture (one-shot)', () => {
       const { container } = render(<MeasurementTool {...defaultProps} />);
       const overlay = getOverlay(container);
 
       fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 2 });
-      fireEvent.mouseUp(overlay, { clientX: 200, clientY: 100 });
 
-      expect(screen.getByText('Save Measurement')).toBeInTheDocument();
+      const firstEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.dispatchEvent(firstEvent);
+      expect(firstEvent.defaultPrevented).toBe(true);
 
-      const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
-      document.dispatchEvent(contextMenuEvent);
-
-      expect(contextMenuEvent.defaultPrevented).toBe(true);
+      const secondEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.dispatchEvent(secondEvent);
+      expect(secondEvent.defaultPrevented).toBe(false);
     });
 
     it('does not prevent context menu on document when idle (not drawing, no dialog)', () => {
@@ -404,17 +404,23 @@ describe('MeasurementTool', () => {
       expect(contextMenuEvent.defaultPrevented).toBe(false);
     });
 
-    it('stops preventing context menu after save dialog is dismissed', () => {
+    it('blocks contextmenu for ctrl+click measurements (trackpad support)', () => {
       const { container } = render(<MeasurementTool {...defaultProps} />);
       const overlay = getOverlay(container);
 
-      fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 2 });
-      fireEvent.mouseUp(overlay, { clientX: 200, clientY: 100 });
+      fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 0, ctrlKey: true });
 
-      const cancelButton = screen.getByRole('button', { name: 'Cancel' });
-      fireEvent.click(cancelButton);
+      const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.dispatchEvent(contextMenuEvent);
 
-      expect(screen.queryByText('Save Measurement')).not.toBeInTheDocument();
+      expect(contextMenuEvent.defaultPrevented).toBe(true);
+    });
+
+    it('does not block contextmenu for left-click measurements', () => {
+      const { container } = render(<MeasurementTool {...defaultProps} leftClickEnabled={true} />);
+      const overlay = getOverlay(container);
+
+      fireEvent.mouseDown(overlay, { clientX: 100, clientY: 100, button: 0 });
 
       const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
       document.dispatchEvent(contextMenuEvent);
