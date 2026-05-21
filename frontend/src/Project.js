@@ -9,6 +9,7 @@ import InspectionWorkbenchPanel from './components/InspectionWorkbenchPanel';
 import AnalyzeWorkbenchTab from './components/AnalyzeWorkbenchTab';
 import ProjectConfigurationPanel from './components/ProjectConfigurationPanel';
 import ProjectDataSummaryTab from './components/ProjectDataSummaryTab';
+import ProjectDataExportPanel from './components/ProjectDataExportPanel';
 import ProjectReportTab from './components/ProjectReportTab';
 import ProjectPhaseFlow from './components/ProjectPhaseFlow';
 import ImagesToPartsTab from './components/ImagesToPartsTab';
@@ -340,6 +341,14 @@ function Project({ currentUserGroups = [] }) {
                   setError={setError}
                 />
               </div>
+              <div className="export-section">
+                <ProjectDataExportPanel
+                  projectId={id}
+                  projectName={project?.name}
+                  counts={dataCounts}
+                  setError={setError}
+                />
+              </div>
             </div>
           )}
           <section className="workbench-panel project-data-action-panel" aria-label="Project data validation">
@@ -481,6 +490,7 @@ function Project({ currentUserGroups = [] }) {
     handleUploadComplete,
     ingestResult,
     project?.is_archived,
+    project?.name,
     project?.project_type,
     refreshProjectCounts,
     refreshRecentlyDeletedOverlays,

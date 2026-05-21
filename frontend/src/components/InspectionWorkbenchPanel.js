@@ -42,6 +42,7 @@ const MPR_RECONSTRUCTION_MODES = {
 const DEFAULT_MPR_PROJECTION_MIRROR = { axial: false, coronal: false, sagittal: false };
 const MPR_VOLUME_CACHE_LIMIT = 4;
 const MPR_SLICE_CANVAS_CACHE_LIMIT = 96;
+const DEFAULT_DISPLAY_VALUE_DOMAIN = { min: 0, max: 255, step: 1, label: '8-bit image' };
 const mprVolumeCacheStore = new Map();
 const DEFAULT_OVERLAY_LAYERS = [
   { id: 'segmentation', label: 'Segmentation', color: '#ef4444' },
@@ -56,6 +57,199 @@ const DEFAULT_INSPECTOR_HOTKEYS = {
 };
 const DEFAULT_INSPECTION_COLUMN_WIDTHS = { leftPx: null, rightPx: null };
 const MEASUREMENT_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
+const DEFAULT_ANNOTATION_COLOR = '#f97316';
+const DEFAULT_ANNOTATION_FILL_OPACITY = 0.5;
+const DEFAULT_SEGMENT_COLOR = '#22c55e';
+const SEGMENT_COLORS = ['#22c55e', '#3b82f6', '#f97316', '#e11d48', '#a855f7', '#14b8a6', '#facc15'];
+const SEGMENTATION_HELPER_TOOLS = [
+  { id: 'brush', label: 'Brush', icon: 'brush', detail: 'Paint freehand strokes onto the current segment.' },
+  { id: 'eraser', label: 'Eraser', icon: 'eraser', detail: 'Remove painted areas with the same brush controls.' },
+  { id: 'connected', label: 'Connected', icon: 'target', detail: 'Seed a contiguous area using sensitivity around the clicked pixel.' },
+  { id: 'polygon', label: 'Polygon', icon: 'polygon', detail: 'Click boundary vertices, double-click to close the perimeter.' },
+  { id: 'circle', label: 'Circle', icon: 'circle', detail: 'Click the center, then drag to set the radius.' },
+  { id: 'rectangle', label: 'Rectangle', icon: 'rectangle', detail: 'Drag from one corner to the opposite corner.' },
+  { id: 'threshold', label: 'Threshold', icon: 'threshold', detail: 'Preview a local intensity band around a clicked point.' },
+  { id: 'level-trace', label: 'Level Trace', icon: 'contour', detail: 'Trace an equal-intensity contour from the clicked point.' },
+  { id: 'scissors', label: 'Scissors', icon: 'scissors', detail: 'Mark cut paths for trimming a selected segment.' },
+  { id: 'ml-helper', label: 'ML Helper', icon: 'spark', detail: 'Run a toolbox segmentation method once per slice, then select regions by click.' },
+];
+const SEGMENTATION_POINT_MARKER_TOOLS = new Set(['polygon', 'circle', 'rectangle']);
+const SEGMENTATION_ML_METHOD_GROUPS = [
+  {
+    id: 'opencv',
+    label: 'OpenCV',
+    methods: [
+      { id: 'segmentation.connected_components', label: 'Connected Components' },
+      { id: 'threshold.otsu', label: 'Otsu Threshold' },
+      { id: 'segmentation.watershed_seeds', label: 'Watershed Seeds' },
+    ],
+  },
+  {
+    id: 'yolo',
+    label: 'YOLO',
+    methods: [
+      { id: 'ml.yolov8.segment', label: 'YOLOv8 Segment' },
+      { id: 'ml.yolo.ultralytics', label: 'Ultralytics Configurable' },
+    ],
+  },
+  {
+    id: 'sam',
+    label: 'SAM',
+    methods: [
+      { id: 'ml.sam.segment_anything', label: 'Segment Anything' },
+      { id: 'ml.mask2former.universal_segment', label: 'Mask2Former' },
+      { id: 'ml.oneformer.universal_segment', label: 'OneFormer' },
+    ],
+  },
+];
+const DEFAULT_SEGMENTATION_ML_PARAMETERS = {
+  'segmentation.connected_components': { min_area_px: 12 },
+  'threshold.otsu': {},
+  'segmentation.watershed_seeds': { seed_spacing_px: 18, compactness: 0.01 },
+  'ml.yolov8.segment': { model: 'yolov8n-seg.pt', confidence: 0.25 },
+  'ml.yolo.ultralytics': { family: 'yolo11', task: 'segment', size: 'n', model: '', confidence: 0.25, iou: 0.45 },
+  'ml.sam.segment_anything': {
+    variant: 'sam2.1_hiera_large',
+    prompt_mode: 'automatic',
+    prompt_json: {},
+    min_mask_region_area: 8,
+    max_foreground_fraction: 0.85,
+  },
+  'ml.mask2former.universal_segment': { checkpoint: 'facebook/mask2former-swin-large-ade-semantic', task: 'semantic' },
+  'ml.oneformer.universal_segment': { checkpoint: 'shi-labs/oneformer_ade20k_swin_large', task: 'semantic' },
+};
+
+function SegmentationToolIcon({ icon }) {
+  const commonProps = {
+    className: 'segmentation-tool-icon',
+    viewBox: '0 0 24 24',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  };
+  if (icon === 'brush') {
+    return (
+      <svg {...commonProps}>
+        <path d="M15.5 3.5l5 5-8.4 8.4-5-5 8.4-8.4z" />
+        <path d="M7.1 11.9c-2.1 1-3.2 2.7-3.2 5.2 1.8-.1 3.5-.5 5.1-1.3" />
+      </svg>
+    );
+  }
+  if (icon === 'eraser') {
+    return (
+      <svg {...commonProps}>
+        <path d="M4 15l8.6-8.6a2 2 0 0 1 2.8 0l4.2 4.2a2 2 0 0 1 0 2.8L13 20H8.8L4 15z" />
+        <path d="M9.5 9.5l5 5" />
+        <path d="M13 20h7" />
+      </svg>
+    );
+  }
+  if (icon === 'target') {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="12" r="7" />
+        <circle cx="12" cy="12" r="2.4" />
+        <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+      </svg>
+    );
+  }
+  if (icon === 'polygon') {
+    return (
+      <svg {...commonProps}>
+        <path d="M6 6l10-2 4 9-7 7-9-5 2-9z" />
+        <circle cx="6" cy="6" r="1.4" />
+        <circle cx="16" cy="4" r="1.4" />
+        <circle cx="20" cy="13" r="1.4" />
+        <circle cx="13" cy="20" r="1.4" />
+      </svg>
+    );
+  }
+  if (icon === 'circle') {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="12" r="7.5" />
+        <circle cx="12" cy="12" r="1.4" />
+        <path d="M12 12l5.3-5.3" />
+      </svg>
+    );
+  }
+  if (icon === 'rectangle') {
+    return (
+      <svg {...commonProps}>
+        <rect x="5" y="6" width="14" height="12" rx="1" />
+        <circle cx="5" cy="6" r="1.3" />
+        <circle cx="19" cy="18" r="1.3" />
+      </svg>
+    );
+  }
+  if (icon === 'threshold') {
+    return (
+      <svg {...commonProps}>
+        <path d="M5 18V6" />
+        <path d="M19 18V6" />
+        <path d="M5 15c3-5 6-5 9 0 1.4 2.3 3 2.7 5 0" />
+        <path d="M8 9h8" />
+      </svg>
+    );
+  }
+  if (icon === 'contour') {
+    return (
+      <svg {...commonProps}>
+        <path d="M4.5 13.5c1.5-6.2 8.4-8.8 13-4.6 3.7 3.4 1 9.7-4.5 9.6-4.2 0-5.4-4.2-2.8-6.1 2-1.5 4.5-.2 4.8 2.1" />
+      </svg>
+    );
+  }
+  if (icon === 'scissors') {
+    return (
+      <svg {...commonProps}>
+        <circle cx="6.5" cy="6.5" r="2.3" />
+        <circle cx="6.5" cy="17.5" r="2.3" />
+        <path d="M8.4 8.4L20 20" />
+        <path d="M8.4 15.6L20 4" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...commonProps}>
+      <path d="M12 3l1.7 5.1L19 10l-5.3 1.9L12 17l-1.7-5.1L5 10l5.3-1.9L12 3z" />
+      <path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z" />
+    </svg>
+  );
+}
+const SEGMENTATION_ML_PARAMETER_FIELDS = {
+  'segmentation.connected_components': [
+    { name: 'min_area_px', label: 'Min area', type: 'number', min: 0, step: 1 },
+  ],
+  'segmentation.watershed_seeds': [
+    { name: 'seed_spacing_px', label: 'Seed spacing', type: 'number', min: 1, step: 1 },
+    { name: 'compactness', label: 'Compactness', type: 'number', min: 0, step: 0.01 },
+  ],
+  'ml.yolov8.segment': [
+    { name: 'model', label: 'Model', type: 'text' },
+    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
+  ],
+  'ml.yolo.ultralytics': [
+    { name: 'family', label: 'Family', type: 'select', options: ['yolov8', 'yolo11', 'custom'] },
+    { name: 'task', label: 'Task', type: 'select', options: ['detect', 'segment'] },
+    { name: 'size', label: 'Size', type: 'select', options: ['n', 's', 'm', 'l', 'x'] },
+    { name: 'model', label: 'Custom model', type: 'text' },
+    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
+    { name: 'iou', label: 'IoU', type: 'number', min: 0, max: 1, step: 0.05 },
+  ],
+  'ml.sam.segment_anything': [
+    { name: 'variant', label: 'Variant', type: 'select', options: ['sam2.1_hiera_tiny', 'sam2.1_hiera_small', 'sam2.1_hiera_base_plus', 'sam2.1_hiera_large', 'sam_vit_b', 'sam_vit_l', 'sam_vit_h'] },
+    { name: 'prompt_mode', label: 'Prompt', type: 'select', options: ['automatic', 'box', 'points'] },
+    { name: 'min_mask_region_area', label: 'Min region', type: 'number', min: 1, step: 1 },
+    { name: 'max_foreground_fraction', label: 'Max foreground', type: 'number', min: 0.05, max: 0.98, step: 0.01 },
+  ],
+  'ml.mask2former.universal_segment': [
+    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['facebook/mask2former-swin-large-ade-semantic', 'facebook/mask2former-swin-large-ade-panoptic', 'facebook/mask2former-swin-tiny-ade-semantic'] },
+    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
+  ],
+  'ml.oneformer.universal_segment': [
+    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['shi-labs/oneformer_ade20k_swin_large', 'shi-labs/oneformer_coco_swin_large', 'shi-labs/oneformer_coco_dinat_large'] },
+    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
+  ],
+};
 const MEASUREMENT_ENDPOINT_HOVER_RATIO = 0.01;
 const MEASUREMENT_LOCAL_ZOOM_DIAMETER_RATIO = 0.5;
 const MEASUREMENT_LOCAL_ZOOM_SCALE = 10;
@@ -144,7 +338,7 @@ function getMeasurementLinesByImageId(annotations) {
       : Math.hypot(x2 - x1, y2 - y1);
     const key = String(imageId);
     const lineIndex = (acc[key] || []).length;
-    const color = annotation?.metadata?.measurement_color || MEASUREMENT_COLORS[lineIndex % MEASUREMENT_COLORS.length];
+    const color = getAnnotationColor(annotation, MEASUREMENT_COLORS[lineIndex % MEASUREMENT_COLORS.length]);
     const entry = {
       id: String(annotation.id || `${imageId}-${x1}-${y1}`),
       imageId: key,
@@ -157,6 +351,10 @@ function getMeasurementLinesByImageId(annotations) {
       imageWidth,
       imageHeight,
       color,
+      axis: line.axis || annotation?.geometry?.axis || '',
+      sliceIndex: Number.isFinite(Number(line.slice_index ?? line.sliceIndex ?? annotation?.geometry?.slice_index ?? annotation?.geometry?.sliceIndex))
+        ? Number(line.slice_index ?? line.sliceIndex ?? annotation?.geometry?.slice_index ?? annotation?.geometry?.sliceIndex)
+        : null,
       distanceMm: Number.isFinite(lengthMm) ? lengthMm : null,
       distancePx,
     };
@@ -181,7 +379,7 @@ function getBoxAnnotationsByImageId(annotations) {
     if (![imageWidth, imageHeight].every(Number.isFinite) || imageWidth <= 0 || imageHeight <= 0) return acc;
 	    const key = String(imageId);
 	    const boxIndex = (acc[key] || []).length;
-	    const color = annotation?.metadata?.annotation_color || annotation?.metadata?.measurement_color || MEASUREMENT_COLORS[boxIndex % MEASUREMENT_COLORS.length];
+	    const color = getAnnotationColor(annotation, MEASUREMENT_COLORS[boxIndex % MEASUREMENT_COLORS.length]);
 	    const widthMm = Number(annotation?.measurements?.width_mm);
 	    const heightMm = Number(annotation?.measurements?.height_mm);
 	    const entry = {
@@ -195,12 +393,156 @@ function getBoxAnnotationsByImageId(annotations) {
 	      imageWidth,
 	      imageHeight,
 	      color,
+	      fillOpacity: getAnnotationFillOpacity(annotation),
+	      axis: annotation?.geometry?.box?.axis || annotation?.geometry?.axis || '',
+	      sliceIndex: Number.isFinite(Number(annotation?.geometry?.box?.slice_index ?? annotation?.geometry?.box?.sliceIndex ?? annotation?.geometry?.slice_index ?? annotation?.geometry?.sliceIndex))
+	        ? Number(annotation?.geometry?.box?.slice_index ?? annotation?.geometry?.box?.sliceIndex ?? annotation?.geometry?.slice_index ?? annotation?.geometry?.sliceIndex)
+	        : null,
 	      widthMm: Number.isFinite(widthMm) ? widthMm : null,
 	      heightMm: Number.isFinite(heightMm) ? heightMm : null,
 	    };
     acc[key] = [...(acc[key] || []), entry];
     return acc;
   }, {});
+}
+
+function getAnnotationColor(annotation, fallback = DEFAULT_ANNOTATION_COLOR) {
+  const color = String(
+    annotation?.metadata?.annotation_color
+    || annotation?.metadata?.measurement_color
+    || annotation?.color
+    || fallback
+  ).trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+}
+
+function getAnnotationFillOpacity(annotation, fallback = DEFAULT_ANNOTATION_FILL_OPACITY) {
+  const value = Number(annotation?.metadata?.annotation_fill_opacity ?? annotation?.fillOpacity ?? annotation?.fill_opacity);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(1, Math.max(0, value));
+}
+
+function getMprSliceKey(axis, sliceIndex) {
+  return `${axis}:${Number(sliceIndex) || 0}`;
+}
+
+function getMprMeasurementLinesBySlice(annotations) {
+  if (!Array.isArray(annotations)) return {};
+  return annotations.reduce((acc, annotation) => {
+    const line = annotation?.geometry?.line;
+    const axis = String(line?.axis || annotation?.geometry?.axis || '').trim();
+    const sliceIndex = Number(line?.slice_index ?? line?.sliceIndex ?? annotation?.geometry?.slice_index ?? annotation?.geometry?.sliceIndex);
+    if (!axis || !Number.isFinite(sliceIndex)) return acc;
+    const parsed = getMeasurementLinesByImageId([{ ...annotation, image_id: annotation?.image_id || getMprSliceKey(axis, sliceIndex) }]);
+    const entry = Object.values(parsed)[0]?.[0];
+    if (!entry) return acc;
+    const key = getMprSliceKey(axis, sliceIndex);
+    acc[key] = [...(acc[key] || []), { ...entry, axis, sliceIndex }];
+    return acc;
+  }, {});
+}
+
+function getMprBoxAnnotationsBySlice(annotations) {
+  if (!Array.isArray(annotations)) return {};
+  return annotations.reduce((acc, annotation) => {
+    const box = annotation?.geometry?.box;
+    const axis = String(box?.axis || annotation?.geometry?.axis || '').trim();
+    const sliceIndex = Number(box?.slice_index ?? box?.sliceIndex ?? annotation?.geometry?.slice_index ?? annotation?.geometry?.sliceIndex);
+    if (!axis || !Number.isFinite(sliceIndex)) return acc;
+    const bbox = annotation?.bbox || box;
+    const imageWidth = Number(annotation?.geometry?.imageWidth || box?.imageWidth || bbox?.imageWidth);
+    const imageHeight = Number(annotation?.geometry?.imageHeight || box?.imageHeight || bbox?.imageHeight);
+    const x = Number(bbox?.x);
+    const y = Number(bbox?.y);
+    const width = Number(bbox?.width);
+    const height = Number(bbox?.height);
+    if (![x, y, width, height, imageWidth, imageHeight].every(Number.isFinite) || width <= 0 || height <= 0) return acc;
+    const key = getMprSliceKey(axis, sliceIndex);
+    const boxIndex = (acc[key] || []).length;
+    acc[key] = [...(acc[key] || []), {
+      id: String(annotation.id || `${key}-${x}-${y}`),
+      imageId: key,
+      name: annotation?.comment || annotation?.defect_class || `Box ${boxIndex + 1}`,
+      x,
+      y,
+      width,
+      height,
+      imageWidth,
+      imageHeight,
+      color: getAnnotationColor(annotation, MEASUREMENT_COLORS[boxIndex % MEASUREMENT_COLORS.length]),
+      fillOpacity: getAnnotationFillOpacity(annotation),
+      axis,
+      sliceIndex,
+    }];
+    return acc;
+  }, {});
+}
+
+function getMprCubeAnnotations(annotations) {
+  if (!Array.isArray(annotations)) return [];
+  return annotations.map((annotation) => {
+    const cube = annotation?.geometry?.cube;
+    if (!cube || typeof cube !== 'object') return null;
+    const axis = String(cube.axis || '').trim();
+    const startSlice = Number(cube.startSlice ?? cube.start_slice);
+    const endSlice = Number(cube.endSlice ?? cube.end_slice);
+    const x = Number(cube.x);
+    const y = Number(cube.y);
+    const width = Number(cube.width);
+    const height = Number(cube.height);
+    const imageWidth = Number(cube.imageWidth || cube.image_width);
+    const imageHeight = Number(cube.imageHeight || cube.image_height);
+    if (!axis || ![startSlice, endSlice, x, y, width, height, imageWidth, imageHeight].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+    return {
+      id: String(annotation.id || `${axis}-${startSlice}-${endSlice}-${x}-${y}`),
+      axis,
+      startSlice: Math.min(startSlice, endSlice),
+      endSlice: Math.max(startSlice, endSlice),
+      x,
+      y,
+      width,
+      height,
+      imageWidth,
+      imageHeight,
+      color: getAnnotationColor(annotation),
+      fillOpacity: getAnnotationFillOpacity(annotation),
+      name: annotation?.comment || annotation?.defect_class || 'Cube',
+    };
+  }).filter(Boolean);
+}
+
+function getMprCubeBoxesForSlice(cubes, axis, sliceIndex) {
+  return (Array.isArray(cubes) ? cubes : [])
+    .filter((cube) => cube.axis === axis && Number(sliceIndex) >= cube.startSlice && Number(sliceIndex) <= cube.endSlice)
+    .map((cube) => ({
+      ...cube,
+      id: `${cube.id}-${axis}-${sliceIndex}`,
+      imageId: getMprSliceKey(axis, sliceIndex),
+    }));
+}
+
+function makeMprCubeVertices(axis, firstBox, secondBox) {
+  const lowerSlice = Math.min(Number(firstBox.sliceIndex), Number(secondBox.sliceIndex));
+  const upperSlice = Math.max(Number(firstBox.sliceIndex), Number(secondBox.sliceIndex));
+  const x = Math.min(Number(firstBox.x), Number(secondBox.x));
+  const y = Math.min(Number(firstBox.y), Number(secondBox.y));
+  const width = Math.max(Number(firstBox.x) + Number(firstBox.width), Number(secondBox.x) + Number(secondBox.width)) - x;
+  const height = Math.max(Number(firstBox.y) + Number(firstBox.height), Number(secondBox.y) + Number(secondBox.height)) - y;
+  const planeCorners = [
+    { x, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height },
+    { x, y: y + height },
+  ];
+  const toVolumeVertex = (point, slice) => {
+    if (axis === 'coronal') return { x: Number(point.x.toFixed(2)), y: slice, z: Number(point.y.toFixed(2)) };
+    if (axis === 'sagittal') return { x: slice, y: Number(point.x.toFixed(2)), z: Number(point.y.toFixed(2)) };
+    return { x: Number(point.x.toFixed(2)), y: Number(point.y.toFixed(2)), z: slice };
+  };
+  return [
+    ...planeCorners.map((point) => toVolumeVertex(point, lowerSlice)),
+    ...planeCorners.map((point) => toVolumeVertex(point, upperSlice)),
+  ];
 }
 
 function isFiniteMeasurementLine(line) {
@@ -438,6 +780,136 @@ function getVolumeSourceImages(part, projectImageLookup = {}) {
     .sort((left, right) => left.sliceIndex - right.sliceIndex || left.filename.localeCompare(right.filename));
 }
 
+function getNumericRangeFromCandidate(candidate) {
+  if (!candidate) return null;
+  if (Array.isArray(candidate) && candidate.length >= 2) {
+    const min = Number(candidate[0]);
+    const max = Number(candidate[1]);
+    return Number.isFinite(min) && Number.isFinite(max) && max > min ? { min, max } : null;
+  }
+  if (typeof candidate !== 'object') return null;
+  const min = Number(candidate.min ?? candidate.minimum ?? candidate.low ?? candidate.lower ?? candidate.min_value ?? candidate.range_min);
+  const max = Number(candidate.max ?? candidate.maximum ?? candidate.high ?? candidate.upper ?? candidate.max_value ?? candidate.range_max);
+  return Number.isFinite(min) && Number.isFinite(max) && max > min ? { min, max } : null;
+}
+
+function getDisplayDomainFromDtype(value) {
+  const dtype = String(value || '').trim().toLowerCase();
+  if (!dtype) return null;
+  if (/uint8|\|u1|<u1|>u1|ubyte/.test(dtype)) return { min: 0, max: 255, step: 1, label: 'uint8' };
+  if (/int8|\|i1|<i1|>i1/.test(dtype)) return { min: -128, max: 127, step: 1, label: 'int8' };
+  if (/uint16|<u2|>u2|\|u2/.test(dtype)) return { min: 0, max: 65535, step: 1, label: 'uint16' };
+  if (/uint32|<u4|>u4|\|u4/.test(dtype)) return { min: 0, max: 4294967295, step: 1, label: 'uint32' };
+  if (/int16|<i2|>i2|\|i2/.test(dtype)) return { min: -32768, max: 32767, step: 1, label: 'int16' };
+  if (/int32|<i4|>i4|\|i4/.test(dtype)) return { min: -2147483648, max: 2147483647, step: 1, label: 'int32' };
+  if (/float|double|<f|>f|\|f/.test(dtype)) return { min: 0, max: 1, step: 0.001, label: dtype.includes('64') ? 'float64' : 'float' };
+  return null;
+}
+
+function getDisplayDomainFromBitDepth(value, signed = false) {
+  const bits = Number(value);
+  if (!Number.isFinite(bits) || bits <= 0 || bits > 32) return null;
+  if (signed) {
+    const max = (2 ** (bits - 1)) - 1;
+    return { min: -(2 ** (bits - 1)), max, step: 1, label: `int${bits}` };
+  }
+  return { min: 0, max: (2 ** bits) - 1, step: 1, label: `${bits}-bit` };
+}
+
+function getDisplayDomainFromMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const dtypeDomain = getDisplayDomainFromDtype(
+    metadata.voxel_dtype
+      ?? metadata.pixel_dtype
+      ?? metadata.data_dtype
+      ?? metadata.dtype
+      ?? metadata.pixel_type
+      ?? metadata.data_type,
+  );
+  if (dtypeDomain) return dtypeDomain;
+  const bitDepthDomain = getDisplayDomainFromBitDepth(
+    metadata.bit_depth ?? metadata.bits_allocated ?? metadata.bits_per_sample,
+    metadata.signed === true || String(metadata.pixel_representation || '').toLowerCase() === 'signed',
+  );
+  if (bitDepthDomain) return bitDepthDomain;
+  const explicitRange = [
+    metadata.data_value_range,
+    metadata.voxel_value_range,
+    metadata.pixel_value_range,
+    metadata.scalar_range,
+    metadata.value_range,
+    metadata.intensity_range,
+    metadata.display_range,
+  ].map(getNumericRangeFromCandidate).find(Boolean);
+  if (explicitRange) {
+    const span = explicitRange.max - explicitRange.min;
+    return {
+      ...explicitRange,
+      step: Number.isInteger(explicitRange.min) && Number.isInteger(explicitRange.max) ? 1 : Math.max(0.001, span / 1000),
+      label: 'metadata range',
+    };
+  }
+  return null;
+}
+
+function getPartDisplayValueDomain(part, projectImageLookup = {}) {
+  const partDomain = getDisplayDomainFromMetadata(part?.metadata);
+  if (partDomain) return partDomain;
+
+  const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
+  for (const source of sourceImages) {
+    const sourceDomain = getDisplayDomainFromMetadata(source?.metadata) || getDisplayDomainFromMetadata(source);
+    if (sourceDomain) return sourceDomain;
+    const filename = String(source?.filename || '');
+    const imageId = String(source?.image_id || '');
+    const imageRecord = projectImageLookup[imageId] || projectImageLookup[filename];
+    const imageDomain = getDisplayDomainFromMetadata(getImageMetadata(imageRecord));
+    if (imageDomain) return imageDomain;
+  }
+
+  return DEFAULT_DISPLAY_VALUE_DOMAIN;
+}
+
+function getNormalizedDisplayDomain(domain) {
+  const min = Number(domain?.min);
+  const max = Number(domain?.max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return DEFAULT_DISPLAY_VALUE_DOMAIN;
+  const step = Number(domain?.step);
+  return {
+    min,
+    max,
+    step: Number.isFinite(step) && step > 0 ? step : 1,
+    label: domain?.label || DEFAULT_DISPLAY_VALUE_DOMAIN.label,
+  };
+}
+
+function formatWindowValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0';
+  if (Number.isInteger(numeric)) return String(numeric);
+  return numeric.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function normalizeDisplayWindow(candidate, domain, fallback) {
+  const safeDomain = getNormalizedDisplayDomain(domain);
+  const minimumGap = Math.min(safeDomain.step, safeDomain.max - safeDomain.min);
+  const fallbackWindow = fallback && Number.isFinite(Number(fallback.min)) && Number.isFinite(Number(fallback.max))
+    ? fallback
+    : { min: safeDomain.min, max: safeDomain.max };
+  const rawMin = Number(candidate?.min);
+  const rawMax = Number(candidate?.max);
+  let min = Number.isFinite(rawMin) ? rawMin : Number(fallbackWindow.min);
+  let max = Number.isFinite(rawMax) ? rawMax : Number(fallbackWindow.max);
+  min = clampRange(min, safeDomain.min, safeDomain.max - minimumGap, safeDomain.min);
+  max = clampRange(max, min + minimumGap, safeDomain.max, safeDomain.max);
+  return { min, max };
+}
+
+function getWindowPercent(value, domain) {
+  const safeDomain = getNormalizedDisplayDomain(domain);
+  return ((clampRange(value, safeDomain.min, safeDomain.max, safeDomain.min) - safeDomain.min) / (safeDomain.max - safeDomain.min)) * 100;
+}
+
 function getShellImageLayers(part, projectImageLookup = {}) {
   const imagesByView = part?.metadata?.view_images;
   if (!imagesByView || typeof imagesByView !== 'object') return [];
@@ -568,15 +1040,17 @@ function getAnnotationSourceImageIdLookup(imageEntries, projectImageLookup) {
   }, {});
 }
 
-function renderAnnotationOverlay({ measurementLines = [], boxes = [], fontSize = 24 }) {
+function renderAnnotationOverlay({ measurementLines = [], boxes = [], fontSize = 24, selectedAnnotationId = '' }) {
   return (
     <>
       {measurementLines.filter(isFiniteMeasurementLine).map((line) => {
         const labelPosition = getMeasurementLabelViewBoxPosition(line, fontSize);
+        const isSelected = String(selectedAnnotationId || '') === String(line.id || '');
         return (
-          <g key={`line-${line.id}`}>
-            <line x1={(line.x1 / line.imageWidth) * 1000} y1={(line.y1 / line.imageHeight) * 1000} x2={(line.x2 / line.imageWidth) * 1000} y2={(line.y2 / line.imageHeight) * 1000} stroke={line.color} strokeWidth="3" />
-            <text x={labelPosition.x} y={labelPosition.y} fill={line.color} fontSize={fontSize}>
+          <g key={`line-${line.id}`} className={isSelected ? 'inspection-annotation-selected' : ''}>
+            {isSelected && <line x1={(line.x1 / line.imageWidth) * 1000} y1={(line.y1 / line.imageHeight) * 1000} x2={(line.x2 / line.imageWidth) * 1000} y2={(line.y2 / line.imageHeight) * 1000} stroke="#ffffff" strokeWidth="10" />}
+            <line x1={(line.x1 / line.imageWidth) * 1000} y1={(line.y1 / line.imageHeight) * 1000} x2={(line.x2 / line.imageWidth) * 1000} y2={(line.y2 / line.imageHeight) * 1000} stroke={line.color} strokeWidth={isSelected ? '6' : '3'} />
+            <text x={labelPosition.x} y={labelPosition.y} fill={line.color} fontSize={fontSize} fontWeight={isSelected ? '800' : '400'}>
               {getMeasurementLineLabel(line)}
             </text>
           </g>
@@ -588,13 +1062,16 @@ function renderAnnotationOverlay({ measurementLines = [], boxes = [], fontSize =
         const width = (box.width / box.imageWidth) * 1000;
         const height = (box.height / box.imageHeight) * 1000;
         const labelSize = Math.max(18, fontSize * 0.82);
+        const isSelected = String(selectedAnnotationId || '') === String(box.id || '');
+        const fillOpacity = Number.isFinite(Number(box.fillOpacity)) ? Math.min(1, Math.max(0, Number(box.fillOpacity))) : DEFAULT_ANNOTATION_FILL_OPACITY;
         return (
-          <g key={`box-${box.id}`}>
-            <rect x={x} y={y} width={width} height={height} fill="transparent" stroke={box.color} strokeWidth="3" />
-            <text x={Math.min(980, Math.max(20, x + (width / 2)))} y={Math.max(24, y - 8)} fill={box.color} fontSize={labelSize} textAnchor="middle">
+          <g key={`box-${box.id}`} className={isSelected ? 'inspection-annotation-selected' : ''}>
+            {isSelected && <rect x={x} y={y} width={width} height={height} fill={box.color} fillOpacity={Math.min(1, fillOpacity + 0.18)} stroke="#ffffff" strokeWidth="10" />}
+            <rect x={x} y={y} width={width} height={height} fill={box.color} fillOpacity={fillOpacity} stroke={box.color} strokeWidth={isSelected ? '6' : '3'} />
+            <text x={Math.min(980, Math.max(20, x + (width / 2)))} y={Math.max(24, y - 8)} fill={box.color} fontSize={labelSize} fontWeight={isSelected ? '800' : '400'} textAnchor="middle">
               {getAnnotationBoxWidthLabel(box)}
             </text>
-            <text x={Math.min(980, x + width + 12)} y={Math.min(980, y + (height / 2))} fill={box.color} fontSize={labelSize} transform={`rotate(90 ${Math.min(980, x + width + 12)} ${Math.min(980, y + (height / 2))})`} textAnchor="middle">
+            <text x={Math.min(980, x + width + 12)} y={Math.min(980, y + (height / 2))} fill={box.color} fontSize={labelSize} fontWeight={isSelected ? '800' : '400'} transform={`rotate(90 ${Math.min(980, x + width + 12)} ${Math.min(980, y + (height / 2))})`} textAnchor="middle">
               {getAnnotationBoxHeightLabel(box)}
             </text>
           </g>
@@ -795,6 +1272,198 @@ function getMprCrosshairStyle(axis, slicePosition, dimensions, mirroredAxes = DE
   return { '--crosshair-x': displayX(y), '--crosshair-y': displayY(z), ...representedStyle };
 }
 
+function createDefaultSegment(index = 0) {
+  return {
+    id: `segment-${Date.now()}-${index}`,
+    name: index === 0 ? 'Segment A' : `Segment ${String.fromCharCode(65 + (index % 26))}`,
+    color: SEGMENT_COLORS[index % SEGMENT_COLORS.length] || DEFAULT_SEGMENT_COLOR,
+    areas: [],
+  };
+}
+
+function getMprAxisImageDimensions(axis, dimensions = {}) {
+  if (axis === 'coronal') {
+    return {
+      width: Math.max(1, Number(dimensions.sagittal) || 1),
+      height: Math.max(1, Number(dimensions.axial) || 1),
+    };
+  }
+  if (axis === 'sagittal') {
+    return {
+      width: Math.max(1, Number(dimensions.coronal) || 1),
+      height: Math.max(1, Number(dimensions.axial) || 1),
+    };
+  }
+  return {
+    width: Math.max(1, Number(dimensions.sagittal) || 1),
+    height: Math.max(1, Number(dimensions.coronal) || 1),
+  };
+}
+
+function getSegmentationShapeKey(shape, index) {
+  return `${shape?.operation || 'add'}-${shape?.tool || 'shape'}-${shape?.axis || 'axis'}-${shape?.sliceIndex ?? 'slice'}-${shape?.id || index}`;
+}
+
+function renderSegmentationShape(shape, options = {}) {
+  if (!shape) return null;
+  const strokeColor = options.color || shape.color || DEFAULT_SEGMENT_COLOR;
+  const fillColor = options.fillColor || strokeColor;
+  const fillOpacity = Number.isFinite(Number(options.fillOpacity)) ? Number(options.fillOpacity) : 0.22;
+  const strokeWidth = options.strokeWidth || 2.5;
+  const points = Array.isArray(shape.points) ? shape.points : [];
+  const className = [
+    'segmentation-helper-shape',
+    shape.operation === 'subtract' ? 'subtract' : 'add',
+    options.preview ? 'preview' : '',
+  ].filter(Boolean).join(' ');
+
+  if (shape.tool === 'brush' || shape.tool === 'eraser' || shape.tool === 'scissors') {
+    if (points.length === 0) return null;
+    const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+    return (
+      <path
+        d={path}
+        className={className}
+        fill="none"
+        stroke={strokeColor}
+        strokeWidth={Math.max(2, Number(shape.brushSize) || 12)}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={shape.tool === 'eraser' || shape.operation === 'subtract' ? 0.72 : 0.88}
+      />
+    );
+  }
+
+  if (shape.tool === 'polygon' && points.length > 0) {
+    const pointString = points.map((point) => `${point.x},${point.y}`).join(' ');
+    return (
+      <polyline
+        points={pointString}
+        className={className}
+        fill={shape.closed && points.length > 2 ? fillColor : 'none'}
+        fillOpacity={shape.closed && points.length > 2 ? fillOpacity : 0}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'circle' && shape.center) {
+    const radius = Number(shape.radius) || (
+      shape.edge ? Math.hypot(shape.edge.x - shape.center.x, shape.edge.y - shape.center.y) : 0
+    );
+    if (radius <= 0) return null;
+    return (
+      <circle
+        cx={shape.center.x}
+        cy={shape.center.y}
+        r={radius}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'rectangle' && shape.start && shape.end) {
+    const x = Math.min(shape.start.x, shape.end.x);
+    const y = Math.min(shape.start.y, shape.end.y);
+    const width = Math.abs(shape.end.x - shape.start.x);
+    const height = Math.abs(shape.end.y - shape.start.y);
+    if (width <= 0 || height <= 0) return null;
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'ml-helper' && Array.isArray(shape.bbox) && shape.bbox.length >= 4) {
+    const [x1, y1, x2, y2] = shape.bbox.map(Number);
+    const width = x2 - x1;
+    const height = y2 - y1;
+    if (![x1, y1, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+    return (
+      <rect
+        x={x1}
+        y={y1}
+        width={width}
+        height={height}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'connected') {
+    if (!shape.maskPath) return null;
+    return (
+      <path
+        d={shape.maskPath}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (['threshold', 'level-trace'].includes(shape.tool) && shape.seed) {
+    const radius = Number(shape.radius) || Number(shape.sensitivity) || 20;
+    return (
+      <ellipse
+        cx={shape.seed.x}
+        cy={shape.seed.y}
+        rx={radius * 1.25}
+        ry={radius}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+        strokeDasharray={shape.tool === 'level-trace' ? '7 5' : undefined}
+      />
+    );
+  }
+
+  return null;
+}
+
+function getSegmentationShapePoints(shape) {
+  if (!shape) return [];
+  if (!SEGMENTATION_POINT_MARKER_TOOLS.has(shape.tool)) return [];
+  if (Array.isArray(shape.points)) return shape.points;
+  if (shape.start && shape.end) return [shape.start, shape.end];
+  if (shape.center && shape.edge) return [shape.center, shape.edge];
+  return [];
+}
+
+function getSegmentationMlMethods(groupId) {
+  return (SEGMENTATION_ML_METHOD_GROUPS.find((group) => group.id === groupId) || SEGMENTATION_ML_METHOD_GROUPS[0]).methods;
+}
+
+function getDefaultSegmentationMlMethod(groupId) {
+  return getSegmentationMlMethods(groupId)[0]?.id || 'segmentation.connected_components';
+}
+
+function getDefaultSegmentationMlParameters(methodId) {
+  return { ...(DEFAULT_SEGMENTATION_ML_PARAMETERS[methodId] || {}) };
+}
+
 function getPlaneFocusRange(position, maxDimension) {
   const half = maxDimension / 10;
   let lo = position - half;
@@ -858,7 +1527,193 @@ function useMprVolumeCache(imageStack, dimensions) {
   return cacheState;
 }
 
-function MprSliceCanvas({ axis, volumeCache, volumeCacheStatus, slicePosition, dimensions, displayWindow }) {
+function applyDisplayWindowToCanvasContext(ctx, width, height, displayWindow, displayDomain) {
+  const domain = getNormalizedDisplayDomain(displayDomain);
+  const windowRange = normalizeDisplayWindow(displayWindow, domain);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const { data } = imageData;
+  const domainSpan = Math.max(Number.EPSILON, domain.max - domain.min);
+  const displaySpan = Math.max(Number.EPSILON, windowRange.max - windowRange.min);
+
+  for (let i = 0; i < data.length; i += 4) {
+    const intensity = (data[i] * 0.2126) + (data[i + 1] * 0.7152) + (data[i + 2] * 0.0722);
+    const sourceValue = domain.min + ((intensity / 255) * domainSpan);
+    const clipped = Math.min(windowRange.max, Math.max(windowRange.min, sourceValue));
+    const normalized = Math.round(((clipped - windowRange.min) / displaySpan) * 255);
+    data[i] = normalized;
+    data[i + 1] = normalized;
+    data[i + 2] = normalized;
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function MprWindowedImage({
+  src,
+  alt,
+  className,
+  draggable = false,
+  onDragStart,
+  style,
+  displayWindow,
+  displayDomain,
+}) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !src) return undefined;
+    if (typeof window !== 'undefined' && /jsdom/i.test(window.navigator?.userAgent || '')) {
+      return undefined;
+    }
+    const ctx = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+    if (!ctx) return undefined;
+
+    let cancelled = false;
+    const image = new Image();
+    image.onload = () => {
+      if (cancelled) return;
+      const width = image.naturalWidth || image.width || 1;
+      const height = image.naturalHeight || image.height || 1;
+      canvas.width = width;
+      canvas.height = height;
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(image, 0, 0, width, height);
+      applyDisplayWindowToCanvasContext(ctx, width, height, displayWindow, displayDomain);
+    };
+    image.onerror = () => {
+      if (cancelled) return;
+      canvas.width = 1;
+      canvas.height = 1;
+      ctx.clearRect(0, 0, 1, 1);
+    };
+    image.src = src;
+    return () => {
+      cancelled = true;
+    };
+  }, [displayDomain, displayWindow, src]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={className}
+      role="img"
+      aria-label={alt}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      style={style}
+      data-display-window={`${formatWindowValue(displayWindow?.min ?? 0)}-${formatWindowValue(displayWindow?.max ?? 255)}`}
+      data-display-domain={`${formatWindowValue(displayDomain?.min ?? 0)}-${formatWindowValue(displayDomain?.max ?? 255)}`}
+    />
+  );
+}
+
+function DisplayWindowControl({ displayWindow, displayDomain, onChange }) {
+  const domain = getNormalizedDisplayDomain(displayDomain);
+  const normalizedWindow = normalizeDisplayWindow(displayWindow, domain);
+  const [draftValues, setDraftValues] = useState({
+    min: formatWindowValue(normalizedWindow.min),
+    max: formatWindowValue(normalizedWindow.max),
+  });
+
+  useEffect(() => {
+    setDraftValues({
+      min: formatWindowValue(normalizedWindow.min),
+      max: formatWindowValue(normalizedWindow.max),
+    });
+  }, [normalizedWindow.max, normalizedWindow.min]);
+
+  const updateWindow = useCallback((patch) => {
+    onChange((previous) => normalizeDisplayWindow({ ...previous, ...patch }, domain, normalizedWindow));
+  }, [domain, normalizedWindow, onChange]);
+
+  const handleTextChange = (edge, value) => {
+    setDraftValues((previous) => ({ ...previous, [edge]: value }));
+    if (value.trim() === '') return;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return;
+    updateWindow({ [edge]: numeric });
+  };
+
+  const handleTextBlur = () => {
+    setDraftValues({
+      min: formatWindowValue(normalizedWindow.min),
+      max: formatWindowValue(normalizedWindow.max),
+    });
+  };
+
+  const minPercent = getWindowPercent(normalizedWindow.min, domain);
+  const maxPercent = getWindowPercent(normalizedWindow.max, domain);
+
+  return (
+    <fieldset
+      className="pt3-window-control"
+      style={{
+        '--window-min-percent': `${minPercent}%`,
+        '--window-max-percent': `${maxPercent}%`,
+      }}
+    >
+      <legend>Display window</legend>
+      <div className="pt3-window-range-control" data-testid="display-window-slider">
+        <div className="pt3-window-range-track" aria-hidden="true">
+          <span className="pt3-window-range-fill" />
+        </div>
+        <input
+          type="range"
+          aria-label="Display window minimum handle"
+          min={domain.min}
+          max={domain.max}
+          step={domain.step}
+          value={normalizedWindow.min}
+          onChange={(event) => updateWindow({ min: Number(event.target.value) })}
+        />
+        <input
+          type="range"
+          aria-label="Display window maximum handle"
+          min={domain.min}
+          max={domain.max}
+          step={domain.step}
+          value={normalizedWindow.max}
+          onChange={(event) => updateWindow({ max: Number(event.target.value) })}
+        />
+      </div>
+      <div className="pt3-window-number-row">
+        <label htmlFor="mpr-window-min">
+          Min
+          <input
+            id="mpr-window-min"
+            type="number"
+            aria-label="Display window minimum"
+            min={domain.min}
+            max={domain.max}
+            step={domain.step}
+            value={draftValues.min}
+            onChange={(event) => handleTextChange('min', event.target.value)}
+            onBlur={handleTextBlur}
+          />
+        </label>
+        <label htmlFor="mpr-window-max">
+          Max
+          <input
+            id="mpr-window-max"
+            type="number"
+            aria-label="Display window maximum"
+            min={domain.min}
+            max={domain.max}
+            step={domain.step}
+            value={draftValues.max}
+            onChange={(event) => handleTextChange('max', event.target.value)}
+            onBlur={handleTextBlur}
+          />
+        </label>
+      </div>
+      <span className="pt3-window-domain">
+        {formatWindowValue(domain.min)}-{formatWindowValue(domain.max)} {domain.label}
+      </span>
+    </fieldset>
+  );
+}
+
+function MprSliceCanvas({ axis, volumeCache, volumeCacheStatus, slicePosition, dimensions, displayWindow, displayDomain }) {
   const canvasRef = useRef(null);
   const relevantSlicePosition = slicePosition[axis];
 
@@ -884,21 +1739,9 @@ function MprSliceCanvas({ axis, volumeCache, volumeCacheStatus, slicePosition, d
     canvas.height = sliceCanvas.height || 1;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(sliceCanvas, 0, 0, canvas.width, canvas.height);
-    const minWindow = clampRange(displayWindow?.min, 0, 254, 0);
-    const maxWindow = clampRange(displayWindow?.max, minWindow + 1, 255, 255);
-    const windowRange = Math.max(1, maxWindow - minWindow);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const { data } = imageData;
-    for (let i = 0; i < data.length; i += 4) {
-      const value = data[i];
-      const normalized = Math.round(((Math.min(maxWindow, Math.max(minWindow, value)) - minWindow) / windowRange) * 255);
-      data[i] = normalized;
-      data[i + 1] = normalized;
-      data[i + 2] = normalized;
-    }
-    ctx.putImageData(imageData, 0, 0);
+    applyDisplayWindowToCanvasContext(ctx, canvas.width, canvas.height, displayWindow, displayDomain);
     return undefined;
-  }, [axis, dimensions, displayWindow?.max, displayWindow?.min, relevantSlicePosition, slicePosition, volumeCache]);
+  }, [axis, dimensions, displayDomain, displayWindow, relevantSlicePosition, slicePosition, volumeCache]);
 
   return (
     <canvas
@@ -906,7 +1749,8 @@ function MprSliceCanvas({ axis, volumeCache, volumeCacheStatus, slicePosition, d
       className="mpr-slice-canvas"
       aria-hidden="true"
       data-volume-cache-status={volumeCacheStatus}
-      data-display-window={`${displayWindow?.min ?? 0}-${displayWindow?.max ?? 255}`}
+      data-display-window={`${formatWindowValue(displayWindow?.min ?? 0)}-${formatWindowValue(displayWindow?.max ?? 255)}`}
+      data-display-domain={`${formatWindowValue(displayDomain?.min ?? 0)}-${formatWindowValue(displayDomain?.max ?? 255)}`}
     />
   );
 }
@@ -1139,10 +1983,28 @@ function getAnnotationTooltip(annotation) {
   const value = getAnnotationListValue(annotation);
   if (type) details.push(type);
   if (value) details.push(value);
-  const createdAt = annotation?.created_at ? new Date(annotation.created_at).toLocaleString() : '';
+  const createdAt = formatAnnotationTimestamp(getAnnotationCreatedAt(annotation));
   if (createdAt) details.push(`Created: ${createdAt}`);
-  if (annotation?.created_by) details.push(`By: ${annotation.created_by}`);
+  details.push(`By: ${getAnnotationCreator(annotation)}`);
   return details.join(' • ');
+}
+
+function getAnnotationCreator(annotation) {
+  const creator = String(annotation?.created_by || annotation?.createdBy || '').trim();
+  if (creator) return creator;
+  const updatedBy = String(annotation?.updated_by || annotation?.updatedBy || '').trim();
+  return updatedBy || 'Unknown user';
+}
+
+function getAnnotationCreatedAt(annotation) {
+  return annotation?.created_at || annotation?.createdAt || annotation?.updated_at || annotation?.updatedAt || '';
+}
+
+function formatAnnotationTimestamp(value) {
+  if (!value) return 'Unknown time';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
 }
 
 function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFilters }) {
@@ -1159,11 +2021,27 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [slicePosition, setSlicePosition] = useState({ axial: 0, coronal: 0, sagittal: 0 });
   const [viewportTransform, setViewportTransform] = useState({ zoom: 1, panX: 0, panY: 0 });
   const [activeMprPane, setActiveMprPane] = useState('axial');
-  const [mprExpandedPane, setMprExpandedPane] = useState(null);
   const [mprRotation, setMprRotation] = useState({ x: -22, y: 32 });
   const [mprReconstructionMode, setMprReconstructionMode] = useState(MPR_RECONSTRUCTION_MODES.orientation);
   const [mprProjectionMirror, setMprProjectionMirror] = useState(DEFAULT_MPR_PROJECTION_MIRROR);
   const [activeWorkbenchModal, setActiveWorkbenchModal] = useState(null);
+  const [segmentationHelperOpen, setSegmentationHelperOpen] = useState(false);
+  const [segmentationHelperAxis, setSegmentationHelperAxis] = useState('axial');
+  const [segmentationSegments, setSegmentationSegments] = useState(() => [createDefaultSegment(0)]);
+  const [selectedSegmentationSegmentId, setSelectedSegmentationSegmentId] = useState('');
+  const [editingSegmentationSegmentId, setEditingSegmentationSegmentId] = useState('');
+  const [segmentationTool, setSegmentationTool] = useState('brush');
+  const [segmentationOperation, setSegmentationOperation] = useState('add');
+  const [segmentationBrushSize, setSegmentationBrushSize] = useState(18);
+  const [segmentationSensitivity, setSegmentationSensitivity] = useState(28);
+  const [segmentationPendingSelection, setSegmentationPendingSelection] = useState(null);
+  const [segmentationDraftShape, setSegmentationDraftShape] = useState(null);
+  const [segmentationPointerPreview, setSegmentationPointerPreview] = useState(null);
+  const [segmentationMlGroup, setSegmentationMlGroup] = useState('opencv');
+  const [segmentationMlMethod, setSegmentationMlMethod] = useState('segmentation.connected_components');
+  const [segmentationMlParameters, setSegmentationMlParameters] = useState(() => getDefaultSegmentationMlParameters('segmentation.connected_components'));
+  const [segmentationMlStatus, setSegmentationMlStatus] = useState('');
+  const [segmentationMlLoading, setSegmentationMlLoading] = useState(false);
   const [displayWindow, setDisplayWindow] = useState({ min: 0, max: 255 });
   const [activeOverlayIds, setActiveOverlayIds] = useState([]);
   const [cursorProbe, setCursorProbe] = useState({ x: 50, y: 50 });
@@ -1176,7 +2054,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [selectedViewName, setSelectedViewName] = useState('');
   const [hiddenViewNames, setHiddenViewNames] = useState([]);
   const [renderCategories, setRenderCategories] = useState(['source', 'overlay']);
-  const [tileSizePercent, setTileSizePercent] = useState(100);
+  const [tileColumnCount, setTileColumnCount] = useState(3);
   const [imageEnabled, setImageEnabled] = useState(true);
   const [measurementEntries, setMeasurementEntries] = useState([]);
   const [inspectorViewport, setInspectorViewport] = useState({ zoom: 1, panX: 0, panY: 0 });
@@ -1194,7 +2072,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [annotationToolMode, setAnnotationToolMode] = useState('');
   const [otherAnnotationModalVisible, setOtherAnnotationModalVisible] = useState(false);
   const [annotationEditModalVisible, setAnnotationEditModalVisible] = useState(false);
-  const [customDefectTypeDraft, setCustomDefectTypeDraft] = useState('');
+  const [annotationEditDraft, setAnnotationEditDraft] = useState(null);
+  const customDefectTypeDraft = '';
   const [tileAnnotationDraft, setTileAnnotationDraft] = useState(null);
   const [tileAnnotationPreview, setTileAnnotationPreview] = useState(null);
   const [inspectorHotkeys, setInspectorHotkeys] = useState(DEFAULT_INSPECTOR_HOTKEYS);
@@ -1226,8 +2105,16 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     .filter(Boolean) : []), [projectConfiguration]);
   const measurementLinesByImageId = useMemo(() => getMeasurementLinesByImageId(annotations), [annotations]);
   const boxAnnotationsByImageId = useMemo(() => getBoxAnnotationsByImageId(annotations), [annotations]);
+  const mprMeasurementLinesBySlice = useMemo(() => getMprMeasurementLinesBySlice(annotations), [annotations]);
+  const mprBoxAnnotationsBySlice = useMemo(() => getMprBoxAnnotationsBySlice(annotations), [annotations]);
+  const mprCubeAnnotations = useMemo(() => getMprCubeAnnotations(annotations), [annotations]);
+  const selectedSegmentationSegment = useMemo(() => (
+    segmentationSegments.find((segment) => segment.id === selectedSegmentationSegmentId) || segmentationSegments[0] || null
+  ), [selectedSegmentationSegmentId, segmentationSegments]);
   const [pendingMeasurePoint, setPendingMeasurePoint] = useState(null);
   const [pendingBoxPoint, setPendingBoxPoint] = useState(null);
+  const [mprAnnotationDraft, setMprAnnotationDraft] = useState(null);
+  const [mprAnnotationPreview, setMprAnnotationPreview] = useState(null);
   const [fullscreenAnnotationPreview, setFullscreenAnnotationPreview] = useState(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
   const [viewportWidth, setViewportWidth] = useState(() => (
@@ -1239,6 +2126,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const inspectionResizeSaveTimerRef = useRef(null);
   const mprDragRef = useRef(null);
   const tileAnnotationDraftRef = useRef(null);
+  const mprAnnotationDraftRef = useRef(null);
+  const segmentationDraftRef = useRef(null);
+  const segmentationMlCacheRef = useRef(new Map());
   const pendingMeasurePointRef = useRef(null);
   const pendingBoxPointRef = useRef(null);
   const fullscreenImageRef = useRef(null);
@@ -1260,6 +2150,19 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       },
     };
   }, [hierarchy, projectType]);
+
+  useEffect(() => {
+    if (segmentationSegments.length === 0) {
+      const firstSegment = createDefaultSegment(0);
+      setSegmentationSegments([firstSegment]);
+      setSelectedSegmentationSegmentId(firstSegment.id);
+      setEditingSegmentationSegmentId(firstSegment.id);
+      return;
+    }
+    if (!selectedSegmentationSegmentId || !segmentationSegments.some((segment) => segment.id === selectedSegmentationSegmentId)) {
+      setSelectedSegmentationSegmentId(segmentationSegments[0].id);
+    }
+  }, [selectedSegmentationSegmentId, segmentationSegments]);
   const leftRegion = inspectionHierarchy.regions[inspectionHierarchy.leftColumn];
   const rightRegion = inspectionHierarchy.regions[inspectionHierarchy.rightColumn];
   const inspectorRegion = inspectionHierarchy.regions.inspector;
@@ -1541,6 +2444,10 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     [filteredParts, selectedPartId],
   );
   const mprDimensions = useMemo(() => getMprDimensions(selectedPart), [selectedPart]);
+  const displayValueDomain = useMemo(
+    () => getPartDisplayValueDomain(selectedPart, projectImageLookup),
+    [projectImageLookup, selectedPart],
+  );
 
   useEffect(() => {
     const canvas = mprOverlayCanvasRef.current;
@@ -1630,6 +2537,13 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       return !hidden.has(String(entry.viewName || '').toLowerCase());
     });
   }, [hiddenViewNames, renderCategories, selectedPartImageRefs]);
+  const tileColumnMax = Math.max(1, selectedPartImageRefs.length || visibleSelectedPartImageRefs.length || 1);
+  const normalizedTileColumnCount = Math.round(clampRange(
+    tileColumnCount,
+    1,
+    tileColumnMax,
+    Math.min(3, tileColumnMax),
+  ));
   const annotationSourceImageIdLookup = useMemo(
     () => getAnnotationSourceImageIdLookup(selectedPartImageRefs, projectImageLookup),
     [projectImageLookup, selectedPartImageRefs],
@@ -1704,25 +2618,35 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   }, [effectiveMprReconstructionMode, mprReconstructionMode]);
 
   const tooltipValues = useMemo(() => {
+    const domain = getNormalizedDisplayDomain(displayValueDomain);
+    const activeWindow = normalizeDisplayWindow(displayWindow, domain);
     const axisSeed = slicePosition.axial + slicePosition.coronal + slicePosition.sagittal;
-    const sourceValue = Math.min(
+    const unitValue = Math.min(
       255,
       Math.max(0, Math.round(cursorProbe.x * 0.35 + cursorProbe.y * 0.65 + axisSeed)),
     );
-    const windowRange = Math.max(1, displayWindow.max - displayWindow.min);
-    const base = Math.round(((Math.min(displayWindow.max, Math.max(displayWindow.min, sourceValue)) - displayWindow.min) / windowRange) * 255);
+    const sourceValue = domain.min + ((unitValue / 255) * (domain.max - domain.min));
+    const windowRange = Math.max(Number.EPSILON, activeWindow.max - activeWindow.min);
+    const base = Math.round(((Math.min(activeWindow.max, Math.max(activeWindow.min, sourceValue)) - activeWindow.min) / windowRange) * 255);
     const overlays = activeOverlayIds.map((overlayId, index) => {
       const value = Number((((base + (index + 1) * 17) / 255) * 100).toFixed(1));
       return { overlayId, value };
     });
     return { base, overlays };
-  }, [activeOverlayIds, cursorProbe.x, cursorProbe.y, displayWindow.max, displayWindow.min, slicePosition]);
+  }, [activeOverlayIds, cursorProbe.x, cursorProbe.y, displayValueDomain, displayWindow, slicePosition]);
 
   useEffect(() => {
     if (selectedPart && selectedPart.id !== selectedPartId) {
       setSelectedPartId(selectedPart.id);
     }
   }, [selectedPart, selectedPartId]);
+
+  useEffect(() => {
+    if (selectedPartImageRefs.length === 0) return;
+    if (tileColumnCount !== normalizedTileColumnCount) {
+      setTileColumnCount(normalizedTileColumnCount);
+    }
+  }, [normalizedTileColumnCount, selectedPartImageRefs.length, tileColumnCount]);
 
   useEffect(() => {
     if (selectedPartImageRefs.length === 0) {
@@ -1758,12 +2682,16 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     );
     setMprProjectionMirror(normalizeMprProjectionMirror(savedMpr.projection_mirror));
     const savedDisplayWindow = savedMpr.display_window || {};
+    const displayDomain = getNormalizedDisplayDomain(displayValueDomain);
     const fallbackContrast = clampRange(savedMpr.contrast_percent, 50, 150, 100);
-    const fallbackMin = Math.max(0, Math.round(((100 - fallbackContrast) / 100) * 127));
-    const fallbackMax = Math.min(255, Math.round((fallbackContrast / 100) * 255));
-    const minValue = clampRange(savedDisplayWindow.min, 0, 254, fallbackMin);
-    const maxValue = clampRange(savedDisplayWindow.max, minValue + 1, 255, Math.max(minValue + 1, fallbackMax));
-    setDisplayWindow({ min: minValue, max: maxValue });
+    const fallbackRange = displayDomain.max - displayDomain.min;
+    const legacyFallback = fallbackContrast === 100
+      ? { min: displayDomain.min, max: displayDomain.max }
+      : {
+        min: displayDomain.min + (Math.max(0, 100 - fallbackContrast) / 100) * (fallbackRange / 2),
+        max: displayDomain.min + Math.min(1, fallbackContrast / 100) * fallbackRange,
+      };
+    setDisplayWindow(normalizeDisplayWindow(savedDisplayWindow, displayDomain, legacyFallback));
     const defaultActive = getOverlayLayers(selectedPart)
       .slice(0, 2)
       .map((overlay) => overlay.id);
@@ -1776,7 +2704,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     setSegmentationRun(getLatestRunFromMetadata(selectedPart, 'segmentation_runs'));
     setMeasurementRun(getLatestRunFromMetadata(selectedPart, 'measurement_runs'));
     setMlActionLoading({ segmentation: false, measurement: false });
-  }, [selectedPart, projectType, mprDimensions, workspaceHydration]);
+  }, [selectedPart, projectType, mprDimensions, workspaceHydration, displayValueDomain]);
 
   useEffect(() => {
     const savedInspector = workspaceHydration?.inspector || {};
@@ -2036,6 +2964,459 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     event.preventDefault();
   };
 
+  const openSegmentationHelper = () => {
+    const fallbackAxis = activeMprPane === 'volume' ? 'axial' : activeMprPane;
+    setSegmentationHelperAxis(MPR_AXES.includes(fallbackAxis) ? fallbackAxis : 'axial');
+    setSegmentationPendingSelection(null);
+    setSegmentationDraftShape(null);
+    segmentationDraftRef.current = null;
+    setSegmentationHelperOpen(true);
+  };
+
+  const closeSegmentationHelper = () => {
+    setSegmentationHelperOpen(false);
+    setSegmentationPendingSelection(null);
+    setSegmentationDraftShape(null);
+    setSegmentationPointerPreview(null);
+    segmentationDraftRef.current = null;
+  };
+
+  const addSegmentationSegment = () => {
+    setSegmentationSegments((prev) => {
+      const nextSegment = createDefaultSegment(prev.length);
+      setSelectedSegmentationSegmentId(nextSegment.id);
+      setEditingSegmentationSegmentId(nextSegment.id);
+      return [...prev, nextSegment];
+    });
+  };
+
+  const updateSegmentationSegment = (segmentId, patch) => {
+    setSegmentationSegments((prev) => prev.map((segment) => (
+      segment.id === segmentId ? { ...segment, ...patch } : segment
+    )));
+  };
+
+  const getSegmentationPointerPosition = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dimensions = getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions);
+    if (!rect.width || !rect.height || !dimensions.width || !dimensions.height) return null;
+    const displayX = Math.min(rect.width, Math.max(0, event.clientX - rect.left));
+    const displayY = Math.min(rect.height, Math.max(0, event.clientY - rect.top));
+    const x = (displayX / rect.width) * dimensions.width;
+    const y = (displayY / rect.height) * dimensions.height;
+    if (![x, y].every(Number.isFinite)) return null;
+    return {
+      x,
+      y,
+      displayX,
+      displayY,
+      stageWidth: rect.width,
+      stageHeight: rect.height,
+      imageWidth: dimensions.width,
+      imageHeight: dimensions.height,
+    };
+  };
+
+  const makeSegmentationShapeBase = (tool, position, overrides = {}) => ({
+    id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tool,
+    operation: segmentationOperation,
+    axis: segmentationHelperAxis,
+    sliceIndex: Number(slicePosition[segmentationHelperAxis] || 0),
+    imageWidth: position?.imageWidth || getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions).width,
+    imageHeight: position?.imageHeight || getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions).height,
+    brushSize: Number(segmentationBrushSize) || 18,
+    sensitivity: Number(segmentationSensitivity) || 28,
+    ...overrides,
+  });
+
+  const getSegmentationMlCacheKey = (axis = segmentationHelperAxis) => JSON.stringify({
+    partId: selectedPart?.id || '',
+    axis,
+    sliceIndex: Number(slicePosition[axis] || 0),
+    methodId: segmentationMlMethod,
+    parameters: segmentationMlParameters,
+    displayWindow,
+  });
+
+  const getSegmentationSliceDataUrl = (stageElement, axis = segmentationHelperAxis) => {
+    const renderedCanvas = stageElement?.querySelector?.('canvas.mpr-slice-canvas');
+    if (renderedCanvas?.toDataURL) {
+      return renderedCanvas.toDataURL('image/png');
+    }
+    const cachedCanvas = getCachedMprSliceCanvas(axis, slicePosition, mprDimensions, volumeCacheState.cache);
+    if (cachedCanvas?.toDataURL) {
+      return cachedCanvas.toDataURL('image/png');
+    }
+    return '';
+  };
+
+  const getSegmentationSliceCanvasForSelection = (stageElement, axis = segmentationHelperAxis) => {
+    const renderedCanvas = stageElement?.querySelector?.('canvas.mpr-slice-canvas');
+    if (renderedCanvas?.getContext) return renderedCanvas;
+    return getCachedMprSliceCanvas(axis, slicePosition, mprDimensions, volumeCacheState.cache);
+  };
+
+  const buildConnectedSegmentationSelection = (stageElement, position) => {
+    const canvas = getSegmentationSliceCanvasForSelection(stageElement, segmentationHelperAxis);
+    const ctx = canvas?.getContext?.('2d');
+    const width = Math.max(1, Number(canvas?.width) || Math.round(position?.imageWidth || 1));
+    const height = Math.max(1, Number(canvas?.height) || Math.round(position?.imageHeight || 1));
+    if (!ctx?.getImageData || !position || width <= 0 || height <= 0) {
+      const radius = Math.max(4, Number(segmentationSensitivity) || 28);
+      return makeSegmentationShapeBase('connected', position, {
+        seed: position,
+        radius,
+        points: [],
+        error: 'slice-pixels-unavailable',
+      });
+    }
+
+    let imageData;
+    try {
+      imageData = ctx.getImageData(0, 0, width, height);
+    } catch (_) {
+      imageData = null;
+    }
+    const data = imageData?.data;
+    if (!data || data.length < width * height * 4) {
+      return null;
+    }
+
+    const seedX = Math.max(0, Math.min(width - 1, Math.round((position.x / Math.max(1, position.imageWidth || width)) * (width - 1))));
+    const seedY = Math.max(0, Math.min(height - 1, Math.round((position.y / Math.max(1, position.imageHeight || height)) * (height - 1))));
+    const seedOffset = (seedY * width + seedX) * 4;
+    const seed = [
+      data[seedOffset],
+      data[seedOffset + 1],
+      data[seedOffset + 2],
+      data[seedOffset + 3],
+    ];
+    const sensitivity = Math.max(0, Number(segmentationSensitivity) || 28);
+    const maxDelta = sensitivity;
+    const visited = new Uint8Array(width * height);
+    const selected = new Uint8Array(width * height);
+    const stack = [seedY * width + seedX];
+    let areaPx = 0;
+    let minX = seedX;
+    let maxX = seedX;
+    let minY = seedY;
+    let maxY = seedY;
+
+    const matchesSeed = (index) => {
+      const offset = index * 4;
+      return Math.max(
+        Math.abs(data[offset] - seed[0]),
+        Math.abs(data[offset + 1] - seed[1]),
+        Math.abs(data[offset + 2] - seed[2]),
+        Math.abs(data[offset + 3] - seed[3]),
+      ) <= maxDelta;
+    };
+
+    while (stack.length > 0) {
+      const index = stack.pop();
+      if (visited[index]) continue;
+      visited[index] = 1;
+      if (!matchesSeed(index)) continue;
+      selected[index] = 1;
+      areaPx += 1;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (x > 0) stack.push(index - 1);
+      if (x < width - 1) stack.push(index + 1);
+      if (y > 0) stack.push(index - width);
+      if (y < height - 1) stack.push(index + width);
+    }
+
+    const scaleX = (position.imageWidth || width) / width;
+    const scaleY = (position.imageHeight || height) / height;
+    const pathParts = [];
+    for (let y = minY; y <= maxY; y += 1) {
+      let x = minX;
+      while (x <= maxX) {
+        const index = y * width + x;
+        if (!selected[index]) {
+          x += 1;
+          continue;
+        }
+        const startX = x;
+        while (x <= maxX && selected[y * width + x]) x += 1;
+        const runWidth = x - startX;
+        pathParts.push(`M ${startX * scaleX} ${y * scaleY} h ${runWidth * scaleX} v ${scaleY} h ${-runWidth * scaleX} Z`);
+      }
+    }
+
+    return makeSegmentationShapeBase('connected', position, {
+      seed: position,
+      points: [],
+      maskPath: pathParts.join(' '),
+      bbox: [minX * scaleX, minY * scaleY, (maxX + 1) * scaleX, (maxY + 1) * scaleY],
+      areaPx,
+      canvasWidth: width,
+      canvasHeight: height,
+      seedColor: seed,
+    });
+  };
+
+  const updateSegmentationMlParameter = (name, value) => {
+    setSegmentationMlParameters((prev) => ({ ...prev, [name]: value }));
+    setSegmentationPendingSelection(null);
+    setSegmentationMlStatus('');
+  };
+
+  const changeSegmentationMlGroup = (groupId) => {
+    const nextMethod = getDefaultSegmentationMlMethod(groupId);
+    setSegmentationMlGroup(groupId);
+    setSegmentationMlMethod(nextMethod);
+    setSegmentationMlParameters(getDefaultSegmentationMlParameters(nextMethod));
+    setSegmentationPendingSelection(null);
+    setSegmentationMlStatus('');
+  };
+
+  const changeSegmentationMlMethod = (methodId) => {
+    setSegmentationMlMethod(methodId);
+    setSegmentationMlParameters(getDefaultSegmentationMlParameters(methodId));
+    setSegmentationPendingSelection(null);
+    setSegmentationMlStatus('');
+  };
+
+  const makeShapeFromMlRegion = (region, position, cachedResult) => {
+    if (!region?.bbox) return null;
+    const dimensions = getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions);
+    return makeSegmentationShapeBase('ml-helper', position, {
+      bbox: region.bbox,
+      seed: position,
+      points: [
+        position,
+        ...(Array.isArray(region.centroid) ? [{ x: region.centroid[0], y: region.centroid[1] }] : []),
+      ],
+      label: region.label,
+      areaPx: region.area_px,
+      className: region.class_name,
+      confidence: region.confidence,
+      methodId: segmentationMlMethod,
+      methodLabel: cachedResult?.method_id || segmentationMlMethod,
+      imageWidth: dimensions.width,
+      imageHeight: dimensions.height,
+    });
+  };
+
+  const selectRegionFromCachedMlResult = (cachedResult, position) => {
+    const regions = Array.isArray(cachedResult?.regions) ? cachedResult.regions : [];
+    const containsPosition = (region) => {
+      const bbox = Array.isArray(region?.bbox) ? region.bbox.map(Number) : [];
+      if (bbox.length < 4 || bbox.some((value) => !Number.isFinite(value))) return false;
+      return bbox[0] <= position.x && position.x <= bbox[2] && bbox[1] <= position.y && position.y <= bbox[3];
+    };
+    const containing = regions.filter((region) => {
+      return containsPosition(region);
+    });
+    const selectedRegion = containing.length > 0
+      ? containing.sort((left, right) => Number(left.area_px || Infinity) - Number(right.area_px || Infinity))[0]
+      : (containsPosition(cachedResult?.selected_region) ? cachedResult.selected_region : null);
+    const shape = makeShapeFromMlRegion(selectedRegion, position, cachedResult);
+    if (shape) {
+      setSegmentationPendingSelection(shape);
+      setSegmentationMlStatus(`Selected ML region ${selectedRegion.label} from ${regions.length} cached regions.`);
+    } else {
+      setSegmentationPendingSelection(null);
+      setSegmentationMlStatus(regions.length > 0 ? 'No ML segment contains that click.' : 'No ML segments were returned for this slice.');
+    }
+  };
+
+  const runSegmentationMlHelper = async (event, position) => {
+    if (!selectedPart?.id || !position) return;
+    const cacheKey = getSegmentationMlCacheKey(segmentationHelperAxis);
+    const cached = segmentationMlCacheRef.current.get(cacheKey);
+    if (cached) {
+      selectRegionFromCachedMlResult(cached, position);
+      return;
+    }
+    const imageData = getSegmentationSliceDataUrl(event.currentTarget, segmentationHelperAxis);
+    if (!imageData) {
+      setSegmentationMlStatus('Current slice image is still loading.');
+      return;
+    }
+    setSegmentationMlLoading(true);
+    setSegmentationMlStatus('Running ML helper on this slice...');
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/parts/${selectedPart.id}/slice-segmentation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          axis: segmentationHelperAxis,
+          slice_index: Number(slicePosition[segmentationHelperAxis] || 0),
+          method_id: segmentationMlMethod,
+          parameters: segmentationMlParameters,
+          image_data_base64: imageData,
+          filename: `${selectedPart.serial_number || selectedPart.id}-${segmentationHelperAxis}-${slicePosition[segmentationHelperAxis] || 0}.png`,
+          click_x: position.x,
+          click_y: position.y,
+        }),
+      });
+      if (!resp.ok) throw new Error(`ML helper failed (${resp.status})`);
+      const result = await resp.json();
+      segmentationMlCacheRef.current.set(cacheKey, result);
+      selectRegionFromCachedMlResult(result, position);
+    } catch (err) {
+      setSegmentationMlStatus(err.message || 'ML helper failed.');
+    } finally {
+      setSegmentationMlLoading(false);
+    }
+  };
+
+  const commitSegmentationShape = (shape, explicitOperation = segmentationOperation) => {
+    if (!shape || !selectedSegmentationSegment) return;
+    const nextShape = {
+      ...shape,
+      operation: explicitOperation,
+      color: selectedSegmentationSegment.color,
+      id: shape.id || `shape-${Date.now()}`,
+    };
+    setSegmentationSegments((prev) => prev.map((segment) => (
+      segment.id === selectedSegmentationSegment.id
+        ? { ...segment, areas: [...(segment.areas || []), nextShape] }
+        : segment
+    )));
+    setSegmentationPendingSelection(null);
+    setSegmentationDraftShape(null);
+    segmentationDraftRef.current = null;
+  };
+
+  const commitPendingSegmentationSelection = (operation = segmentationOperation) => {
+    if (!segmentationPendingSelection) return;
+    commitSegmentationShape(segmentationPendingSelection, operation);
+  };
+
+  const handleSegmentationHelperWheel = (event) => {
+    event.preventDefault();
+    stepSlicePosition(segmentationHelperAxis, event.deltaY > 0 ? 1 : -1);
+  };
+
+  const handleSegmentationStagePointerDown = (event) => {
+    if (!selectedSegmentationSegment || (event.button !== undefined && event.button !== 0)) return;
+    const position = getSegmentationPointerPosition(event);
+    if (!position) return;
+    setSegmentationPointerPreview(position);
+    event.preventDefault();
+    event.stopPropagation();
+    const operation = segmentationTool === 'eraser' ? 'subtract' : segmentationOperation;
+    const tool = segmentationTool === 'eraser' ? 'brush' : segmentationTool;
+    if (tool === 'ml-helper') {
+      runSegmentationMlHelper(event, position);
+      return;
+    }
+    if (tool === 'brush' || tool === 'scissors') {
+      const shape = makeSegmentationShapeBase(tool, position, { operation, points: [position] });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (tool === 'circle') {
+      const shape = makeSegmentationShapeBase(tool, position, { center: position, edge: position, radius: 0, points: [position] });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (tool === 'rectangle') {
+      const shape = makeSegmentationShapeBase(tool, position, { start: position, end: position, points: [position] });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (tool === 'connected') {
+      setSegmentationPendingSelection(buildConnectedSegmentationSelection(event.currentTarget, position));
+      return;
+    }
+    if (['threshold', 'level-trace'].includes(tool)) {
+      const radius = Math.max(6, Number(segmentationSensitivity) || 28);
+      setSegmentationPendingSelection(makeSegmentationShapeBase(tool, position, {
+        seed: position,
+        radius,
+        points: SEGMENTATION_POINT_MARKER_TOOLS.has(tool) ? [position] : [],
+      }));
+      return;
+    }
+    if (tool === 'polygon') {
+      const existing = segmentationDraftRef.current?.tool === 'polygon' ? segmentationDraftRef.current : null;
+      const points = [...(existing?.points || []), position];
+      const shape = makeSegmentationShapeBase(tool, position, { ...(existing || {}), points, closed: false });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+    }
+  };
+
+  const handleSegmentationStagePointerMove = (event) => {
+    const position = getSegmentationPointerPosition(event);
+    if (position) setSegmentationPointerPreview(position);
+    const draft = segmentationDraftRef.current;
+    if (!draft || draft.tool === 'polygon') return;
+    if (!position) return;
+    event.preventDefault();
+    if (draft.tool === 'brush' || draft.tool === 'scissors') {
+      const next = { ...draft, points: [...(draft.points || []), position] };
+      segmentationDraftRef.current = next;
+      setSegmentationDraftShape(next);
+      return;
+    }
+    if (draft.tool === 'circle') {
+      const radius = Math.hypot(position.x - draft.center.x, position.y - draft.center.y);
+      const next = { ...draft, edge: position, radius, points: [draft.center, position] };
+      segmentationDraftRef.current = next;
+      setSegmentationDraftShape(next);
+      return;
+    }
+    if (draft.tool === 'rectangle') {
+      const next = { ...draft, end: position, points: [draft.start, position] };
+      segmentationDraftRef.current = next;
+      setSegmentationDraftShape(next);
+    }
+  };
+
+  const handleSegmentationStagePointerLeave = () => {
+    setSegmentationPointerPreview(null);
+  };
+
+  const handleSegmentationStagePointerUp = (event) => {
+    const draft = segmentationDraftRef.current;
+    if (!draft || draft.tool === 'polygon') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (draft.tool === 'brush' || draft.tool === 'scissors') {
+      if ((draft.points || []).length > 0) commitSegmentationShape(draft, draft.operation);
+    } else {
+      setSegmentationPendingSelection(draft);
+      setSegmentationDraftShape(null);
+      segmentationDraftRef.current = null;
+    }
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const completeSegmentationPolygon = (event) => {
+    if (segmentationTool !== 'polygon') return;
+    const draft = segmentationDraftRef.current;
+    if (!draft || draft.tool !== 'polygon' || (draft.points || []).length < 3) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const closed = { ...draft, closed: true };
+    setSegmentationPendingSelection(closed);
+    setSegmentationDraftShape(null);
+    segmentationDraftRef.current = null;
+  };
+
+  const cancelSegmentationDraft = () => {
+    setSegmentationDraftShape(null);
+    setSegmentationPendingSelection(null);
+    segmentationDraftRef.current = null;
+  };
+
   const adjustZoom = (delta) => {
     setViewportTransform((prev) => {
       const nextZoom = Math.min(4, Math.max(0.5, Number((prev.zoom + delta).toFixed(2))));
@@ -2159,6 +3540,28 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     setTileAnnotationDraft(null);
     setTileAnnotationPreview(null);
     tileAnnotationDraftRef.current = null;
+    setMprAnnotationDraft(null);
+    setMprAnnotationPreview(null);
+    mprAnnotationDraftRef.current = null;
+  };
+
+  const openAnnotationEditModal = (annotation) => {
+    if (!annotation?.id) return;
+    setSelectedAnnotationId(annotation.id);
+    setAnnotationEditDraft({
+      id: annotation.id,
+      defect_class: annotation.defect_class || '',
+      comment: annotation.comment || '',
+      disposition: annotation.disposition || 'open',
+      color: getAnnotationColor(annotation),
+      fill_opacity: getAnnotationFillOpacity(annotation),
+    });
+    setAnnotationEditModalVisible(true);
+  };
+
+  const closeAnnotationEditModal = () => {
+    setAnnotationEditModalVisible(false);
+    setAnnotationEditDraft(null);
   };
 
   const createAnnotation = async () => {
@@ -2195,7 +3598,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     }
   };
 
-  const createMeasurementAnnotation = async ({ imageId, line, name, color, distanceMm }) => {
+  const createMeasurementAnnotation = async ({ imageId, line, name, color, distanceMm, modality, geometryPatch = {}, metadataPatch = {} }) => {
     if (!selectedPart?.id || !line || !line.imageWidth || !line.imageHeight) return;
     const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
     const width = Math.abs(line.x2 - line.x1);
@@ -2204,12 +3607,12 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     const payload = {
       image_id: annotationImageId ? String(annotationImageId) : null,
       defect_class: 'Measurement',
-      modality: activeViewName || enabledModalities[0] || modalityOptions[0] || 'visual',
+      modality: modality || activeViewName || enabledModalities[0] || modalityOptions[0] || 'visual',
       comment: name || 'Captured from measurement tool.',
       disposition: 'open',
       measurements: { length_px: Number(distancePixels.toFixed(2)), ...(Number.isFinite(distanceMm) ? { length_mm: Number(distanceMm.toFixed(2)) } : {}) },
-      geometry: { line },
-      metadata: { measurement_color: color },
+      geometry: { ...geometryPatch, line },
+      metadata: { measurement_color: color, annotation_color: color, ...metadataPatch },
       bbox: {
         x: Number(Math.min(line.x1, line.x2).toFixed(2)),
         y: Number(Math.min(line.y1, line.y2).toFixed(2)),
@@ -2235,7 +3638,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     }
   };
 
-	  const createBoxAnnotation = async ({ imageId, box, name, color }) => {
+	  const createBoxAnnotation = async ({ imageId, box, name, color, modality, defectClass = 'Bounding Box', geometryPatch = {}, metadataPatch = {} }) => {
 	    if (!selectedPart?.id || !isFiniteAnnotationBox(box)) return null;
 	    const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
 	    const pixelsPerMm = Number(getCalibrationForImage(annotationImageId)?.pixels_per_mm || 0);
@@ -2243,8 +3646,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    const heightMm = pixelsPerMm > 0 ? box.height / pixelsPerMm : null;
 	    const payload = {
       image_id: annotationImageId ? String(annotationImageId) : null,
-      defect_class: 'Bounding Box',
-      modality: activeViewName || enabledModalities[0] || modalityOptions[0] || 'visual',
+      defect_class: defectClass,
+      modality: modality || activeViewName || enabledModalities[0] || modalityOptions[0] || 'visual',
       comment: name || 'Captured from draw box tool.',
       disposition: 'open',
 	      measurements: {
@@ -2254,6 +3657,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	        ...(Number.isFinite(heightMm) ? { height_mm: Number(heightMm.toFixed(2)) } : {}),
 	      },
       geometry: {
+        ...geometryPatch,
         imageWidth: box.imageWidth,
         imageHeight: box.imageHeight,
         box: {
@@ -2263,9 +3667,10 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
           height: box.height,
           imageWidth: box.imageWidth,
           imageHeight: box.imageHeight,
+          ...(geometryPatch?.box || {}),
         },
       },
-      metadata: { annotation_color: color },
+      metadata: { annotation_color: color, annotation_fill_opacity: DEFAULT_ANNOTATION_FILL_OPACITY, ...metadataPatch },
       bbox: {
         x: Number(box.x.toFixed(2)),
         y: Number(box.y.toFixed(2)),
@@ -2287,6 +3692,69 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       return created;
     } catch (err) {
       setError(err.message || 'Failed to create box annotation');
+      return null;
+    }
+  };
+
+  const createCubeAnnotation = async ({ axis, firstBox, secondBox, color }) => {
+    if (!selectedPart?.id || !axis || !isFiniteAnnotationBox(firstBox) || !isFiniteAnnotationBox(secondBox)) return null;
+    const firstSlice = Number(firstBox.sliceIndex);
+    const secondSlice = Number(secondBox.sliceIndex);
+    if (!Number.isFinite(firstSlice) || !Number.isFinite(secondSlice) || firstSlice === secondSlice) return null;
+    const x = Math.min(firstBox.x, secondBox.x);
+    const y = Math.min(firstBox.y, secondBox.y);
+    const right = Math.max(firstBox.x + firstBox.width, secondBox.x + secondBox.width);
+    const bottom = Math.max(firstBox.y + firstBox.height, secondBox.y + secondBox.height);
+    const width = right - x;
+    const height = bottom - y;
+    const cube = {
+      axis,
+      startSlice: Math.min(firstSlice, secondSlice),
+      endSlice: Math.max(firstSlice, secondSlice),
+      x,
+      y,
+      width,
+      height,
+      imageWidth: secondBox.imageWidth || firstBox.imageWidth,
+      imageHeight: secondBox.imageHeight || firstBox.imageHeight,
+      firstBox,
+      secondBox,
+      vertices: makeMprCubeVertices(axis, firstBox, secondBox),
+    };
+    const payload = {
+      image_id: null,
+      defect_class: '3D Box',
+      modality: 'volume',
+      comment: 'Captured from 3D box tool.',
+      disposition: 'open',
+      measurements: {
+        width_px: Number(width.toFixed(2)),
+        height_px: Number(height.toFixed(2)),
+        depth_slices: Math.abs(secondSlice - firstSlice),
+      },
+      geometry: { cube },
+      metadata: { annotation_color: color, annotation_fill_opacity: DEFAULT_ANNOTATION_FILL_OPACITY },
+      bbox: {
+        x: Number(x.toFixed(2)),
+        y: Number(y.toFixed(2)),
+        width: Number(width.toFixed(2)),
+        height: Number(height.toFixed(2)),
+      },
+      hidden: false,
+    };
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/parts/${selectedPart.id}/annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(`Failed to create 3D annotation (${resp.status})`);
+      const created = await resp.json();
+      setAnnotations((prev) => [created, ...prev]);
+      setSelectedAnnotationId(created.id);
+      return created;
+    } catch (err) {
+      setError(err.message || 'Failed to create 3D annotation');
       return null;
     }
   };
@@ -2583,36 +4051,12 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                 </select>
               </label>
             )}
-            <label htmlFor="mpr-window-min">
-              Display window
-              <div className="pt3-window-dual-slider">
-                <input
-                  id="mpr-window-min"
-                  type="range"
-                  aria-label="Display window minimum"
-                  min="0"
-                  max={Math.max(0, displayWindow.max - 1)}
-                  value={displayWindow.min}
-                  onChange={(event) => {
-                    const nextMin = Number(event.target.value);
-                    setDisplayWindow((previous) => ({ ...previous, min: Math.min(nextMin, previous.max - 1) }));
-                  }}
-                />
-                <input
-                  id="mpr-window-max"
-                  type="range"
-                  aria-label="Display window maximum"
-                  min={Math.min(255, displayWindow.min + 1)}
-                  max="255"
-                  value={displayWindow.max}
-                  onChange={(event) => {
-                    const nextMax = Number(event.target.value);
-                    setDisplayWindow((previous) => ({ ...previous, max: Math.max(nextMax, previous.min + 1) }));
-                  }}
-                />
-              </div>
-            </label>
-            <span className="group-badge">{displayWindow.min}–{displayWindow.max}</span>
+            <DisplayWindowControl
+              displayWindow={displayWindow}
+              displayDomain={displayValueDomain}
+              onChange={setDisplayWindow}
+            />
+            <span className="group-badge">{formatWindowValue(displayWindow.min)}-{formatWindowValue(displayWindow.max)}</span>
             <label className="mpr-reconstruction-selector" htmlFor="mpr-reconstruction-mode">
               3D view
               <select
@@ -2661,11 +4105,21 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                 {mlActionLoading.measurement ? 'Running Measurements...' : 'Run Measurements'}
               </button>
               <button type="button" className="btn btn-secondary btn-sm" onClick={resetViewport}>Reset 3D</button>
+              {projectType === 'PT3' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={openSegmentationHelper}
+                  disabled={!selectedPart}
+                >
+                  Segmentation Helpers
+                </button>
+              )}
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMprAnnotationTool(activeMprPane === 'volume' ? 'axial' : activeMprPane, 'measure')}>Measure</button>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMprAnnotationTool(activeMprPane === 'volume' ? 'axial' : activeMprPane, 'box')}>Draw Box</button>
             </div>
           </div>
-          <div className={`mpr-grid ${mprExpandedPane ? 'mpr-grid-single' : 'mpr-grid-four'}`}>
+          <div className="mpr-grid mpr-grid-four" data-testid="mpr-grid">
             {MPR_AXES.map((axis) => {
               const upper = Math.max(0, (mprDimensions[axis] || 1) - 1);
               const config = MPR_AXIS_CONFIG[axis];
@@ -2673,15 +4127,36 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
               const isMirrored = mprProjectionMirror[axis] === true;
               const crosshairStyle = getMprCrosshairStyle(axis, slicePosition, mprDimensions, mprProjectionMirror);
               const fallbackImage = getFallbackProjectionImage(axis, shellImageLayers);
+              const currentSliceIndex = Number(slicePosition[axis] || 0);
+              const mprSliceKey = getMprSliceKey(axis, currentSliceIndex);
+              const mprPreviewLines = mprAnnotationPreview?.mode === 'measure'
+                && mprAnnotationPreview.axis === axis
+                && Number(mprAnnotationPreview.sliceIndex) === currentSliceIndex
+                ? [mprAnnotationPreview.line]
+                : [];
+              const mprPreviewBoxes = mprAnnotationPreview?.box
+                && mprAnnotationPreview.axis === axis
+                && Number(mprAnnotationPreview.sliceIndex) === currentSliceIndex
+                ? [mprAnnotationPreview.box]
+                : [];
+              const pendingCubeBoxes = mprAnnotationDraft?.mode === 'cube-pending'
+                && mprAnnotationDraft.axis === axis
+                && Number(mprAnnotationDraft.sliceIndex) === currentSliceIndex
+                ? [{ ...mprAnnotationDraft.box, id: 'mpr-cube-pending', color: DEFAULT_ANNOTATION_COLOR, fillOpacity: DEFAULT_ANNOTATION_FILL_OPACITY }]
+                : [];
+              const mprSliceLines = (mprMeasurementLinesBySlice[mprSliceKey] || []).filter(isFiniteMeasurementLine);
+              const mprSliceBoxes = [
+                ...(mprBoxAnnotationsBySlice[mprSliceKey] || []),
+                ...getMprCubeBoxesForSlice(mprCubeAnnotations, axis, currentSliceIndex),
+              ].filter(isFiniteAnnotationBox);
               return (
                 <article
                   key={axis}
-                  className={`mpr-pane mpr-pane-${axis} ${activeMprPane === axis ? 'active-pane' : ''} ${mprExpandedPane && mprExpandedPane !== axis ? 'mpr-pane-hidden' : ''}`}
+                  className={`mpr-pane mpr-pane-${axis} ${activeMprPane === axis ? 'active-pane' : ''}`}
                   style={{ '--mpr-axis-color': config?.color, ...crosshairStyle }}
                   data-testid={`mpr-pane-${axis}`}
                   onClick={() => {
                     setActiveMprPane(axis);
-                    setMprExpandedPane(null);
                     openMprAnnotationTool(axis, 'measure');
                     setFullscreenMeasureActive(false);
                     setFullscreenImageZoom({ scale: 1, panX: 0, panY: 0, originX: 50, originY: 50 });
@@ -2708,6 +4183,16 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     aria-label={`${label} slice preview`}
                     data-testid={`mpr-preview-${axis}`}
                     style={crosshairStyle}
+                    onMouseDown={(event) => handleMprAnnotationPointerDown(event, axis)}
+                    onMouseMove={(event) => handleMprAnnotationPointerMove(event, axis)}
+                    onMouseUp={(event) => handleMprAnnotationPointerUp(event, axis)}
+                    onMouseLeave={handleMprAnnotationPointerCancel}
+                    onClick={(event) => {
+                      if (annotationToolMode) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }
+                    }}
                   >
                     {volumeImageStack.length > 0 ? (
                       <MprSliceCanvas
@@ -2717,13 +4202,15 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                         slicePosition={slicePosition}
                         dimensions={mprDimensions}
                         displayWindow={displayWindow}
+                        displayDomain={displayValueDomain}
                       />
                     ) : fallbackImage ? (
-                      <img
+                      <MprWindowedImage
                         className="mpr-fallback-projection"
                         src={fallbackImage.url}
                         alt={`${label} fallback projection from ${fallbackImage.viewName} view`}
-                        loading="lazy"
+                        displayWindow={displayWindow}
+                        displayDomain={displayValueDomain}
                       />
                     ) : (
                       <span className="mpr-empty-volume">No volume stack images</span>
@@ -2731,6 +4218,14 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     <span className="mpr-crosshair-h" />
                     <span className="mpr-crosshair-v" />
                     <span className="mpr-crosshair-center" />
+                    <svg className="inspection-fullscreen-measurement-overlay mpr-annotation-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label={`${label} annotation overlay`}>
+                      {renderAnnotationOverlay({
+                        measurementLines: [...mprSliceLines, ...mprPreviewLines],
+                        boxes: [...mprSliceBoxes, ...pendingCubeBoxes, ...mprPreviewBoxes],
+                        fontSize: 26,
+                        selectedAnnotationId,
+                      })}
+                    </svg>
                   </div>
                   <label className="mpr-slice-control" htmlFor={`mpr-slice-${axis}`}>
                     Slice
@@ -2747,11 +4242,10 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
               );
             })}
             <article
-              className={`mpr-pane mpr-pane-volume ${activeMprPane === 'volume' ? 'active-pane' : ''} ${mprExpandedPane && mprExpandedPane !== 'volume' ? 'mpr-pane-hidden' : ''}`}
+              className={`mpr-pane mpr-pane-volume ${activeMprPane === 'volume' ? 'active-pane' : ''}`}
               data-testid="mpr-pane-3d"
               onClick={() => {
                 setActiveMprPane('volume');
-                setMprExpandedPane((prev) => (prev === 'volume' ? null : 'volume'));
               }}
               onWheel={handleMprVolumeWheel}
             >
@@ -2784,7 +4278,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                 >
                   {effectiveMprReconstructionMode === MPR_RECONSTRUCTION_MODES.stack ? (
                     volumePreviewLayers.map((layer) => (
-                      <img
+                      <MprWindowedImage
                         key={`${layer.id}-${layer.sliceIndex}`}
                         className="volume-slice-voxel"
                         src={layer.url}
@@ -2795,19 +4289,21 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                           '--slice-depth': `${layer.depth}px`,
                           '--slice-opacity': layer.opacity,
                         }}
-                        loading="lazy"
+                        displayWindow={displayWindow}
+                        displayDomain={displayValueDomain}
                       />
                     ))
                   ) : effectiveMprReconstructionMode === MPR_RECONSTRUCTION_MODES.shell ? (
                     shellImageLayers.map((layer) => (
-                      <img
+                      <MprWindowedImage
                         key={`${layer.id}-${layer.viewName}`}
                         className={`volume-shell-image shell-view-${layer.viewName}`}
                         src={layer.url}
                         alt={`Fallback visual hull shell ${layer.viewName} view`}
                         draggable={false}
                         onDragStart={preventMprNativeDrag}
-                        loading="lazy"
+                        displayWindow={displayWindow}
+                        displayDomain={displayValueDomain}
                       />
                     ))
                   ) : !canShowStackReconstruction && !canShowShellReconstruction ? (
@@ -2883,11 +4379,35 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
           ) : (
             <>
             <div className="view-board-controls">
-              <label className="tile-size-control">
-                Tile size
-                <input type="range" min="70" max="160" step="5" value={tileSizePercent} onChange={(event) => setTileSizePercent(Number(event.target.value))} />
-                <span>{tileSizePercent}%</span>
-              </label>
+              <div className="tile-size-control">
+                <label htmlFor="inspection-tile-columns-slider">Tile size</label>
+                <input
+                  id="inspection-tile-columns-slider"
+                  type="range"
+                  aria-label="Inspection tile columns"
+                  min="1"
+                  max={tileColumnMax}
+                  step="1"
+                  value={normalizedTileColumnCount}
+                  onChange={(event) => setTileColumnCount(Number(event.target.value))}
+                />
+                <input
+                  id="inspection-tile-columns-input"
+                  className="tile-size-input"
+                  type="number"
+                  aria-label="Inspection tile columns value"
+                  min="1"
+                  max={tileColumnMax}
+                  step="1"
+                  value={normalizedTileColumnCount}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    if (!Number.isFinite(nextValue)) return;
+                    setTileColumnCount(Math.round(clampRange(nextValue, 1, tileColumnMax, normalizedTileColumnCount)));
+                  }}
+                />
+                <span>{normalizedTileColumnCount} / {tileColumnMax}</span>
+              </div>
               <div className="view-category-controls" aria-label="Image categories">
                 {IMAGE_RENDER_CATEGORIES.map((category) => (
                   <label key={category.id}>
@@ -2897,7 +4417,14 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                 ))}
               </div>
             </div>
-            <div className="view-board" data-layout-region="visual_workspace" style={{ '--inspection-tile-scale': tileSizePercent / 100 }}>
+            <div
+              className="view-board"
+              data-layout-region="visual_workspace"
+              style={{
+                '--inspection-tile-columns': normalizedTileColumnCount,
+                '--inspection-tile-min-height': `${Math.max(240, Math.round(560 / normalizedTileColumnCount))}px`,
+              }}
+            >
               {visibleSelectedPartImageRefs.map((entry) => {
                 const viewName = entry.viewName || 'image';
                 const imageRef = String(entry.imageRef || '');
@@ -2993,7 +4520,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                             loading="lazy"
                           />
 	                          <svg className="inspection-fullscreen-measurement-overlay" viewBox={`0 0 1000 1000`} preserveAspectRatio="none" aria-label="tile measurement overlay">
-	                            {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30 })}
+	                            {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId })}
 	                          </svg>
 	                        </div>
 	                      ) : imageId ? (
@@ -3020,7 +4547,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                             loading="lazy"
 	                          />
 	                          <svg className="inspection-fullscreen-measurement-overlay" viewBox={`0 0 1000 1000`} preserveAspectRatio="none" aria-label="tile measurement overlay">
-	                            {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30 })}
+	                            {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId })}
 	                          </svg>
 	                        </div>
                       ) : imageRef ? (
@@ -3060,12 +4587,23 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          <button
 	            type="button"
 	            className={`btn btn-secondary ${annotationToolMode === 'box' ? 'active' : ''}`}
-	            aria-label="Draw box on tiles"
+	            aria-label={projectType === 'PT3' ? 'Draw box on MPR slices' : 'Draw box on tiles'}
 	            onClick={() => setTileAnnotationMode('box')}
 	            disabled={!selectedPart}
 	          >
 	            Draw box
 	          </button>
+	          {projectType === 'PT3' && (
+	            <button
+	              type="button"
+	              className={`btn btn-secondary ${annotationToolMode === 'cube' ? 'active' : ''}`}
+	              aria-label="Draw 3D box on MPR slices"
+	              onClick={() => setTileAnnotationMode('cube')}
+	              disabled={!selectedPart}
+	            >
+	              3D Box
+	            </button>
+	          )}
 	          <button
 	            type="button"
 	            className="btn btn-secondary"
@@ -3080,55 +4618,78 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	        </div>
 	        {annotationToolMode === 'measure' && (
 	          <p className="muted annotation-tool-hint">
-	            Click two points on a tile to place a measurement line.
+	            Click two points {projectType === 'PT3' ? 'on an MPR slice' : 'on a tile'} to place a measurement line.
 	          </p>
 	        )}
 	        {annotationToolMode === 'box' && (
 	          <p className="muted annotation-tool-hint">
-	            Click two corners on a tile to draw a bounding box.
+	            Drag two corners {projectType === 'PT3' ? 'on the active MPR slice' : 'on a tile'} to draw a bounding box.
 	          </p>
         )}
+	        {annotationToolMode === 'cube' && (
+	          <p className="muted annotation-tool-hint">
+	            Draw one box, move to another slice on the same axis, then draw the second box.
+	          </p>
+	        )}
         <ul className="measurement-list" data-testid="annotation-list">
           {annotationsLoading ? (
             <li className="muted">Loading annotations…</li>
           ) : annotations.length === 0 ? (
             <li className="muted">No annotations captured.</li>
           ) : (
-            annotations.map((annotation) => (
-              <li
-                key={annotation.id}
-                className={`annotation-entry ${selectedAnnotationId === annotation.id ? 'selected' : ''}`}
-                role="button"
-                tabIndex={0}
-                title={getAnnotationTooltip(annotation)}
-                onClick={() => { setSelectedAnnotationId(annotation.id);
-                    setAnnotationEditModalVisible(true); setAnnotationEditModalVisible(true); }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setSelectedAnnotationId(annotation.id);
-                    setAnnotationEditModalVisible(true);
-                  }
-                }}
-              >
-                <div className="annotation-entry-content">
-                  <span className="annotation-entry-type">{getAnnotationListType(annotation)}</span>
-                  <span className="annotation-entry-value">{getAnnotationListValue(annotation)}</span>
-                </div>
-                <button
-                  type="button"
-                  className="annotation-entry-delete"
-                  aria-label={`Delete annotation ${annotation.comment || annotation.defect_class || annotation.id}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    deleteMeasurementAnnotation(annotation.id);
+            annotations.map((annotation) => {
+              const creator = getAnnotationCreator(annotation);
+              const createdAt = formatAnnotationTimestamp(getAnnotationCreatedAt(annotation));
+              return (
+                <li
+                  key={annotation.id}
+                  className={`annotation-entry ${selectedAnnotationId === annotation.id ? 'selected' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  title={getAnnotationTooltip(annotation)}
+                  onClick={() => setSelectedAnnotationId(annotation.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedAnnotationId(annotation.id);
+                    }
                   }}
                 >
-                  ×
-                </button>
-              </li>
-            ))
+                  <div className="annotation-entry-content">
+                    <span className="annotation-entry-type">{getAnnotationListType(annotation)}</span>
+                    <span className="annotation-entry-value">{getAnnotationListValue(annotation)}</span>
+                    <span className="annotation-entry-meta">Created by {creator}</span>
+                    <span className="annotation-entry-meta">{createdAt}</span>
+                  </div>
+                  <div className="annotation-entry-actions">
+                    <button
+                      type="button"
+                      className="annotation-entry-edit"
+                      aria-label={`Edit annotation ${annotation.comment || annotation.defect_class || annotation.id}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openAnnotationEditModal(annotation);
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="annotation-entry-delete"
+                      aria-label={`Delete annotation ${annotation.comment || annotation.defect_class || annotation.id}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        deleteMeasurementAnnotation(annotation.id);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </li>
+              );
+            })
           )}
         </ul>
       </div>
@@ -3256,21 +4817,30 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const updateAnnotationFromModal = async () => {
     const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId);
     if (!selected || !selectedPart?.id) return;
+    const draft = annotationEditDraft || {};
+    const fillOpacity = clampRange(Number(draft.fill_opacity), 0, 1, getAnnotationFillOpacity(selected));
+    const color = getAnnotationColor({ metadata: { annotation_color: draft.color } }, getAnnotationColor(selected));
     try {
       const resp = await fetch(`/api/projects/${projectId}/parts/${selectedPart.id}/annotations/${selected.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          defect_class: selected.defect_class,
-          comment: selected.comment,
+          defect_class: draft.defect_class ?? selected.defect_class,
+          comment: draft.comment ?? selected.comment,
           measurements: selected.measurements || {},
-          disposition: selected.disposition || 'open',
+          disposition: draft.disposition || selected.disposition || 'open',
+          metadata: {
+            ...(selected.metadata || {}),
+            annotation_color: color,
+            measurement_color: color,
+            annotation_fill_opacity: fillOpacity,
+          },
         }),
       });
       if (!resp.ok) throw new Error(`Failed to update annotation (${resp.status})`);
       const updated = await resp.json();
       setAnnotations((prev) => prev.map((annotation) => (annotation.id === updated.id ? updated : annotation)));
-      setAnnotationEditModalVisible(false);
+      closeAnnotationEditModal();
     } catch (err) {
       setError(err.message || 'Failed to update annotation');
     }
@@ -3280,14 +4850,476 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     if (!annotationEditModalVisible) return null;
     const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId);
     if (!selected) return null;
+    const draft = annotationEditDraft || {
+      defect_class: selected.defect_class || '',
+      comment: selected.comment || '',
+      disposition: selected.disposition || 'open',
+      color: getAnnotationColor(selected),
+      fill_opacity: getAnnotationFillOpacity(selected),
+    };
     return (
-      <div className="modal" style={{ display: 'flex' }} onClick={() => setAnnotationEditModalVisible(false)}>
+      <div className="modal" style={{ display: 'flex' }} onClick={closeAnnotationEditModal}>
         <div className="modal-content workbench-utility-modal" role="dialog" aria-label="Edit annotation" onClick={(event) => event.stopPropagation()}>
-          <div className="modal-header"><h3>Edit Annotation</h3></div>
+          <div className="modal-header">
+            <h3>Edit Annotation</h3>
+            <button
+              type="button"
+              className="modal-close-btn modal-close-danger"
+              aria-label="Cancel edit annotation"
+              onClick={closeAnnotationEditModal}
+            >
+              ×
+            </button>
+          </div>
           <div className="modal-body">
-            <input type="text" value={selected.defect_class || ""} onChange={(event) => setAnnotations((prev) => prev.map((annotation) => (annotation.id === selected.id ? { ...annotation, defect_class: event.target.value } : annotation)))} />
-            <input type="text" value={selected.comment || ""} onChange={(event) => setAnnotations((prev) => prev.map((annotation) => (annotation.id === selected.id ? { ...annotation, comment: event.target.value } : annotation)))} />
-            <div className="modal-actions"><button type="button" className="btn btn-primary" onClick={updateAnnotationFromModal}>Save</button></div>
+            <div className="measurement-fields">
+              <input
+                type="text"
+                aria-label="Edit annotation defect class"
+                value={draft.defect_class}
+                onChange={(event) => setAnnotationEditDraft((prev) => ({ ...(prev || draft), defect_class: event.target.value }))}
+              />
+              <select
+                aria-label="Edit annotation disposition"
+                value={draft.disposition}
+                onChange={(event) => setAnnotationEditDraft((prev) => ({ ...(prev || draft), disposition: event.target.value }))}
+              >
+                <option value="open">Open</option>
+                <option value="accepted">Accepted</option>
+                <option value="rejected">Rejected</option>
+                <option value="needs_info">Needs Info</option>
+              </select>
+            </div>
+            <div className="measurement-fields">
+              <input
+                type="text"
+                aria-label="Edit annotation comment"
+                value={draft.comment}
+                onChange={(event) => setAnnotationEditDraft((prev) => ({ ...(prev || draft), comment: event.target.value }))}
+              />
+            </div>
+            <div className="measurement-fields annotation-style-fields">
+              <label htmlFor="edit-annotation-color">
+                Color
+                <input
+                  id="edit-annotation-color"
+                  type="color"
+                  aria-label="Edit annotation color"
+                  value={draft.color || DEFAULT_ANNOTATION_COLOR}
+                  onChange={(event) => setAnnotationEditDraft((prev) => ({ ...(prev || draft), color: event.target.value }))}
+                />
+              </label>
+              <label htmlFor="edit-annotation-fill-opacity">
+                Fill opacity
+                <input
+                  id="edit-annotation-fill-opacity"
+                  type="number"
+                  aria-label="Edit annotation fill opacity"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={draft.fill_opacity ?? DEFAULT_ANNOTATION_FILL_OPACITY}
+                  onChange={(event) => setAnnotationEditDraft((prev) => ({ ...(prev || draft), fill_opacity: event.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={closeAnnotationEditModal}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={updateAnnotationFromModal}>Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSegmentationHelperModal = () => {
+    if (!segmentationHelperOpen) return null;
+    const axis = MPR_AXES.includes(segmentationHelperAxis) ? segmentationHelperAxis : 'axial';
+    const dimensions = getMprAxisImageDimensions(axis, mprDimensions);
+    const upper = Math.max(0, (mprDimensions[axis] || 1) - 1);
+    const config = MPR_AXIS_CONFIG[axis] || MPR_AXIS_CONFIG.axial;
+    const fallbackImage = getFallbackProjectionImage(axis, shellImageLayers);
+    const crosshairStyle = getMprCrosshairStyle(axis, slicePosition, mprDimensions, mprProjectionMirror);
+    const activeTool = SEGMENTATION_HELPER_TOOLS.find((tool) => tool.id === segmentationTool) || SEGMENTATION_HELPER_TOOLS[0];
+    const visibleSegmentShapes = segmentationSegments.flatMap((segment) => (
+      (segment.areas || [])
+        .filter((shape) => shape.axis === axis && Number(shape.sliceIndex) === Number(slicePosition[axis] || 0))
+        .map((shape) => ({ ...shape, segmentId: segment.id, color: segment.color }))
+    ));
+    const draftPoints = [
+      ...getSegmentationShapePoints(segmentationDraftShape),
+      ...getSegmentationShapePoints(segmentationPendingSelection),
+    ];
+    const brushPointerVisible = ['brush', 'eraser'].includes(segmentationTool) && segmentationPointerPreview;
+    const brushPointerDiameter = Math.max(2, Number(segmentationBrushSize) || 18);
+
+    return (
+      <div className="modal segmentation-helper-modal" style={{ display: 'flex' }} onClick={closeSegmentationHelper}>
+        <div
+          className="modal-content segmentation-helper-modal-content"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Segmentation Helpers"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="modal-header segmentation-helper-header">
+            <div>
+              <h3>Segmentation Helpers</h3>
+              <p className="muted">Slice tools for building local segment masks on PT3 volumes.</p>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              aria-label="Close Segmentation Helpers"
+              onClick={closeSegmentationHelper}
+            >
+              &times;
+            </button>
+          </div>
+
+          <div className="segmentation-helper-body">
+            <aside className="segmentation-helper-sidebar" aria-label="Segmentation helper controls">
+              <div className="segmentation-orientation-switcher" aria-label="View orientation">
+                {MPR_AXES.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={axis === option ? 'active' : ''}
+                    style={{ '--segment-axis-color': MPR_AXIS_CONFIG[option]?.color }}
+                    onClick={() => {
+                      setSegmentationHelperAxis(option);
+                      setActiveMprPane(option);
+                      cancelSegmentationDraft();
+                    }}
+                  >
+                    {MPR_AXIS_CONFIG[option]?.label || option}
+                  </button>
+                ))}
+              </div>
+
+              <div className="segmentation-slice-sliders" aria-label="Slice navigation">
+                {MPR_AXES.map((sliceAxis) => {
+                  const sliceUpper = Math.max(0, (mprDimensions[sliceAxis] || 1) - 1);
+                  return (
+                    <label key={sliceAxis} htmlFor={`segmentation-helper-slice-${sliceAxis}`}>
+                      <span>{MPR_AXIS_CONFIG[sliceAxis]?.sliceLabel || sliceAxis.toUpperCase()}</span>
+                      <input
+                        id={`segmentation-helper-slice-${sliceAxis}`}
+                        type="range"
+                        min="0"
+                        max={sliceUpper}
+                        value={slicePosition[sliceAxis]}
+                        onChange={(event) => updateSlicePosition(sliceAxis, event.target.value, mprDimensions)}
+                      />
+                      <output>{slicePosition[sliceAxis]} / {sliceUpper}</output>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="segmentation-segment-panel">
+                <div className="segmentation-panel-title">
+                  <h4>Segments</h4>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={addSegmentationSegment}>
+                    Add new segment
+                  </button>
+                </div>
+                <ul className="segmentation-segment-list" data-testid="segmentation-segment-list">
+                  {segmentationSegments.map((segment) => {
+                    const selected = selectedSegmentationSegment?.id === segment.id;
+                    const editing = editingSegmentationSegmentId === segment.id;
+                    return (
+                      <li
+                        key={segment.id}
+                        className={`segmentation-segment-row ${selected ? 'selected' : ''}`}
+                        style={{ borderColor: selected ? segment.color : undefined }}
+                      >
+                        <button
+                          type="button"
+                          className="segmentation-segment-select"
+                          onClick={() => setSelectedSegmentationSegmentId(segment.id)}
+                        >
+                          <span className="segmentation-segment-color" style={{ backgroundColor: segment.color }} />
+                          <span>{segment.name}</span>
+                          <small>{(segment.areas || []).length} areas</small>
+                        </button>
+                        <button
+                          type="button"
+                          className="annotation-entry-edit"
+                          aria-label={`Edit ${segment.name}`}
+                          onClick={() => {
+                            setSelectedSegmentationSegmentId(segment.id);
+                            setEditingSegmentationSegmentId(editing ? '' : segment.id);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        {editing && (
+                          <div className="segmentation-segment-editor">
+                            <label htmlFor={`segmentation-segment-name-${segment.id}`}>
+                              Name
+                              <input
+                                id={`segmentation-segment-name-${segment.id}`}
+                                type="text"
+                                value={segment.name}
+                                onChange={(event) => updateSegmentationSegment(segment.id, { name: event.target.value })}
+                              />
+                            </label>
+                            <label htmlFor={`segmentation-segment-color-${segment.id}`}>
+                              Color
+                              <input
+                                id={`segmentation-segment-color-${segment.id}`}
+                                type="color"
+                                value={segment.color}
+                                onChange={(event) => updateSegmentationSegment(segment.id, { color: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </aside>
+
+            <main className="segmentation-helper-main" aria-label="Segmentation helper slice workspace">
+              <div className="segmentation-helper-toolbar">
+                <div className="segmentation-operation-buttons" aria-label="Selection operation">
+                  <button
+                    type="button"
+                    className={segmentationOperation === 'add' ? 'active' : ''}
+                    onClick={() => setSegmentationOperation('add')}
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    className={segmentationOperation === 'subtract' ? 'active' : ''}
+                    onClick={() => setSegmentationOperation('subtract')}
+                  >
+                    Subtract
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!segmentationPendingSelection}
+                    onClick={() => commitPendingSegmentationSelection('add')}
+                  >
+                    Add selection
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!segmentationPendingSelection}
+                    onClick={() => commitPendingSegmentationSelection('subtract')}
+                  >
+                    Subtract selection
+                  </button>
+                </div>
+                <div className="segmentation-helper-current">
+                  <span className="segmentation-segment-color" style={{ backgroundColor: selectedSegmentationSegment?.color || DEFAULT_SEGMENT_COLOR }} />
+                  <strong>{selectedSegmentationSegment?.name || 'No segment'}</strong>
+                  <span>{config.sliceLabel} {slicePosition[axis]} / {upper}</span>
+                </div>
+              </div>
+
+              <div className="segmentation-tools-grid" aria-label="Segmentation tools">
+                {SEGMENTATION_HELPER_TOOLS.map((tool) => (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    className={segmentationTool === tool.id ? 'active' : ''}
+                    title={tool.detail}
+                    aria-label={`${tool.label}: ${tool.detail}`}
+                    data-tooltip={`${tool.label}: ${tool.detail}`}
+                    onClick={() => {
+                      setSegmentationTool(tool.id);
+                      cancelSegmentationDraft();
+                    }}
+                  >
+                    <SegmentationToolIcon icon={tool.icon} />
+                    <span className="segmentation-tool-label">{tool.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="segmentation-tool-parameters">
+                <label htmlFor="segmentation-brush-size">
+                  Brush size
+                  <input
+                    id="segmentation-brush-size"
+                    type="range"
+                    min="2"
+                    max="80"
+                    value={segmentationBrushSize}
+                    onChange={(event) => setSegmentationBrushSize(Number(event.target.value))}
+                  />
+                  <output>{segmentationBrushSize}px</output>
+                </label>
+                <label htmlFor="segmentation-sensitivity">
+                  Sensitivity
+                  <input
+                    id="segmentation-sensitivity"
+                    type="range"
+                    min="2"
+                    max="96"
+                    value={segmentationSensitivity}
+                    onChange={(event) => setSegmentationSensitivity(Number(event.target.value))}
+                  />
+                  <output>{segmentationSensitivity}</output>
+                </label>
+                <p className="muted">{activeTool.detail}</p>
+                {SEGMENTATION_POINT_MARKER_TOOLS.has(segmentationTool) && (
+                  <p className="muted">Defined points are shown as dots on the slice. Double-click closes polygon selections.</p>
+                )}
+              </div>
+
+              {segmentationTool === 'ml-helper' && (
+                <div className="segmentation-ml-panel" aria-label="ML helper options">
+                  <label htmlFor="segmentation-ml-group">
+                    Method family
+                    <select
+                      id="segmentation-ml-group"
+                      value={segmentationMlGroup}
+                      onChange={(event) => changeSegmentationMlGroup(event.target.value)}
+                    >
+                      {SEGMENTATION_ML_METHOD_GROUPS.map((group) => (
+                        <option key={group.id} value={group.id}>{group.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label htmlFor="segmentation-ml-method">
+                    Segment function
+                    <select
+                      id="segmentation-ml-method"
+                      value={segmentationMlMethod}
+                      onChange={(event) => changeSegmentationMlMethod(event.target.value)}
+                    >
+                      {getSegmentationMlMethods(segmentationMlGroup).map((method) => (
+                        <option key={method.id} value={method.id}>{method.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {(SEGMENTATION_ML_PARAMETER_FIELDS[segmentationMlMethod] || []).map((field) => (
+                    <label key={field.name} htmlFor={`segmentation-ml-${field.name}`}>
+                      {field.label}
+                      {field.type === 'select' ? (
+                        <select
+                          id={`segmentation-ml-${field.name}`}
+                          value={segmentationMlParameters[field.name] ?? ''}
+                          onChange={(event) => updateSegmentationMlParameter(field.name, event.target.value)}
+                        >
+                          {(field.options || []).map((option) => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id={`segmentation-ml-${field.name}`}
+                          type={field.type}
+                          min={field.min}
+                          max={field.max}
+                          step={field.step}
+                          value={segmentationMlParameters[field.name] ?? ''}
+                          onChange={(event) => updateSegmentationMlParameter(
+                            field.name,
+                            field.type === 'number' ? Number(event.target.value) : event.target.value,
+                          )}
+                        />
+                      )}
+                    </label>
+                  ))}
+                  <p className="muted">
+                    {segmentationMlLoading ? 'Running analysis for this slice.' : (segmentationMlStatus || 'Click the slice to run once, cache this method result, and select the clicked segment.')}
+                  </p>
+                </div>
+              )}
+
+              <div
+                className={`segmentation-slice-stage ${brushPointerVisible ? 'show-brush-pointer' : ''}`}
+                style={{
+                  '--segment-axis-color': config.color,
+                  '--brush-pointer-x': brushPointerVisible ? `${segmentationPointerPreview.displayX}px` : '50%',
+                  '--brush-pointer-y': brushPointerVisible ? `${segmentationPointerPreview.displayY}px` : '50%',
+                  '--brush-pointer-size': `${brushPointerDiameter}px`,
+                  ...crosshairStyle,
+                }}
+                onWheel={handleSegmentationHelperWheel}
+                onMouseDown={handleSegmentationStagePointerDown}
+                onMouseMove={handleSegmentationStagePointerMove}
+                onMouseUp={handleSegmentationStagePointerUp}
+                onMouseLeave={handleSegmentationStagePointerLeave}
+                onDoubleClick={completeSegmentationPolygon}
+                data-testid="segmentation-helper-stage"
+              >
+                {volumeImageStack.length > 0 ? (
+                  <MprSliceCanvas
+                    axis={axis}
+                    volumeCache={volumeCacheState.cache}
+                    volumeCacheStatus={volumeCacheState.status}
+                    slicePosition={slicePosition}
+                    dimensions={mprDimensions}
+                    displayWindow={displayWindow}
+                    displayDomain={displayValueDomain}
+                  />
+                ) : fallbackImage ? (
+                  <MprWindowedImage
+                    className="mpr-fallback-projection"
+                    src={fallbackImage.url}
+                    alt={`${config.label} segmentation helper fallback`}
+                    displayWindow={displayWindow}
+                    displayDomain={displayValueDomain}
+                  />
+                ) : (
+                  <span className="mpr-empty-volume">No volume stack images</span>
+                )}
+                <svg
+                  className="segmentation-helper-overlay"
+                  viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+                  preserveAspectRatio="none"
+                  aria-label="Segmentation helper overlay"
+                >
+                  {visibleSegmentShapes.map((shape, index) => (
+                    <g
+                      key={getSegmentationShapeKey(shape, index)}
+                      className={shape.segmentId === selectedSegmentationSegment?.id ? 'active-segment' : ''}
+                    >
+                      {renderSegmentationShape(shape, {
+                        color: shape.color,
+                        fillColor: shape.color,
+                        fillOpacity: shape.operation === 'subtract' ? 0.08 : 0.2,
+                      })}
+                    </g>
+                  ))}
+                  {segmentationPendingSelection && renderSegmentationShape(segmentationPendingSelection, {
+                    color: '#fde047',
+                    fillColor: '#fde047',
+                    fillOpacity: 0.18,
+                    preview: true,
+                    strokeWidth: 3,
+                  })}
+                  {segmentationDraftShape && renderSegmentationShape(segmentationDraftShape, {
+                    color: '#f8fafc',
+                    fillColor: selectedSegmentationSegment?.color || DEFAULT_SEGMENT_COLOR,
+                    fillOpacity: 0.15,
+                    preview: true,
+                    strokeWidth: 3,
+                  })}
+                </svg>
+                <div className="segmentation-helper-point-layer" aria-hidden="true">
+                  {draftPoints.map((point, index) => (
+                    <span
+                      key={`segmentation-point-${index}-${point.x}-${point.y}`}
+                      className="segmentation-helper-point"
+                      style={{
+                        left: `${Math.max(0, Math.min(100, (point.x / Math.max(1, dimensions.width)) * 100))}%`,
+                        top: `${Math.max(0, Math.min(100, (point.y / Math.max(1, dimensions.height)) * 100))}%`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </main>
           </div>
         </div>
       </div>
@@ -3338,9 +5370,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
           <button type="button" className="btn btn-secondary" onClick={() => setActiveWorkbenchModal('parts')}>
             Part Selection
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => setActiveWorkbenchModal('annotations')}>
-            Annotations
-          </button>
           {selectedPart && (
             <>
               <button
@@ -3371,7 +5400,14 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
           </ul>
         </div>
       )}
-      {renderMprPane()}
+      <div className="pt3-inspection-layout" data-testid="pt3-inspection-layout">
+        <div className="pt3-mpr-center">
+          {renderMprPane()}
+        </div>
+        <aside className="pt3-annotations-column" aria-label="PT3 annotations">
+          {renderAnnotationsPane()}
+        </aside>
+      </div>
       {renderWorkbenchModal()}
     </div>
   );
@@ -3565,6 +5601,156 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      setTileAnnotationPreview({ mode: 'box', imageId: String(annotationImageId || ''), box });
 	    }
 	  };
+
+  const handleMprAnnotationPointerDown = (event, axis) => {
+    if (!['measure', 'box', 'cube'].includes(annotationToolMode)) return false;
+    if (event.button !== undefined && event.button !== 0) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    setActiveMprPane(axis);
+    const position = getAnnotationSurfacePointerPosition(event);
+    if (!position) return true;
+    const sliceIndex = Number(slicePosition[axis] || 0);
+    if (annotationToolMode === 'measure') {
+      const firstPoint = mprAnnotationDraft?.mode === 'measure' && mprAnnotationDraft.axis === axis
+        ? mprAnnotationDraft
+        : null;
+      if (!firstPoint) {
+        setMprAnnotationDraft({ ...position, mode: 'measure', axis, sliceIndex });
+        return true;
+      }
+      const line = {
+        x1: firstPoint.x,
+        y1: firstPoint.y,
+        x2: position.x,
+        y2: position.y,
+        imageWidth: position.imageWidth,
+        imageHeight: position.imageHeight,
+        axis,
+        slice_index: firstPoint.sliceIndex,
+      };
+      const key = getMprSliceKey(axis, firstPoint.sliceIndex);
+      const existingLineCount = (mprMeasurementLinesBySlice[key] || []).length;
+      createMeasurementAnnotation({
+        imageId: null,
+        line,
+        name: nextMeasurementName(classifyMeasurementLine(line)),
+        color: MEASUREMENT_COLORS[existingLineCount % MEASUREMENT_COLORS.length],
+        modality: 'volume',
+        geometryPatch: { axis, slice_index: firstPoint.sliceIndex },
+      });
+      setMprAnnotationDraft(null);
+      setMprAnnotationPreview(null);
+      setAnnotationToolMode('');
+      return true;
+    }
+    const nextPoint = { ...position, mode: annotationToolMode, axis, sliceIndex };
+    mprAnnotationDraftRef.current = nextPoint;
+    if (!(annotationToolMode === 'cube' && mprAnnotationDraft?.mode === 'cube-pending')) {
+      setMprAnnotationDraft(nextPoint);
+    }
+    setMprAnnotationPreview(null);
+    if (event.pointerId !== undefined) event.currentTarget.setPointerCapture?.(event.pointerId);
+    return true;
+  };
+
+  const handleMprAnnotationPointerMove = (event, axis) => {
+    if (!['measure', 'box', 'cube'].includes(annotationToolMode)) return;
+    const position = getAnnotationSurfacePointerPosition(event);
+    if (!position) return;
+    const sliceIndex = Number(slicePosition[axis] || 0);
+    if (annotationToolMode === 'measure' && mprAnnotationDraft?.mode === 'measure' && mprAnnotationDraft.axis === axis) {
+      const line = {
+        id: 'mpr-measure-preview',
+        imageId: getMprSliceKey(axis, mprAnnotationDraft.sliceIndex),
+        x1: mprAnnotationDraft.x,
+        y1: mprAnnotationDraft.y,
+        x2: position.x,
+        y2: position.y,
+        imageWidth: position.imageWidth,
+        imageHeight: position.imageHeight,
+        axis,
+        sliceIndex: mprAnnotationDraft.sliceIndex,
+        color: DEFAULT_ANNOTATION_COLOR,
+        distancePx: Math.hypot(position.x - mprAnnotationDraft.x, position.y - mprAnnotationDraft.y),
+        distanceMm: null,
+      };
+      setMprAnnotationPreview({ mode: 'measure', axis, sliceIndex: mprAnnotationDraft.sliceIndex, line });
+      return;
+    }
+    const firstPoint = mprAnnotationDraftRef.current;
+    if (firstPoint && firstPoint.axis === axis && ['box', 'cube'].includes(annotationToolMode)) {
+      const box = {
+        ...makeBoxFromPoints(firstPoint, position),
+        id: `mpr-${annotationToolMode}-preview`,
+        imageId: getMprSliceKey(axis, sliceIndex),
+        color: DEFAULT_ANNOTATION_COLOR,
+        fillOpacity: DEFAULT_ANNOTATION_FILL_OPACITY,
+        axis,
+        sliceIndex,
+      };
+      setMprAnnotationPreview({ mode: annotationToolMode, axis, sliceIndex, box });
+    }
+  };
+
+  const handleMprAnnotationPointerUp = (event, axis) => {
+    if (!['box', 'cube'].includes(annotationToolMode)) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const firstPoint = mprAnnotationDraftRef.current;
+    const position = getAnnotationSurfacePointerPosition(event);
+    const sliceIndex = Number(slicePosition[axis] || 0);
+    if (firstPoint && position && firstPoint.axis === axis) {
+      const box = {
+        ...makeBoxFromPoints(firstPoint, position),
+        axis,
+        sliceIndex,
+      };
+      if (isFiniteAnnotationBox(box)) {
+        if (annotationToolMode === 'box') {
+          const key = getMprSliceKey(axis, sliceIndex);
+          const existingBoxCount = (mprBoxAnnotationsBySlice[key] || []).length;
+          createBoxAnnotation({
+            imageId: null,
+            box,
+            name: 'Drawn MPR bounding box',
+            color: MEASUREMENT_COLORS[existingBoxCount % MEASUREMENT_COLORS.length],
+            modality: 'volume',
+            geometryPatch: { axis, slice_index: sliceIndex, box: { axis, slice_index: sliceIndex } },
+          });
+          setAnnotationToolMode('');
+        } else {
+          const firstCubeBox = mprAnnotationDraft?.mode === 'cube-pending' ? mprAnnotationDraft.box : null;
+          if (firstCubeBox && firstCubeBox.axis === axis && Number(firstCubeBox.sliceIndex) !== sliceIndex) {
+            createCubeAnnotation({
+              axis,
+              firstBox: firstCubeBox,
+              secondBox: box,
+              color: DEFAULT_ANNOTATION_COLOR,
+            });
+            setAnnotationToolMode('');
+            setMprAnnotationDraft(null);
+          } else {
+            setMprAnnotationDraft({ mode: 'cube-pending', axis, sliceIndex, box });
+          }
+        }
+      }
+    }
+    mprAnnotationDraftRef.current = null;
+    setMprAnnotationPreview(null);
+    if (annotationToolMode !== 'cube') setMprAnnotationDraft(null);
+    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
+    return true;
+  };
+
+  const handleMprAnnotationPointerCancel = (event) => {
+    if (!mprAnnotationDraftRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    mprAnnotationDraftRef.current = null;
+    setMprAnnotationPreview(null);
+    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
 
   const getFullscreenImagePointerPosition = (event) => {
     const image = fullscreenImageRef.current;
@@ -4236,7 +6422,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                         </g>
 	                      );
 	                    })}
-	                    {renderAnnotationOverlay({ measurementLines: [], boxes: [...fullscreenBoxAnnotations, ...fullscreenPreviewBoxes], fontSize: 20 })}
+	                    {renderAnnotationOverlay({ measurementLines: [], boxes: [...fullscreenBoxAnnotations, ...fullscreenPreviewBoxes], fontSize: 20, selectedAnnotationId })}
                     {fullscreenBoxAnnotations.map((box) => {
                       const cornerPositions = getAnnotationBoxCornerViewBoxPosition(box);
                       const cornerActive = fullscreenHoveredBoxCorner?.boxId === String(box.id)
@@ -4455,6 +6641,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      )}
 	      {renderOtherAnnotationModal()}
       {renderAnnotationEditModal()}
+      {renderSegmentationHelperModal()}
 	      {renderFullscreenImageModal()}
 	    </section>
 	  );

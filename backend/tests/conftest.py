@@ -8,6 +8,14 @@ from sqlalchemy.orm import sessionmaker
 from unittest.mock import Mock, patch
 import uuid
 
+if os.name != "nt":
+    try:
+        import uvloop
+
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        pass
+
 # Set test environment variables before importing app components
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["FAST_TEST_MODE"] = "true"

@@ -1,6 +1,8 @@
 import uuid
 import json
 import mimetypes
+import base64
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -18,6 +20,19 @@ import utils.crud as crud
 from core.config import settings
 from utils.boto3_client import upload_file_to_s3
 from utils.volume_loader import load_slice_stack
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
+TOOLBOX_IMPORT_ERROR: Optional[Exception] = None
+try:
+    from test_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow
+except ModuleNotFoundError as exc:
+    TOOLBOX_IMPORT_ERROR = exc
+    WorkflowGraph = None
+    WorkflowImageInput = None
+    execute_image_workflow = None
 
 
 router = APIRouter(tags=["Inspection Workbench"])
@@ -57,6 +72,29 @@ WORKSPACE_INSPECTOR_DEFAULTS = {
 }
 TEST_DATA_ROOT = Path(__file__).resolve().parents[2] / "test" / "data"
 PT3_TEST_STACK_ROOT = TEST_DATA_ROOT / "3D" / "geometric"
+SLICE_SEGMENTATION_METHOD_IDS = {
+    "threshold.otsu",
+    "threshold.manual",
+    "segmentation.connected_components",
+    "segmentation.watershed_seeds",
+    "ml.yolov8.segment",
+    "ml.yolo.ultralytics",
+    "ml.sam.segment_anything",
+    "ml.mask2former.universal_segment",
+    "ml.oneformer.universal_segment",
+}
+
+
+def _require_toolbox() -> None:
+    if TOOLBOX_IMPORT_ERROR is None:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=(
+            "Inspection slice segmentation is unavailable because dependency 'test_toolbox' "
+            f"could not be imported. Original error: {TOOLBOX_IMPORT_ERROR}"
+        ),
+    )
 
 
 async def _get_project_with_access_check(
@@ -297,6 +335,130 @@ def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
             "default_model": None,
         },
     }
+
+
+def _decode_slice_image_payload(value: str) -> bytes:
+    encoded = str(value or "").strip()
+    if "," in encoded and encoded.lower().startswith("data:"):
+        encoded = encoded.split(",", 1)[1]
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid slice image payload") from exc
+
+
+def _slice_segmentation_workflow(method_id: str, parameters: dict):
+    if WorkflowGraph is None:
+        _require_toolbox()
+    if method_id in {"threshold.otsu", "threshold.manual"}:
+        return WorkflowGraph(
+            name=f"Inspection slice segmentation {method_id}",
+            source={"kind": "manual_selection", "image_count": 1, "part_count": 1},
+            output={"mode": "metadata_only", "artifact_policy": "metadata_only"},
+            nodes=[
+                {"id": "input", "method_id": "source.project_part_images"},
+                {"id": "threshold", "method_id": method_id, "parameters": parameters or {}},
+                {"id": "segment", "method_id": "segmentation.connected_components", "parameters": {"min_area_px": 1}},
+            ],
+            edges=[
+                {"source_node": "input", "target_node": "threshold"},
+                {"source_node": "threshold", "target_node": "segment"},
+            ],
+        )
+    return WorkflowGraph(
+        name=f"Inspection slice segmentation {method_id}",
+        source={"kind": "manual_selection", "image_count": 1, "part_count": 1},
+        output={"mode": "metadata_only", "artifact_policy": "metadata_only"},
+        nodes=[
+            {"id": "input", "method_id": "source.project_part_images"},
+            {"id": "segment", "method_id": method_id, "parameters": parameters or {}},
+        ],
+        edges=[
+            {"source_node": "input", "target_node": "segment"},
+        ],
+    )
+
+
+def _normalize_segment_region(entry: object, index: int) -> Optional[dict]:
+    if not isinstance(entry, dict):
+        return None
+    bbox = entry.get("bbox")
+    if not isinstance(bbox, list) or len(bbox) < 4:
+        detection_bbox = entry.get("bbox") if isinstance(entry.get("bbox"), dict) else None
+        if detection_bbox:
+            x = float(detection_bbox.get("x", 0) or 0)
+            y = float(detection_bbox.get("y", 0) or 0)
+            width = float(detection_bbox.get("width", 0) or 0)
+            height = float(detection_bbox.get("height", 0) or 0)
+            bbox = [x, y, x + width, y + height]
+    if not isinstance(bbox, list) or len(bbox) < 4:
+        return None
+    try:
+        x1, y1, x2, y2 = [float(value) for value in bbox[:4]]
+    except (TypeError, ValueError):
+        return None
+    if x2 <= x1 or y2 <= y1:
+        return None
+    raw_centroid = entry.get("centroid")
+    centroid = None
+    if isinstance(raw_centroid, list) and len(raw_centroid) >= 2:
+        try:
+            centroid = [float(raw_centroid[0]), float(raw_centroid[1])]
+        except (TypeError, ValueError):
+            centroid = None
+    raw_label = entry.get("label", index + 1)
+    try:
+        label = int(raw_label)
+    except (TypeError, ValueError):
+        label = index + 1
+    area = entry.get("area_px", (x2 - x1) * (y2 - y1))
+    try:
+        area_px = float(area)
+    except (TypeError, ValueError):
+        area_px = float((x2 - x1) * (y2 - y1))
+    confidence = entry.get("confidence")
+    try:
+        confidence_value = float(confidence) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence_value = None
+    return {
+        "label": label,
+        "area_px": area_px,
+        "bbox": [x1, y1, x2, y2],
+        "centroid": centroid,
+        "confidence": confidence_value,
+        "class_name": str(entry.get("class_name")) if entry.get("class_name") is not None else None,
+    }
+
+
+def _regions_from_toolbox_result(result) -> List[dict]:
+    regions: List[dict] = []
+    for node_result in result.node_results:
+        summary = node_result.summary if isinstance(node_result.summary, dict) else {}
+        for key in ("measurements", "detections"):
+            values = summary.get(key)
+            if not isinstance(values, list):
+                continue
+            for entry in values:
+                region = _normalize_segment_region(entry, len(regions))
+                if region:
+                    regions.append(region)
+    deduped = {}
+    for region in regions:
+        key = tuple(round(value, 3) for value in region["bbox"])
+        deduped[key] = region
+    return list(deduped.values())
+
+
+def _select_clicked_region(regions: List[dict], click_x: float, click_y: float) -> Optional[dict]:
+    containing = []
+    for region in regions:
+        x1, y1, x2, y2 = region["bbox"]
+        if x1 <= click_x <= x2 and y1 <= click_y <= y2:
+            containing.append(region)
+    if not containing:
+        return None
+    return min(containing, key=lambda region: region.get("area_px") or float("inf"))
 
 
 def _prune_config_to_source_shape(*, persisted_config: dict, source_config: dict) -> dict:
@@ -1031,6 +1193,74 @@ async def invoke_part_segmentation(
         "status": "completed",
         "overlay_id": overlay_id,
         "created_at": created_at,
+    }
+
+
+@router.post(
+    "/projects/{project_id}/parts/{part_id}/slice-segmentation",
+    response_model=schemas.InspectionSliceSegmentationResponse,
+)
+async def segment_inspection_slice(
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    payload: schemas.InspectionSliceSegmentationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    _require_toolbox()
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+
+    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    if payload.method_id not in SLICE_SEGMENTATION_METHOD_IDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported slice segmentation method")
+
+    image_bytes = _decode_slice_image_payload(payload.image_data_base64)
+    workflow = _slice_segmentation_workflow(payload.method_id, payload.parameters)
+    image_input = WorkflowImageInput(
+        image_id=uuid.uuid4(),
+        filename=payload.filename,
+        content_type="image/png",
+        data=image_bytes,
+        metadata={
+            "part_id": str(part_id),
+            "axis": payload.axis,
+            "slice_index": payload.slice_index,
+        },
+    )
+
+    try:
+        result = execute_image_workflow(workflow, [image_input])
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Slice segmentation failed: {exc}") from exc
+
+    regions = _regions_from_toolbox_result(result)
+    selected_region = _select_clicked_region(regions, payload.click_x, payload.click_y)
+    summary = {
+        "workflow_name": result.workflow_name,
+        "image_count": result.image_count,
+        "region_count": len(regions),
+        "click": {"x": payload.click_x, "y": payload.click_y},
+    }
+    for node_result in result.node_results:
+        if node_result.method_id == payload.method_id and isinstance(node_result.summary, dict):
+            summary.update({key: value for key, value in node_result.summary.items() if key not in {"measurements", "detections"}})
+
+    return {
+        "run_id": result.run_id,
+        "part_id": part_id,
+        "axis": payload.axis,
+        "slice_index": payload.slice_index,
+        "method_id": payload.method_id,
+        "status": result.status,
+        "cached": False,
+        "regions": regions,
+        "selected_region": selected_region,
+        "summary": summary,
+        "warnings": result.warnings,
     }
 
 

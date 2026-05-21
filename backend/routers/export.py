@@ -1,10 +1,13 @@
 import uuid
+import asyncio
 import io
 import json
 import logging
+import re
 import zipfile
 from collections import defaultdict
 from decimal import Decimal
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, StreamingResponse, Response
@@ -12,14 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func as _func
 
 from core import models, schemas
+from core.config import settings
 from core.database import get_db
 from core.group_auth_helper import is_user_in_group
+from utils.boto3_client import boto3_client
 from utils.dependencies import get_current_user
 import utils.crud as crud
+from routers.inspection_workbench import _default_project_configuration
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Export"])
+
+PROJECT_CONFIGURATION_KEY = "inspection_workbench.project_configuration"
 
 
 async def _get_project_with_export_access(
@@ -316,6 +324,117 @@ def _normalize_metadata_dict_list(metadata_obj, key):
         else:
             dropped_count += 1
     return normalized, dropped_count
+
+
+def _json_safe(value):
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, Decimal):
+        return int(value) if value == int(value) else float(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _toml_scalar(value) -> str:
+    value = _json_safe(value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, list) and all(not isinstance(item, (dict, list)) for item in value):
+        return "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
+    if value is None:
+        return '""'
+    if isinstance(value, (dict, list)):
+        return json.dumps(json.dumps(value, indent=2, sort_keys=True))
+    return json.dumps(str(value))
+
+
+def _toml_table(name: str, values: dict) -> str:
+    lines = [f"[{name}]"]
+    for key in sorted(values.keys()):
+        safe_key = re.sub(r"[^A-Za-z0-9_-]", "_", str(key))
+        lines.append(f"{safe_key} = {_toml_scalar(values[key])}")
+    return "\n".join(lines)
+
+
+def _toml_array_table(name: str, rows: list[dict]) -> str:
+    blocks = []
+    for row in rows:
+        lines = [f"[[{name}]]"]
+        for key in sorted(row.keys()):
+            safe_key = re.sub(r"[^A-Za-z0-9_-]", "_", str(key))
+            lines.append(f"{safe_key} = {_toml_scalar(row[key])}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _build_toml_document(*, tables: dict[str, dict] | None = None, arrays: dict[str, list[dict]] | None = None) -> str:
+    blocks = []
+    for name, values in (tables or {}).items():
+        blocks.append(_toml_table(name, values))
+    for name, rows in (arrays or {}).items():
+        blocks.append(_toml_array_table(name, rows))
+    return "\n\n".join(block for block in blocks if block).strip() + "\n"
+
+
+def _safe_export_name(value: str, fallback: str) -> str:
+    base = str(value or fallback).split("/")[-1].split("\\")[-1].strip()
+    base = re.sub(r"[^A-Za-z0-9._ -]+", "_", base)
+    base = re.sub(r"\s+", " ", base).strip(" .")
+    return base or fallback
+
+
+def _dedupe_archive_path(directory: str, filename: str, used_paths: set[str]) -> str:
+    safe_name = _safe_export_name(filename, "artifact.bin")
+    stem, dot, suffix = safe_name.rpartition(".")
+    if not dot:
+        stem, suffix = safe_name, ""
+    candidate = f"{directory}/{safe_name}"
+    index = 2
+    while candidate in used_paths:
+        candidate_name = f"{stem}-{index}.{suffix}" if suffix else f"{stem}-{index}"
+        candidate = f"{directory}/{candidate_name}"
+        index += 1
+    used_paths.add(candidate)
+    return candidate
+
+
+def _image_record_is_overlay(filename: str, metadata: dict | None, part_overlay_filenames: set[str]) -> bool:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if bool(metadata.get("overlay")):
+        return True
+    filename = str(filename or "").strip()
+    if filename in part_overlay_filenames:
+        return True
+    image_role = str(metadata.get("artifact_type") or metadata.get("role") or "").lower()
+    return "overlay" in image_role
+
+
+async def _read_storage_object_bytes(object_storage_key: str) -> bytes | None:
+    if not boto3_client or not object_storage_key:
+        return None
+    buffer = io.BytesIO()
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: boto3_client.download_fileobj(settings.S3_BUCKET, object_storage_key, buffer),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Project export could not read storage object",
+            extra={"object_storage_key": object_storage_key, "error": str(exc)},
+        )
+        return None
+    return buffer.getvalue()
 
 
 async def _build_project_report_payload(project_id: uuid.UUID, db: AsyncSession, db_project: models.Project) -> dict:
@@ -736,6 +855,11 @@ async def export_project_bundle_json(
 @router.get("/projects/{project_id}/export-bundle")
 async def export_project_bundle_archive(
     project_id: uuid.UUID,
+    include_images: bool = True,
+    include_overlays: bool = True,
+    include_metadata: bool = True,
+    include_created_overlays: bool = True,
+    include_project_configuration: bool = True,
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
@@ -758,33 +882,256 @@ async def export_project_bundle_archive(
             models.DataInstance.filename,
             models.DataInstance.object_storage_key,
             models.DataInstance.size_bytes,
+            models.DataInstance.content_type,
+            models.DataInstance.metadata_json,
+            models.DataInstance.created_at,
+            models.DataInstance.updated_at,
+            models.DataInstance.uploaded_by_user_id,
         )
         .where(models.DataInstance.project_id == project_id)
         .where(models.DataInstance.deleted_at.is_(None))
         .order_by(models.DataInstance.created_at.asc())
     )
-    image_refs = [
-        {
-            "image_id": str(row.id),
-            "filename": row.filename,
-            "object_storage_key": row.object_storage_key,
-            "size_bytes": row.size_bytes,
-        }
-        for row in image_refs_result
-    ]
+    image_rows = image_refs_result.all()
+
+    part_rows_result = await db.execute(
+        select(
+            models.InspectionPart.id,
+            models.InspectionPart.batch_id,
+            models.InspectionPart.serial_number,
+            models.InspectionPart.display_name,
+            models.InspectionPart.review_state,
+            models.InspectionPart.metadata_json,
+            models.InspectionPart.created_at,
+            models.InspectionPart.updated_at,
+        )
+        .where(models.InspectionPart.project_id == project_id)
+        .order_by(models.InspectionPart.serial_number.asc())
+    )
+    part_rows = part_rows_result.all()
+
+    batch_rows_result = await db.execute(
+        select(
+            models.InspectionBatch.id,
+            models.InspectionBatch.name,
+            models.InspectionBatch.description,
+            models.InspectionBatch.owner,
+            models.InspectionBatch.status,
+            models.InspectionBatch.created_at,
+            models.InspectionBatch.updated_at,
+        )
+        .where(models.InspectionBatch.project_id == project_id)
+        .order_by(models.InspectionBatch.name.asc())
+    )
+    batch_rows = batch_rows_result.all()
+
+    project_metadata_result = await db.execute(
+        select(
+            models.ProjectMetadata.key,
+            models.ProjectMetadata.value,
+            models.ProjectMetadata.created_at,
+            models.ProjectMetadata.updated_at,
+        )
+        .where(models.ProjectMetadata.project_id == project_id)
+        .order_by(models.ProjectMetadata.key.asc())
+    )
+    project_metadata_rows = project_metadata_result.all()
+    project_configuration = _default_project_configuration(db_project.project_type)
+    for key, value, _created_at, _updated_at in project_metadata_rows:
+        if key == PROJECT_CONFIGURATION_KEY and isinstance(value, dict):
+            project_configuration = {
+                **project_configuration,
+                **value,
+            }
+            break
+
+    part_overlay_filenames: set[str] = set()
+    for _part_id, _batch_id, _serial, _display, _review_state, metadata, _created_at, _updated_at in part_rows:
+        metadata_obj = metadata if isinstance(metadata, dict) else {}
+        source_images = metadata_obj.get("source_images")
+        if not isinstance(source_images, list):
+            continue
+        for record in source_images:
+            if isinstance(record, dict) and record.get("overlay") and record.get("filename"):
+                part_overlay_filenames.add(str(record["filename"]))
+
+    used_paths: set[str] = set()
+    image_refs = []
+    missing_artifacts = []
+    artifact_counts = {
+        "images_requested": 0,
+        "overlays_requested": 0,
+        "files_written": 0,
+        "files_missing": 0,
+    }
+
+    for row in image_rows:
+        (
+            image_id,
+            filename,
+            object_storage_key,
+            size_bytes,
+            content_type,
+            metadata,
+            created_at,
+            updated_at,
+            uploaded_by_user_id,
+        ) = row
+        is_overlay = _image_record_is_overlay(filename, metadata, part_overlay_filenames)
+        should_include_file = include_overlays if is_overlay else include_images
+        archive_path = None
+        if should_include_file:
+            artifact_counts["overlays_requested" if is_overlay else "images_requested"] += 1
+            archive_path = _dedupe_archive_path(
+                "artifacts/overlays" if is_overlay else "artifacts/images",
+                filename or f"{image_id}.bin",
+                used_paths,
+            )
+        image_refs.append(
+            {
+                "image_id": str(image_id),
+                "filename": filename,
+                "archive_path": archive_path or "",
+                "artifact_kind": "overlay" if is_overlay else "image",
+                "object_storage_key": object_storage_key,
+                "size_bytes": size_bytes,
+                "content_type": content_type or "",
+                "uploaded_by": uploaded_by_user_id or "",
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "metadata_json": metadata if isinstance(metadata, dict) else {},
+            }
+        )
 
     manifest_payload = {
         "project": bundle_payload["project"],
         "bundle_summary": bundle_payload["bundle_summary"],
+        "export": {
+            "format": "vista-project-export",
+            "version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_by": current_user.email,
+            "options": {
+                "include_images": include_images,
+                "include_overlays": include_overlays,
+                "include_metadata": include_metadata,
+                "include_created_overlays": include_created_overlays,
+                "include_project_configuration": include_project_configuration,
+            },
+        },
         "image_references": image_refs,
     }
 
+    batch_records = [
+        {
+            "id": str(batch_id),
+            "name": name,
+            "description": description or "",
+            "owner": owner or "",
+            "status": status_value,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+        for batch_id, name, description, owner, status_value, created_at, updated_at in batch_rows
+    ]
+    part_records = [
+        {
+            "id": str(part_id),
+            "batch_id": str(batch_id) if batch_id else "",
+            "serial_number": serial_number,
+            "display_name": display_name or "",
+            "review_state": review_state,
+            "metadata_json": metadata if isinstance(metadata, dict) else {},
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+        for part_id, batch_id, serial_number, display_name, review_state, metadata, created_at, updated_at in part_rows
+    ]
+    project_metadata_records = [
+        {
+            "key": key,
+            "value_json": value,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+        for key, value, created_at, updated_at in project_metadata_rows
+    ]
+
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for image_ref in image_refs:
+            archive_path = image_ref.get("archive_path")
+            if not archive_path:
+                continue
+            file_bytes = await _read_storage_object_bytes(image_ref.get("object_storage_key") or "")
+            if file_bytes is None:
+                artifact_counts["files_missing"] += 1
+                missing_artifacts.append({
+                    "image_id": image_ref["image_id"],
+                    "filename": image_ref["filename"],
+                    "archive_path": archive_path,
+                    "object_storage_key": image_ref.get("object_storage_key") or "",
+                })
+                continue
+            archive.writestr(archive_path, file_bytes)
+            artifact_counts["files_written"] += 1
+
+        manifest_payload["export"]["artifact_counts"] = artifact_counts
+        manifest_payload["export"]["missing_artifacts"] = missing_artifacts
+        manifest_payload = _json_safe(manifest_payload)
         archive.writestr(
             "export-manifest.json",
             json.dumps(manifest_payload, indent=2, sort_keys=True),
         )
+        archive.writestr(
+            "export-manifest.toml",
+            _build_toml_document(
+                tables={
+                    "project": manifest_payload["project"],
+                    "export": manifest_payload["export"],
+                    "bundle_summary": manifest_payload["bundle_summary"],
+                },
+                arrays={"image_references": image_refs},
+            ),
+        )
+        if include_project_configuration:
+            archive.writestr(
+                "project-configuration.toml",
+                _build_toml_document(
+                    tables={
+                        "project": manifest_payload["project"],
+                        "project_configuration": {
+                            "metadata_key": PROJECT_CONFIGURATION_KEY,
+                            "config_json": project_configuration,
+                        },
+                    }
+                ),
+            )
+        if include_metadata:
+            archive.writestr(
+                "project-metadata.toml",
+                _build_toml_document(arrays={"project_metadata": project_metadata_records}),
+            )
+            archive.writestr(
+                "images.toml",
+                _build_toml_document(arrays={"images": image_refs}),
+            )
+            archive.writestr(
+                "parts.toml",
+                _build_toml_document(arrays={"batches": batch_records, "parts": part_records}),
+            )
+        if include_created_overlays:
+            archive.writestr(
+                "created-overlays.toml",
+                _build_toml_document(
+                    tables={"project": manifest_payload["project"]},
+                    arrays={
+                        "annotations": bundle_payload["bundle_summary"]["annotations"]["records"],
+                        "overlay_layers": bundle_payload["bundle_summary"]["overlays"]["records"],
+                        "measurement_runs": bundle_payload["bundle_summary"]["measurements"]["records"],
+                    },
+                ),
+            )
     buffer.seek(0)
 
     safe_name = "".join(

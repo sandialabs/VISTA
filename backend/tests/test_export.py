@@ -1072,14 +1072,74 @@ def test_project_bundle_archive_supports_progressive_users_per_project_type(clie
             with zipfile.ZipFile(io.BytesIO(bundle_resp.content)) as archive:
                 names = archive.namelist()
                 assert "export-manifest.json" in names
+                assert "export-manifest.toml" in names
+                assert "project-configuration.toml" in names
+                assert "project-metadata.toml" in names
+                assert "images.toml" in names
+                assert "parts.toml" in names
+                assert "created-overlays.toml" in names
                 manifest = _json.loads(archive.read("export-manifest.json").decode("utf-8"))
+                manifest_toml = archive.read("export-manifest.toml").decode("utf-8")
+                parts_toml = archive.read("parts.toml").decode("utf-8")
 
             assert manifest["project"]["project_type"] == project_type
+            assert manifest["export"]["options"]["include_project_configuration"] is True
+            assert "[project]" in manifest_toml
+            assert "[[image_references]]" in manifest_toml
+            assert "[[parts]]" in parts_toml
             assert manifest["bundle_summary"]["parts"]["total"] == scenario["part_count"]
             assert manifest["bundle_summary"]["images"]["total"] == scenario["image_count"]
             assert len(manifest["bundle_summary"]["overlays"]["records"]) == scenario["part_count"]
             assert len(manifest["bundle_summary"]["measurements"]["records"]) == scenario["part_count"]
             assert len(manifest["image_references"]) == scenario["image_count"]
+
+
+def test_project_bundle_archive_respects_export_option_flags(client):
+    headers = {"X-Forwarded-Email": "bundle-options@bundle-options.test"}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Bundle Option Flags",
+            "description": "option flag coverage",
+            "meta_group_id": "bundle-options",
+            "project_type": "PT2",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    image_resp = client.post(
+        f"/api/projects/{project_id}/images",
+        files={"file": ("option_image.png", b"image-bytes", "image/png")},
+        data={"metadata": _json.dumps({"overlay": False})},
+        headers=headers,
+    )
+    assert image_resp.status_code == 201, image_resp.text
+
+    bundle_resp = client.get(
+        (
+            f"/api/projects/{project_id}/export-bundle"
+            "?include_images=false"
+            "&include_metadata=false"
+            "&include_created_overlays=false"
+            "&include_project_configuration=false"
+        ),
+        headers=headers,
+    )
+    assert bundle_resp.status_code == 200, bundle_resp.text
+    with zipfile.ZipFile(io.BytesIO(bundle_resp.content)) as archive:
+        names = archive.namelist()
+        manifest = _json.loads(archive.read("export-manifest.json").decode("utf-8"))
+
+    assert "export-manifest.toml" in names
+    assert "project-configuration.toml" not in names
+    assert "project-metadata.toml" not in names
+    assert "images.toml" not in names
+    assert "parts.toml" not in names
+    assert "created-overlays.toml" not in names
+    assert manifest["export"]["options"]["include_images"] is False
+    assert manifest["image_references"][0]["archive_path"] == ""
 
 
 # ---------------------------------------------------------------------------

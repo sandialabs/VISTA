@@ -203,6 +203,7 @@ const scenarioByUser = [
         metadata: {
           defects: [{ severity: 'critical' }, { severity: 'critical' }, { severity: 'major' }],
           modalities: ['visual', 'infrared', 'uv'],
+          voxel_dtype: 'uint16',
           view_images: { front: 'adv-front.png', top: 'adv-top.png' },
           volume_shape: { axial: 128, coronal: 96, sagittal: 80 },
           overlay_layers: [
@@ -450,6 +451,28 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
         }),
       });
     }
+    if (url.includes('/slice-segmentation') && options.method === 'POST') {
+      const payload = JSON.parse(options.body || '{}');
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          run_id: 'slice-seg-run-1',
+          part_id: mutableParts[0]?.id || 'part',
+          axis: payload.axis || 'axial',
+          slice_index: payload.slice_index || 0,
+          method_id: payload.method_id || 'segmentation.connected_components',
+          status: 'completed',
+          cached: false,
+          regions: [
+            { label: 1, area_px: 256, bbox: [6, 6, 26, 26], centroid: [16, 16] },
+            { label: 2, area_px: 324, bbox: [34, 34, 60, 60], centroid: [47, 47] },
+          ],
+          selected_region: { label: 2, area_px: 324, bbox: [34, 34, 60, 60], centroid: [47, 47] },
+          summary: { region_count: 2 },
+          warnings: [],
+        }),
+      });
+    }
     if (url.includes('/measurement-runs') && options.method === 'POST') {
       return Promise.resolve({
         ok: true,
@@ -573,6 +596,8 @@ describe('InspectionWorkbenchPanel', () => {
       expect(screen.getByText(`Parts: ${scenario.parts.length}`)).toBeInTheDocument();
       if (projectType === 'PT3') {
         expect(screen.getByTestId('mpr-panel')).toBeInTheDocument();
+        expect(screen.getByTestId('pt3-inspection-layout')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Draw 3D box on MPR slices' })).toBeInTheDocument();
         expect(screen.queryByTestId('selected-image-panel')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Part Selection' }));
         expect(screen.getByRole('heading', { name: 'Part Selection' })).toBeInTheDocument();
@@ -609,14 +634,12 @@ describe('InspectionWorkbenchPanel', () => {
         expect(screen.getByText('Passed: 1')).toBeInTheDocument();
       });
 
-      if (projectType === 'PT3') {
-        fireEvent.click(screen.getByRole('button', { name: 'Close Part Selection' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Annotations' }));
-      }
+      if (projectType === 'PT3') fireEvent.click(screen.getByRole('button', { name: 'Close Part Selection' }));
       const seedAnnotationType = scenario.parts[0].metadata.annotations[0].defect_class;
       await waitFor(() => {
         expect(screen.getByTestId('annotation-list')).toHaveTextContent(seedAnnotationType);
-        expect(screen.getByTestId('annotation-list')).not.toHaveTextContent('@ 2026-03-28');
+        expect(screen.getByTestId('annotation-list')).toHaveTextContent('seed-user@example.com');
+        expect(screen.getByTestId('annotation-list')).toHaveTextContent(new Date('2026-03-28T11:00:00Z').toLocaleString());
       });
       fireEvent.click(screen.getByRole('button', { name: 'Other' }));
       fireEvent.change(screen.getByLabelText('Annotation defect type'), { target: { value: 'Other' } });
@@ -631,10 +654,7 @@ describe('InspectionWorkbenchPanel', () => {
         expect(screen.getByTestId('annotation-list')).toHaveTextContent('Other');
         expect(screen.getByTestId('annotation-list')).toHaveTextContent(`${scenario.user}-crack`);
       });
-      if (projectType === 'PT3') {
-        fireEvent.click(screen.getByRole('button', { name: 'Close Annotations' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Part Selection' }));
-      }
+      if (projectType === 'PT3') fireEvent.click(screen.getByRole('button', { name: 'Part Selection' }));
       fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'all' } });
       fireEvent.change(screen.getByLabelText('Batch'), { target: { value: '' } });
       await waitFor(() => {
@@ -710,6 +730,89 @@ describe('InspectionWorkbenchPanel', () => {
       expect(savedViewNames.every((value) => typeof value === 'string')).toBe(true);
       unmount();
     }
+  });
+
+  test('keeps PT3 MPR quadrants constrained after clicking the 3D pane', async () => {
+    mockWorkbenchFetch(scenarioByUser[2]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mpr-panel')).toBeInTheDocument();
+    });
+
+    const mprGrid = screen.getByTestId('mpr-grid');
+    const quadrantPaneIds = ['mpr-pane-axial', 'mpr-pane-coronal', 'mpr-pane-sagittal', 'mpr-pane-3d'];
+
+    expect(mprGrid).toHaveClass('mpr-grid-four');
+    expect(mprGrid).not.toHaveClass('mpr-grid-single');
+    quadrantPaneIds.forEach((testId) => {
+      expect(screen.getByTestId(testId)).not.toHaveClass('mpr-pane-hidden');
+    });
+
+    fireEvent.click(screen.getByTestId('mpr-pane-3d'));
+
+    expect(mprGrid).toHaveClass('mpr-grid-four');
+    expect(mprGrid).not.toHaveClass('mpr-grid-single');
+    quadrantPaneIds.forEach((testId) => {
+      expect(screen.getByTestId(testId)).not.toHaveClass('mpr-pane-hidden');
+    });
+  });
+
+  test('creates PT3 cube annotations from boxes on two MPR slices', async () => {
+    mockWorkbenchFetch(scenarioByUser[2]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pt3-inspection-layout')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('annotation-controls')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Draw 3D box on MPR slices' }));
+
+    const axialPreview = screen.getByTestId('mpr-preview-axial');
+    axialPreview.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 300,
+      height: 150,
+      right: 300,
+      bottom: 150,
+    });
+
+    fireEvent.mouseDown(axialPreview, { clientX: 30, clientY: 20, button: 0 });
+    fireEvent.mouseMove(axialPreview, { clientX: 120, clientY: 80 });
+    fireEvent.mouseUp(axialPreview, { clientX: 120, clientY: 80, button: 0 });
+
+    fireEvent.change(document.querySelector('#mpr-slice-axial'), { target: { value: '12' } });
+
+    fireEvent.mouseDown(axialPreview, { clientX: 45, clientY: 30, button: 0 });
+    fireEvent.mouseMove(axialPreview, { clientX: 135, clientY: 90 });
+    fireEvent.mouseUp(axialPreview, { clientX: 135, clientY: 90, button: 0 });
+
+    await waitFor(() => {
+      const cubePost = global.fetch.mock.calls.find((call) => {
+        if (!call[0].includes('/annotations') || call[1]?.method !== 'POST') return false;
+        const body = JSON.parse(call[1].body);
+        return body.geometry?.cube;
+      });
+      expect(cubePost).toBeDefined();
+      const body = JSON.parse(cubePost[1].body);
+      expect(body.defect_class).toBe('3D Box');
+      expect(body.geometry.cube.axis).toBe('axial');
+      expect(body.geometry.cube.vertices).toHaveLength(8);
+      expect(body.metadata).toEqual(expect.objectContaining({
+        annotation_color: '#f97316',
+        annotation_fill_opacity: 0.5,
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('annotation-list')).toHaveTextContent('3D Box');
+    });
+    const axialOverlay = within(axialPreview).getByLabelText('XY annotation overlay');
+    const shadedRect = axialOverlay.querySelector('rect[fill="#f97316"]');
+    expect(shadedRect).toBeInTheDocument();
+    expect(shadedRect.getAttribute('fill-opacity') || shadedRect.getAttribute('fillOpacity')).toBe('0.5');
   });
 
   test.each(projectTypes)('saves configurable hotkeys for progressive %s workflows', async (projectType) => {
@@ -951,6 +1054,15 @@ describe('InspectionWorkbenchPanel', () => {
 
     await waitFor(() => expect(screen.getAllByText('Analyze Output Part').length).toBeGreaterThan(0));
     const composite = screen.getByTestId('inspection-overlay-composite');
+    const viewBoard = document.querySelector('.view-board');
+    expect(screen.getByLabelText('Inspection tile columns')).toHaveAttribute('max', '2');
+    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('2');
+    fireEvent.change(screen.getByLabelText('Inspection tile columns'), { target: { value: '1' } });
+    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('1');
+    expect(screen.getByLabelText('Inspection tile columns value')).toHaveValue(1);
+    fireEvent.change(screen.getByLabelText('Inspection tile columns value'), { target: { value: '2' } });
+    expect(screen.getByLabelText('Inspection tile columns')).toHaveValue('2');
+    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('2');
     expect(screen.getByText('Watershed From Seeds :: Segmentation Overlay')).toBeInTheDocument();
     expect(within(composite).getByAltText('front source')).toHaveAttribute('src', '/api/images/source-image-1/content');
     expect(within(composite).getByAltText('front overlay')).toHaveAttribute('src', '/api/images/overlay-image-1/content');
@@ -1126,8 +1238,12 @@ describe('InspectionWorkbenchPanel', () => {
           annotations: [{
             id: 'measurement-a',
             image_id: 'part-basic-1-image-1',
+            defect_class: 'Measurement',
+            comment: 'Line check',
             geometry: { line: { x1: 100, y1: 80, x2: 280, y2: 160, imageWidth: 400, imageHeight: 200 } },
             measurements: { length_mm: 4.2 },
+            created_by: 'inspector@example.com',
+            created_at: '2026-04-01T09:15:00Z',
           }],
         },
       }],
@@ -1135,6 +1251,32 @@ describe('InspectionWorkbenchPanel', () => {
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
     await waitFor(() => expect(screen.getByLabelText('tile measurement overlay')).toBeInTheDocument());
     await waitFor(() => expect(screen.queryByText('Loading annotations…')).not.toBeInTheDocument());
+    expect(screen.getByTestId('annotation-list')).toHaveTextContent('inspector@example.com');
+    expect(screen.getByTestId('annotation-list')).toHaveTextContent(new Date('2026-04-01T09:15:00Z').toLocaleString());
+    fireEvent.click(screen.getByTestId('annotation-list').querySelector('.annotation-entry'));
+    expect(document.querySelector('.inspection-annotation-selected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit annotation Line check' }));
+    expect(screen.getByRole('dialog', { name: 'Edit annotation' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Edit annotation comment'), { target: { value: 'Unsaved edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel edit annotation' }));
+    expect(screen.queryByRole('dialog', { name: 'Edit annotation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit annotation Unsaved edit' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit annotation Line check' }));
+    fireEvent.change(screen.getByLabelText('Edit annotation comment'), { target: { value: 'Saved edit' } });
+    fireEvent.change(screen.getByLabelText('Edit annotation color'), { target: { value: '#22c55e' } });
+    fireEvent.change(screen.getByLabelText('Edit annotation fill opacity'), { target: { value: '0.35' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit annotation Saved edit' })).toBeInTheDocument());
+    const stylePatchCall = global.fetch.mock.calls.find((call) => {
+      if (!call[0].includes('/annotations/measurement-a') || call[1]?.method !== 'PATCH') return false;
+      const body = JSON.parse(call[1].body);
+      return body.comment === 'Saved edit';
+    });
+    expect(JSON.parse(stylePatchCall[1].body).metadata).toEqual(expect.objectContaining({
+      annotation_color: '#22c55e',
+      measurement_color: '#22c55e',
+      annotation_fill_opacity: 0.35,
+    }));
     expect(screen.getAllByText('4.20 mm').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByAltText('front view'));
     await waitFor(() => expect(screen.getAllByText('4.20 mm').length).toBeGreaterThan(1));
@@ -1467,14 +1609,14 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getByTestId('mpr-pane-coronal')).toHaveTextContent('No volume stack images');
     fireEvent.change(screen.getByTestId('mpr-part-selector'), { target: { value: 'part-adv-1' } });
     expect(screen.getByTestId('mpr-part-selector')).toHaveValue('part-adv-1');
-    expect(screen.queryByAltText(/Volume reconstruction slice/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /Volume reconstruction slice/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/axial/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/coronal/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/sagittal/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('3D view'), { target: { value: 'stack' } });
-    expect(screen.getAllByAltText(/Volume reconstruction slice/).length).toBeGreaterThan(0);
-    expect(screen.getAllByAltText(/Volume reconstruction slice/)[0]).toHaveAttribute('draggable', 'false');
+    expect(screen.getAllByRole('img', { name: /Volume reconstruction slice/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('img', { name: /Volume reconstruction slice/ })[0]).toHaveAttribute('draggable', 'false');
 
     const coronalPreview = screen.getByTestId('mpr-preview-coronal');
     const initialCoronalCrosshairY = coronalPreview.style.getPropertyValue('--crosshair-y');
@@ -1508,8 +1650,15 @@ describe('InspectionWorkbenchPanel', () => {
     const maxSlider = screen.getByLabelText('Display window maximum');
     fireEvent.change(minSlider, { target: { value: '30' } });
     fireEvent.change(maxSlider, { target: { value: '180' } });
-    expect(screen.getByTestId('mpr-panel')).toHaveTextContent('30–180');
+    expect(screen.getByTestId('mpr-panel')).toHaveTextContent('30-180');
     expect(screen.getAllByTestId('mpr-preview-axial')[0].querySelector('.mpr-slice-canvas')).toHaveAttribute('data-display-window', '30-180');
+    expect(screen.getAllByTestId('mpr-preview-axial')[0].querySelector('.mpr-slice-canvas')).toHaveAttribute('data-display-domain', '0-65535');
+    expect(screen.getByLabelText('Display window maximum handle')).toHaveAttribute('max', '65535');
+
+    fireEvent.change(screen.getByLabelText('Display window minimum'), { target: { value: '4096' } });
+    expect(screen.getByLabelText('Display window minimum handle')).toHaveValue('4096');
+    fireEvent.change(screen.getByLabelText('Display window maximum handle'), { target: { value: '32768' } });
+    expect(screen.getByLabelText('Display window maximum')).toHaveValue(32768);
 
     fireEvent.click(screen.getByTestId('mpr-pane-axial'));
     const zoomLayer = document.querySelector('.inspection-fullscreen-image-zoom-layer');
@@ -1521,6 +1670,185 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getByRole('button', { name: 'Close Part Selection' })).toBeInTheDocument();
   });
 
+  test('opens PT3 segmentation helpers with editable segments and slice drawing tools', async () => {
+    mockWorkbenchFetch(scenarioByUser[2]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByTestId('mpr-panel')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Segmentation Helpers' }));
+    expect(screen.getByRole('dialog', { name: 'Segmentation Helpers' })).toBeInTheDocument();
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('Segment A');
+    expect(screen.getByLabelText('View orientation')).toHaveTextContent('XY');
+    expect(screen.getByLabelText('View orientation')).toHaveTextContent('XZ');
+    expect(screen.getByLabelText('View orientation')).toHaveTextContent('YZ');
+    expect(screen.getByLabelText('Slice navigation')).toHaveTextContent('Z');
+    expect(screen.getByRole('button', { name: /Connected: Seed a contiguous area/i })).toHaveAttribute('data-tooltip', expect.stringContaining('Connected'));
+    expect(screen.getByRole('button', { name: /Level Trace: Trace an equal-intensity contour/i })).toHaveAttribute('data-tooltip', expect.stringContaining('Level Trace'));
+    expect(screen.getByRole('button', { name: /Scissors: Mark cut paths/i })).toHaveAttribute('data-tooltip', expect.stringContaining('Scissors'));
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit Segment A/i }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Void core' } });
+    fireEvent.change(screen.getByLabelText('Color'), { target: { value: '#e11d48' } });
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('Void core');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add new segment' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('Segment B');
+
+    fireEvent.click(screen.getByRole('button', { name: 'XZ' }));
+    fireEvent.change(screen.getByLabelText('Y'), { target: { value: '12' } });
+    expect(screen.getAllByText('Y 12 / 95').length).toBeGreaterThan(0);
+
+    const stage = screen.getByTestId('segmentation-helper-stage');
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 });
+    fireEvent.wheel(stage, { deltaY: 80 });
+    expect(screen.getAllByText('Y 13 / 95').length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Brush size'), { target: { value: '32' } });
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 120 });
+    expect(stage).toHaveClass('show-brush-pointer');
+    expect(stage.style.getPropertyValue('--brush-pointer-size')).toBe('32px');
+
+    fireEvent.click(screen.getByRole('button', { name: /Connected/i }));
+    const connectedCanvas = stage.querySelector('canvas.mpr-slice-canvas');
+    const connectedWidth = 80;
+    const connectedHeight = 96;
+    const connectedPixels = new Uint8ClampedArray(connectedWidth * connectedHeight * 4);
+    for (let index = 0; index < connectedWidth * connectedHeight; index += 1) {
+      const offset = index * 4;
+      connectedPixels[offset] = 255;
+      connectedPixels[offset + 1] = 255;
+      connectedPixels[offset + 2] = 255;
+      connectedPixels[offset + 3] = 255;
+    }
+    for (let y = 20; y < 36; y += 1) {
+      for (let x = 20; x < 44; x += 1) {
+        const offset = (y * connectedWidth + x) * 4;
+        connectedPixels[offset] = 0;
+        connectedPixels[offset + 1] = 0;
+        connectedPixels[offset + 2] = 0;
+        connectedPixels[offset + 3] = 255;
+      }
+    }
+    connectedCanvas.width = connectedWidth;
+    connectedCanvas.height = connectedHeight;
+    Object.defineProperty(connectedCanvas, 'getContext', {
+      configurable: true,
+      value: jest.fn(() => ({
+        getImageData: jest.fn(() => ({ width: connectedWidth, height: connectedHeight, data: connectedPixels })),
+      })),
+    });
+    fireEvent.mouseDown(stage, { clientX: 120, clientY: 90, button: 0 });
+    expect(stage.querySelector('.segmentation-helper-point')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Segmentation helper overlay').querySelector('ellipse')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add selection' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('1 areas');
+
+    fireEvent.click(screen.getByRole('button', { name: /Polygon/i }));
+    fireEvent.mouseDown(stage, { clientX: 80, clientY: 70, button: 0 });
+    fireEvent.mouseDown(stage, { clientX: 180, clientY: 80, button: 0 });
+    fireEvent.mouseDown(stage, { clientX: 140, clientY: 160, button: 0 });
+    expect(stage.querySelectorAll('.segmentation-helper-point').length).toBeGreaterThanOrEqual(3);
+    fireEvent.doubleClick(stage, { clientX: 140, clientY: 160, button: 0 });
+    fireEvent.click(screen.getByRole('button', { name: 'Subtract selection' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('2 areas');
+
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = jest.fn(() => 'data:image/png;base64,c2xpY2U=');
+    fireEvent.click(screen.getByRole('button', { name: /ML Helper/i }));
+    expect(screen.getByLabelText('ML helper options')).toHaveTextContent('OpenCV');
+    fireEvent.change(screen.getByLabelText('Method family'), { target: { value: 'sam' } });
+    expect(screen.getByLabelText('Segment function')).toHaveValue('ml.sam.segment_anything');
+    fireEvent.change(screen.getByLabelText('Variant'), { target: { value: 'sam_vit_b' } });
+    const beforeMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
+    fireEvent.mouseDown(stage, { clientX: 220, clientY: 110, button: 0 });
+    await waitFor(() => expect(screen.getByText(/Selected ML region 2/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add selection' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('3 areas');
+    const afterFirstMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
+    expect(afterFirstMlCalls).toBe(beforeMlCalls + 1);
+    const mlPayload = JSON.parse(global.fetch.mock.calls.find((call) => call[0].includes('/slice-segmentation'))[1].body);
+    expect(mlPayload.method_id).toBe('ml.sam.segment_anything');
+    expect(mlPayload.parameters.variant).toBe('sam_vit_b');
+
+    fireEvent.mouseDown(stage, { clientX: 221, clientY: 111, button: 0 });
+    expect(global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length).toBe(afterFirstMlCalls);
+    HTMLCanvasElement.prototype.toDataURL = originalToDataURL;
+  });
+
+  test('connected segmentation helper selects distinct contiguous black and white shapes at default sensitivity', async () => {
+    mockWorkbenchFetch(scenarioByUser[2]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByTestId('mpr-panel')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Segmentation Helpers' }));
+
+    const stage = screen.getByTestId('segmentation-helper-stage');
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 480, right: 400, bottom: 480 });
+    const canvas = stage.querySelector('canvas.mpr-slice-canvas');
+    expect(canvas).toBeInTheDocument();
+
+    const installSlicePixels = ({ background, shape }) => {
+      const width = 80;
+      const height = 96;
+      const data = new Uint8ClampedArray(width * height * 4);
+      for (let index = 0; index < width * height; index += 1) {
+        const offset = index * 4;
+        data[offset] = background;
+        data[offset + 1] = background;
+        data[offset + 2] = background;
+        data[offset + 3] = 255;
+      }
+      for (let y = shape.y; y < shape.y + shape.height; y += 1) {
+        for (let x = shape.x; x < shape.x + shape.width; x += 1) {
+          const offset = (y * width + x) * 4;
+          data[offset] = shape.value;
+          data[offset + 1] = shape.value;
+          data[offset + 2] = shape.value;
+          data[offset + 3] = 255;
+        }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      Object.defineProperty(canvas, 'getContext', {
+        configurable: true,
+        value: jest.fn(() => ({
+          getImageData: jest.fn(() => ({ width, height, data })),
+        })),
+      });
+    };
+
+    const assertConnectedShape = (shape) => {
+      installSlicePixels(shape);
+      fireEvent.click(screen.getByRole('button', { name: /Connected/i }));
+      fireEvent.mouseDown(stage, {
+        clientX: ((shape.shape.x + Math.floor(shape.shape.width / 2)) / 80) * 400,
+        clientY: ((shape.shape.y + Math.floor(shape.shape.height / 2)) / 96) * 480,
+        button: 0,
+      });
+      const path = screen.getByLabelText('Segmentation helper overlay').querySelector('.segmentation-helper-shape.preview');
+      expect(path).toBeInTheDocument();
+      const pathData = path.getAttribute('d');
+      expect(pathData).toContain(`M ${shape.shape.x} ${shape.shape.y} h ${shape.shape.width}`);
+      expect((pathData.match(new RegExp(`h ${shape.shape.width}`, 'g')) || []).length).toBe(shape.shape.height);
+      expect(pathData).not.toContain('h 80');
+      expect(stage.querySelector('.segmentation-helper-point')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Add selection' }));
+    };
+
+    assertConnectedShape({
+      background: 255,
+      shape: { x: 18, y: 24, width: 20, height: 16, value: 0 },
+    });
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('1 areas');
+
+    assertConnectedShape({
+      background: 0,
+      shape: { x: 42, y: 50, width: 14, height: 18, value: 255 },
+    });
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('2 areas');
+  });
+
   test('renders a fast visual shell fallback for PT3 parts without volume metadata', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
@@ -1529,11 +1857,11 @@ describe('InspectionWorkbenchPanel', () => {
       expect(screen.getByTestId('mpr-panel')).toBeInTheDocument();
     });
 
-    expect(screen.queryByAltText(/Volume reconstruction slice/)).not.toBeInTheDocument();
-    expect(screen.getAllByAltText(/fallback projection from front view/i).length).toBeGreaterThan(0);
-    expect(screen.queryByAltText(/Fallback visual hull shell front view/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /Volume reconstruction slice/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('img', { name: /fallback projection from front view/i }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('img', { name: /Fallback visual hull shell front view/i })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('3D view'), { target: { value: 'shell' } });
-    expect(screen.getByAltText(/Fallback visual hull shell front view/i)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Fallback visual hull shell front view/i })).toBeInTheDocument();
     expect(screen.queryByText('No stack')).not.toBeInTheDocument();
   });
 

@@ -580,7 +580,7 @@ def _apply_node(state: ImageState, node, method) -> Tuple[ImageState, str, Dict[
         state.overlay_label = _overlay_label("Segmentation", method)
         state.overlay_method_id = method.id
         state.overlay_method_name = method.name
-        return state, "Labeled connected components.", {"region_count": len(state.measurements)}, artifacts
+        return state, "Labeled connected components.", {"region_count": len(state.measurements), "measurements": state.measurements}, artifacts
     if node.method_id == "segmentation.watershed_seeds":
         state.labels = _seeded_regions(state.mask or state.image, int(params["seed_spacing_px"]))
         state.overlay_label = _overlay_label("Segmentation", method)
@@ -646,6 +646,7 @@ def _apply_node(state: ImageState, node, method) -> Tuple[ImageState, str, Dict[
             "detection_count": len(state.detections),
             "detection_classes": _detection_class_summary(state.detections),
             "detections": state.detections,
+            "measurements": state.measurements,
             **({"runtime_warning": runtime_warning} if runtime_warning else {}),
         }, artifacts
     if node.method_id == "ml.yolo.ultralytics":
@@ -702,6 +703,7 @@ def _apply_node(state: ImageState, node, method) -> Tuple[ImageState, str, Dict[
             "measurement_count": len(state.measurements),
             "detection_classes": _detection_class_summary(state.detections),
             "detections": state.detections,
+            "measurements": state.measurements,
             **({"instance_count": len(state.measurements)} if task == "segment" else {}),
             **({"runtime_warning": runtime_warning} if runtime_warning else {}),
         }, artifacts
@@ -748,6 +750,7 @@ def _apply_node(state: ImageState, node, method) -> Tuple[ImageState, str, Dict[
             "model": params.get("variant") or params.get("checkpoint"),
             "segment_count": len(state.measurements),
             "measurement_count": len(state.measurements),
+            "measurements": state.measurements,
             **segmentation_summary,
         }, artifacts
     if node.method_id == "output.versioned_image_artifact":
