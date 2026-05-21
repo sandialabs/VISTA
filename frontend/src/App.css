@@ -5600,10 +5600,465 @@ ul li:hover {
   outline: none;
 }
 
+.segmentation-helper-modal {
+  z-index: 1350;
+}
+
+.segmentation-helper-modal-content {
+  width: 98vw;
+  max-width: none;
+  height: 94vh;
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+}
+
+.segmentation-helper-header {
+  border-bottom: 1px solid #dbe2ea;
+}
+
+.segmentation-helper-header h3,
+.segmentation-helper-header p {
+  margin: 0;
+}
+
+.segmentation-helper-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  background: #07111f;
+}
+
+.segmentation-helper-sidebar {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid #1f2937;
+  background: #0f172a;
+  color: #e5e7eb;
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.segmentation-orientation-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.segmentation-orientation-switcher button,
+.segmentation-operation-buttons button,
+.segmentation-tools-grid button {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.segmentation-orientation-switcher button {
+  padding: 9px 8px;
+}
+
+.segmentation-orientation-switcher button.active {
+  border-color: var(--segment-axis-color, #38bdf8);
+  box-shadow: 0 0 0 1px var(--segment-axis-color, #38bdf8) inset;
+  color: #f8fafc;
+}
+
+.segmentation-slice-sliders {
+  display: grid;
+  gap: 10px;
+}
+
+.segmentation-slice-sliders label,
+.segmentation-tool-parameters label,
+.segmentation-segment-editor label {
+  display: grid;
+  grid-template-columns: minmax(54px, auto) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.segmentation-slice-sliders output,
+.segmentation-tool-parameters output {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.segmentation-segment-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.segmentation-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.segmentation-panel-title h4 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 0.92rem;
+}
+
+.segmentation-segment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.segmentation-segment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.46);
+  padding: 6px;
+}
+
+.segmentation-segment-row.selected {
+  box-shadow: 0 0 0 1px currentColor inset;
+}
+
+.segmentation-segment-select {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+}
+
+.segmentation-segment-select span:not(.segmentation-segment-color) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.segmentation-segment-select small {
+  color: #94a3b8;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.segmentation-segment-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(248, 250, 252, 0.6);
+}
+
+.segmentation-segment-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  padding-top: 8px;
+}
+
+.segmentation-segment-editor label {
+  grid-template-columns: 54px minmax(0, 1fr);
+}
+
+.segmentation-segment-editor input[type='text'] {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 4px;
+  background: #020617;
+  color: #f8fafc;
+  padding: 6px 8px;
+}
+
+.segmentation-helper-main {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  color: #e5e7eb;
+}
+
+.segmentation-helper-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.segmentation-operation-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.segmentation-operation-buttons button {
+  padding: 8px 10px;
+}
+
+.segmentation-operation-buttons button.active,
+.segmentation-tools-grid button.active {
+  border-color: #38bdf8;
+  background: #0c4a6e;
+  color: #f8fafc;
+}
+
+.segmentation-operation-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.segmentation-helper-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+}
+
+.segmentation-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(40px, 1fr));
+  gap: 8px;
+}
+
+.segmentation-tools-grid button {
+  position: relative;
+  min-width: 0;
+  min-height: 42px;
+  aspect-ratio: 1;
+  padding: 8px;
+  display: inline-grid;
+  place-items: center;
+}
+
+.segmentation-tools-grid button::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  width: max-content;
+  max-width: 220px;
+  transform: translate(-50%, 4px);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 5px;
+  background: #020617;
+  color: #f8fafc;
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.4);
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.segmentation-tools-grid button:hover::after,
+.segmentation-tools-grid button:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.segmentation-tool-icon {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.segmentation-tool-icon circle,
+.segmentation-tool-icon rect {
+  fill: none;
+}
+
+.segmentation-tool-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.segmentation-tool-parameters {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(180px, 260px) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.segmentation-tool-parameters label {
+  color: #cbd5e1;
+}
+
+.segmentation-tool-parameters p {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.segmentation-ml-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 8px;
+  align-items: end;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.66);
+  padding: 10px;
+}
+
+.segmentation-ml-panel label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.segmentation-ml-panel input,
+.segmentation-ml-panel select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 4px;
+  background: #020617;
+  color: #f8fafc;
+  padding: 6px 8px;
+}
+
+.segmentation-ml-panel p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.segmentation-slice-stage {
+  position: relative;
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--segment-axis-color, #38bdf8) 42%, #1f2937);
+  border-radius: 6px;
+  background: #020617;
+  cursor: crosshair;
+}
+
+.segmentation-slice-stage.show-brush-pointer {
+  cursor: none;
+}
+
+.segmentation-slice-stage.show-brush-pointer::after {
+  content: '';
+  position: absolute;
+  z-index: 20;
+  left: var(--brush-pointer-x, 50%);
+  top: var(--brush-pointer-y, 50%);
+  width: var(--brush-pointer-size, 18px);
+  height: var(--brush-pointer-size, 18px);
+  border: 1.5px solid #f8fafc;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(2, 6, 23, 0.8), 0 0 10px rgba(56, 189, 248, 0.45);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.segmentation-helper-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.segmentation-helper-shape {
+  paint-order: stroke;
+  filter: drop-shadow(0 0 4px rgba(2, 6, 23, 0.65));
+}
+
+.segmentation-helper-shape.subtract {
+  stroke-dasharray: 8 5;
+}
+
+.segmentation-helper-shape.preview {
+  filter: drop-shadow(0 0 7px rgba(250, 204, 21, 0.58));
+}
+
+.segmentation-helper-overlay .active-segment {
+  filter: drop-shadow(0 0 7px rgba(248, 250, 252, 0.34));
+}
+
+.segmentation-helper-point-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.segmentation-helper-point {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid #020617;
+  border-radius: 50%;
+  background: #f8fafc;
+  box-shadow: 0 0 4px rgba(15, 23, 42, 0.9);
+  transform: translate(-50%, -50%);
+}
+
 @media (max-width: 900px) {
   .inspection-fullscreen-workspace {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .segmentation-helper-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .segmentation-helper-sidebar {
+    max-height: 34vh;
+    border-right: 0;
+    border-bottom: 1px solid #1f2937;
+  }
+
+  .segmentation-tools-grid {
+    grid-template-columns: repeat(5, minmax(38px, 1fr));
+  }
+
+  .segmentation-tool-parameters {
+    grid-template-columns: 1fr;
+  }
+
+  .segmentation-ml-panel {
+    grid-template-columns: 1fr;
   }
 
   .inspection-fullscreen-annotations {

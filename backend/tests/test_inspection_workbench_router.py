@@ -1,5 +1,9 @@
 import pytest
 from unittest.mock import patch
+import base64
+import io
+
+from PIL import Image, ImageDraw
 
 
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
@@ -381,6 +385,74 @@ def test_segmentation_and_measurement_invocation_supports_progressive_users(clie
         persisted_part = listed_parts.json()[0]
         assert len(persisted_part["metadata"]["segmentation_runs"]) == 1
         assert len(persisted_part["metadata"]["measurement_runs"]) == 1
+
+
+def test_slice_segmentation_selects_clicked_toolbox_region(client):
+    headers = {
+        "X-User-Id": "slice-helper@example.com",
+        "X-User-Groups": '["slice-helper-group"]',
+    }
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "PT3 slice helper",
+            "description": "slice helper toolbox workflow",
+            "meta_group_id": "slice-helper-group",
+            "project_type": "PT3",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    batch_resp = client.post(
+        f"/api/projects/{project_id}/batches",
+        json={"name": "slice-batch"},
+        headers=headers,
+    )
+    assert batch_resp.status_code == 201, batch_resp.text
+    part_resp = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={
+            "serial_number": "PT3-SLICE-1",
+            "display_name": "slice-part",
+            "batch_id": batch_resp.json()["id"],
+            "metadata": {"volume_shape": {"axial": 16, "coronal": 64, "sagittal": 64}},
+        },
+        headers=headers,
+    )
+    assert part_resp.status_code == 201, part_resp.text
+    part_id = part_resp.json()["id"]
+
+    image = Image.new("L", (64, 64), 0)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([8, 8, 24, 24], fill=255)
+    draw.rectangle([38, 38, 55, 55], fill=255)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    response = client.post(
+        f"/api/projects/{project_id}/parts/{part_id}/slice-segmentation",
+        json={
+            "axis": "axial",
+            "slice_index": 4,
+            "method_id": "segmentation.connected_components",
+            "parameters": {"min_area_px": 4},
+            "image_data_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+            "filename": "slice-z-004.png",
+            "click_x": 44,
+            "click_y": 44,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["method_id"] == "segmentation.connected_components"
+    assert payload["summary"]["region_count"] == 2
+    assert len(payload["regions"]) == 2
+    assert payload["selected_region"]["bbox"][0] <= 44 <= payload["selected_region"]["bbox"][2]
+    assert payload["selected_region"]["bbox"][1] <= 44 <= payload["selected_region"]["bbox"][3]
 
 
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])

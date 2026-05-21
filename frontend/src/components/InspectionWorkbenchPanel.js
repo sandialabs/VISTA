@@ -59,6 +59,197 @@ const DEFAULT_INSPECTION_COLUMN_WIDTHS = { leftPx: null, rightPx: null };
 const MEASUREMENT_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
 const DEFAULT_ANNOTATION_COLOR = '#f97316';
 const DEFAULT_ANNOTATION_FILL_OPACITY = 0.5;
+const DEFAULT_SEGMENT_COLOR = '#22c55e';
+const SEGMENT_COLORS = ['#22c55e', '#3b82f6', '#f97316', '#e11d48', '#a855f7', '#14b8a6', '#facc15'];
+const SEGMENTATION_HELPER_TOOLS = [
+  { id: 'brush', label: 'Brush', icon: 'brush', detail: 'Paint freehand strokes onto the current segment.' },
+  { id: 'eraser', label: 'Eraser', icon: 'eraser', detail: 'Remove painted areas with the same brush controls.' },
+  { id: 'connected', label: 'Connected', icon: 'target', detail: 'Seed a contiguous area using sensitivity around the clicked pixel.' },
+  { id: 'polygon', label: 'Polygon', icon: 'polygon', detail: 'Click boundary vertices, double-click to close the perimeter.' },
+  { id: 'circle', label: 'Circle', icon: 'circle', detail: 'Click the center, then drag to set the radius.' },
+  { id: 'rectangle', label: 'Rectangle', icon: 'rectangle', detail: 'Drag from one corner to the opposite corner.' },
+  { id: 'threshold', label: 'Threshold', icon: 'threshold', detail: 'Preview a local intensity band around a clicked point.' },
+  { id: 'level-trace', label: 'Level Trace', icon: 'contour', detail: 'Trace an equal-intensity contour from the clicked point.' },
+  { id: 'scissors', label: 'Scissors', icon: 'scissors', detail: 'Mark cut paths for trimming a selected segment.' },
+  { id: 'ml-helper', label: 'ML Helper', icon: 'spark', detail: 'Run a toolbox segmentation method once per slice, then select regions by click.' },
+];
+const SEGMENTATION_POINT_MARKER_TOOLS = new Set(['polygon', 'circle', 'rectangle']);
+const SEGMENTATION_ML_METHOD_GROUPS = [
+  {
+    id: 'opencv',
+    label: 'OpenCV',
+    methods: [
+      { id: 'segmentation.connected_components', label: 'Connected Components' },
+      { id: 'threshold.otsu', label: 'Otsu Threshold' },
+      { id: 'segmentation.watershed_seeds', label: 'Watershed Seeds' },
+    ],
+  },
+  {
+    id: 'yolo',
+    label: 'YOLO',
+    methods: [
+      { id: 'ml.yolov8.segment', label: 'YOLOv8 Segment' },
+      { id: 'ml.yolo.ultralytics', label: 'Ultralytics Configurable' },
+    ],
+  },
+  {
+    id: 'sam',
+    label: 'SAM',
+    methods: [
+      { id: 'ml.sam.segment_anything', label: 'Segment Anything' },
+      { id: 'ml.mask2former.universal_segment', label: 'Mask2Former' },
+      { id: 'ml.oneformer.universal_segment', label: 'OneFormer' },
+    ],
+  },
+];
+const DEFAULT_SEGMENTATION_ML_PARAMETERS = {
+  'segmentation.connected_components': { min_area_px: 12 },
+  'threshold.otsu': {},
+  'segmentation.watershed_seeds': { seed_spacing_px: 18, compactness: 0.01 },
+  'ml.yolov8.segment': { model: 'yolov8n-seg.pt', confidence: 0.25 },
+  'ml.yolo.ultralytics': { family: 'yolo11', task: 'segment', size: 'n', model: '', confidence: 0.25, iou: 0.45 },
+  'ml.sam.segment_anything': {
+    variant: 'sam2.1_hiera_large',
+    prompt_mode: 'automatic',
+    prompt_json: {},
+    min_mask_region_area: 8,
+    max_foreground_fraction: 0.85,
+  },
+  'ml.mask2former.universal_segment': { checkpoint: 'facebook/mask2former-swin-large-ade-semantic', task: 'semantic' },
+  'ml.oneformer.universal_segment': { checkpoint: 'shi-labs/oneformer_ade20k_swin_large', task: 'semantic' },
+};
+
+function SegmentationToolIcon({ icon }) {
+  const commonProps = {
+    className: 'segmentation-tool-icon',
+    viewBox: '0 0 24 24',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  };
+  if (icon === 'brush') {
+    return (
+      <svg {...commonProps}>
+        <path d="M15.5 3.5l5 5-8.4 8.4-5-5 8.4-8.4z" />
+        <path d="M7.1 11.9c-2.1 1-3.2 2.7-3.2 5.2 1.8-.1 3.5-.5 5.1-1.3" />
+      </svg>
+    );
+  }
+  if (icon === 'eraser') {
+    return (
+      <svg {...commonProps}>
+        <path d="M4 15l8.6-8.6a2 2 0 0 1 2.8 0l4.2 4.2a2 2 0 0 1 0 2.8L13 20H8.8L4 15z" />
+        <path d="M9.5 9.5l5 5" />
+        <path d="M13 20h7" />
+      </svg>
+    );
+  }
+  if (icon === 'target') {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="12" r="7" />
+        <circle cx="12" cy="12" r="2.4" />
+        <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+      </svg>
+    );
+  }
+  if (icon === 'polygon') {
+    return (
+      <svg {...commonProps}>
+        <path d="M6 6l10-2 4 9-7 7-9-5 2-9z" />
+        <circle cx="6" cy="6" r="1.4" />
+        <circle cx="16" cy="4" r="1.4" />
+        <circle cx="20" cy="13" r="1.4" />
+        <circle cx="13" cy="20" r="1.4" />
+      </svg>
+    );
+  }
+  if (icon === 'circle') {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="12" r="7.5" />
+        <circle cx="12" cy="12" r="1.4" />
+        <path d="M12 12l5.3-5.3" />
+      </svg>
+    );
+  }
+  if (icon === 'rectangle') {
+    return (
+      <svg {...commonProps}>
+        <rect x="5" y="6" width="14" height="12" rx="1" />
+        <circle cx="5" cy="6" r="1.3" />
+        <circle cx="19" cy="18" r="1.3" />
+      </svg>
+    );
+  }
+  if (icon === 'threshold') {
+    return (
+      <svg {...commonProps}>
+        <path d="M5 18V6" />
+        <path d="M19 18V6" />
+        <path d="M5 15c3-5 6-5 9 0 1.4 2.3 3 2.7 5 0" />
+        <path d="M8 9h8" />
+      </svg>
+    );
+  }
+  if (icon === 'contour') {
+    return (
+      <svg {...commonProps}>
+        <path d="M4.5 13.5c1.5-6.2 8.4-8.8 13-4.6 3.7 3.4 1 9.7-4.5 9.6-4.2 0-5.4-4.2-2.8-6.1 2-1.5 4.5-.2 4.8 2.1" />
+      </svg>
+    );
+  }
+  if (icon === 'scissors') {
+    return (
+      <svg {...commonProps}>
+        <circle cx="6.5" cy="6.5" r="2.3" />
+        <circle cx="6.5" cy="17.5" r="2.3" />
+        <path d="M8.4 8.4L20 20" />
+        <path d="M8.4 15.6L20 4" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...commonProps}>
+      <path d="M12 3l1.7 5.1L19 10l-5.3 1.9L12 17l-1.7-5.1L5 10l5.3-1.9L12 3z" />
+      <path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z" />
+    </svg>
+  );
+}
+const SEGMENTATION_ML_PARAMETER_FIELDS = {
+  'segmentation.connected_components': [
+    { name: 'min_area_px', label: 'Min area', type: 'number', min: 0, step: 1 },
+  ],
+  'segmentation.watershed_seeds': [
+    { name: 'seed_spacing_px', label: 'Seed spacing', type: 'number', min: 1, step: 1 },
+    { name: 'compactness', label: 'Compactness', type: 'number', min: 0, step: 0.01 },
+  ],
+  'ml.yolov8.segment': [
+    { name: 'model', label: 'Model', type: 'text' },
+    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
+  ],
+  'ml.yolo.ultralytics': [
+    { name: 'family', label: 'Family', type: 'select', options: ['yolov8', 'yolo11', 'custom'] },
+    { name: 'task', label: 'Task', type: 'select', options: ['detect', 'segment'] },
+    { name: 'size', label: 'Size', type: 'select', options: ['n', 's', 'm', 'l', 'x'] },
+    { name: 'model', label: 'Custom model', type: 'text' },
+    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
+    { name: 'iou', label: 'IoU', type: 'number', min: 0, max: 1, step: 0.05 },
+  ],
+  'ml.sam.segment_anything': [
+    { name: 'variant', label: 'Variant', type: 'select', options: ['sam2.1_hiera_tiny', 'sam2.1_hiera_small', 'sam2.1_hiera_base_plus', 'sam2.1_hiera_large', 'sam_vit_b', 'sam_vit_l', 'sam_vit_h'] },
+    { name: 'prompt_mode', label: 'Prompt', type: 'select', options: ['automatic', 'box', 'points'] },
+    { name: 'min_mask_region_area', label: 'Min region', type: 'number', min: 1, step: 1 },
+    { name: 'max_foreground_fraction', label: 'Max foreground', type: 'number', min: 0.05, max: 0.98, step: 0.01 },
+  ],
+  'ml.mask2former.universal_segment': [
+    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['facebook/mask2former-swin-large-ade-semantic', 'facebook/mask2former-swin-large-ade-panoptic', 'facebook/mask2former-swin-tiny-ade-semantic'] },
+    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
+  ],
+  'ml.oneformer.universal_segment': [
+    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['shi-labs/oneformer_ade20k_swin_large', 'shi-labs/oneformer_coco_swin_large', 'shi-labs/oneformer_coco_dinat_large'] },
+    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
+  ],
+};
 const MEASUREMENT_ENDPOINT_HOVER_RATIO = 0.01;
 const MEASUREMENT_LOCAL_ZOOM_DIAMETER_RATIO = 0.5;
 const MEASUREMENT_LOCAL_ZOOM_SCALE = 10;
@@ -1081,6 +1272,198 @@ function getMprCrosshairStyle(axis, slicePosition, dimensions, mirroredAxes = DE
   return { '--crosshair-x': displayX(y), '--crosshair-y': displayY(z), ...representedStyle };
 }
 
+function createDefaultSegment(index = 0) {
+  return {
+    id: `segment-${Date.now()}-${index}`,
+    name: index === 0 ? 'Segment A' : `Segment ${String.fromCharCode(65 + (index % 26))}`,
+    color: SEGMENT_COLORS[index % SEGMENT_COLORS.length] || DEFAULT_SEGMENT_COLOR,
+    areas: [],
+  };
+}
+
+function getMprAxisImageDimensions(axis, dimensions = {}) {
+  if (axis === 'coronal') {
+    return {
+      width: Math.max(1, Number(dimensions.sagittal) || 1),
+      height: Math.max(1, Number(dimensions.axial) || 1),
+    };
+  }
+  if (axis === 'sagittal') {
+    return {
+      width: Math.max(1, Number(dimensions.coronal) || 1),
+      height: Math.max(1, Number(dimensions.axial) || 1),
+    };
+  }
+  return {
+    width: Math.max(1, Number(dimensions.sagittal) || 1),
+    height: Math.max(1, Number(dimensions.coronal) || 1),
+  };
+}
+
+function getSegmentationShapeKey(shape, index) {
+  return `${shape?.operation || 'add'}-${shape?.tool || 'shape'}-${shape?.axis || 'axis'}-${shape?.sliceIndex ?? 'slice'}-${shape?.id || index}`;
+}
+
+function renderSegmentationShape(shape, options = {}) {
+  if (!shape) return null;
+  const strokeColor = options.color || shape.color || DEFAULT_SEGMENT_COLOR;
+  const fillColor = options.fillColor || strokeColor;
+  const fillOpacity = Number.isFinite(Number(options.fillOpacity)) ? Number(options.fillOpacity) : 0.22;
+  const strokeWidth = options.strokeWidth || 2.5;
+  const points = Array.isArray(shape.points) ? shape.points : [];
+  const className = [
+    'segmentation-helper-shape',
+    shape.operation === 'subtract' ? 'subtract' : 'add',
+    options.preview ? 'preview' : '',
+  ].filter(Boolean).join(' ');
+
+  if (shape.tool === 'brush' || shape.tool === 'eraser' || shape.tool === 'scissors') {
+    if (points.length === 0) return null;
+    const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+    return (
+      <path
+        d={path}
+        className={className}
+        fill="none"
+        stroke={strokeColor}
+        strokeWidth={Math.max(2, Number(shape.brushSize) || 12)}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={shape.tool === 'eraser' || shape.operation === 'subtract' ? 0.72 : 0.88}
+      />
+    );
+  }
+
+  if (shape.tool === 'polygon' && points.length > 0) {
+    const pointString = points.map((point) => `${point.x},${point.y}`).join(' ');
+    return (
+      <polyline
+        points={pointString}
+        className={className}
+        fill={shape.closed && points.length > 2 ? fillColor : 'none'}
+        fillOpacity={shape.closed && points.length > 2 ? fillOpacity : 0}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'circle' && shape.center) {
+    const radius = Number(shape.radius) || (
+      shape.edge ? Math.hypot(shape.edge.x - shape.center.x, shape.edge.y - shape.center.y) : 0
+    );
+    if (radius <= 0) return null;
+    return (
+      <circle
+        cx={shape.center.x}
+        cy={shape.center.y}
+        r={radius}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'rectangle' && shape.start && shape.end) {
+    const x = Math.min(shape.start.x, shape.end.x);
+    const y = Math.min(shape.start.y, shape.end.y);
+    const width = Math.abs(shape.end.x - shape.start.x);
+    const height = Math.abs(shape.end.y - shape.start.y);
+    if (width <= 0 || height <= 0) return null;
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'ml-helper' && Array.isArray(shape.bbox) && shape.bbox.length >= 4) {
+    const [x1, y1, x2, y2] = shape.bbox.map(Number);
+    const width = x2 - x1;
+    const height = y2 - y1;
+    if (![x1, y1, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+    return (
+      <rect
+        x={x1}
+        y={y1}
+        width={width}
+        height={height}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (shape.tool === 'connected') {
+    if (!shape.maskPath) return null;
+    return (
+      <path
+        d={shape.maskPath}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
+
+  if (['threshold', 'level-trace'].includes(shape.tool) && shape.seed) {
+    const radius = Number(shape.radius) || Number(shape.sensitivity) || 20;
+    return (
+      <ellipse
+        cx={shape.seed.x}
+        cy={shape.seed.y}
+        rx={radius * 1.25}
+        ry={radius}
+        className={className}
+        fill={fillColor}
+        fillOpacity={fillOpacity}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+        strokeDasharray={shape.tool === 'level-trace' ? '7 5' : undefined}
+      />
+    );
+  }
+
+  return null;
+}
+
+function getSegmentationShapePoints(shape) {
+  if (!shape) return [];
+  if (!SEGMENTATION_POINT_MARKER_TOOLS.has(shape.tool)) return [];
+  if (Array.isArray(shape.points)) return shape.points;
+  if (shape.start && shape.end) return [shape.start, shape.end];
+  if (shape.center && shape.edge) return [shape.center, shape.edge];
+  return [];
+}
+
+function getSegmentationMlMethods(groupId) {
+  return (SEGMENTATION_ML_METHOD_GROUPS.find((group) => group.id === groupId) || SEGMENTATION_ML_METHOD_GROUPS[0]).methods;
+}
+
+function getDefaultSegmentationMlMethod(groupId) {
+  return getSegmentationMlMethods(groupId)[0]?.id || 'segmentation.connected_components';
+}
+
+function getDefaultSegmentationMlParameters(methodId) {
+  return { ...(DEFAULT_SEGMENTATION_ML_PARAMETERS[methodId] || {}) };
+}
+
 function getPlaneFocusRange(position, maxDimension) {
   const half = maxDimension / 10;
   let lo = position - half;
@@ -1642,6 +2025,23 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [mprReconstructionMode, setMprReconstructionMode] = useState(MPR_RECONSTRUCTION_MODES.orientation);
   const [mprProjectionMirror, setMprProjectionMirror] = useState(DEFAULT_MPR_PROJECTION_MIRROR);
   const [activeWorkbenchModal, setActiveWorkbenchModal] = useState(null);
+  const [segmentationHelperOpen, setSegmentationHelperOpen] = useState(false);
+  const [segmentationHelperAxis, setSegmentationHelperAxis] = useState('axial');
+  const [segmentationSegments, setSegmentationSegments] = useState(() => [createDefaultSegment(0)]);
+  const [selectedSegmentationSegmentId, setSelectedSegmentationSegmentId] = useState('');
+  const [editingSegmentationSegmentId, setEditingSegmentationSegmentId] = useState('');
+  const [segmentationTool, setSegmentationTool] = useState('brush');
+  const [segmentationOperation, setSegmentationOperation] = useState('add');
+  const [segmentationBrushSize, setSegmentationBrushSize] = useState(18);
+  const [segmentationSensitivity, setSegmentationSensitivity] = useState(28);
+  const [segmentationPendingSelection, setSegmentationPendingSelection] = useState(null);
+  const [segmentationDraftShape, setSegmentationDraftShape] = useState(null);
+  const [segmentationPointerPreview, setSegmentationPointerPreview] = useState(null);
+  const [segmentationMlGroup, setSegmentationMlGroup] = useState('opencv');
+  const [segmentationMlMethod, setSegmentationMlMethod] = useState('segmentation.connected_components');
+  const [segmentationMlParameters, setSegmentationMlParameters] = useState(() => getDefaultSegmentationMlParameters('segmentation.connected_components'));
+  const [segmentationMlStatus, setSegmentationMlStatus] = useState('');
+  const [segmentationMlLoading, setSegmentationMlLoading] = useState(false);
   const [displayWindow, setDisplayWindow] = useState({ min: 0, max: 255 });
   const [activeOverlayIds, setActiveOverlayIds] = useState([]);
   const [cursorProbe, setCursorProbe] = useState({ x: 50, y: 50 });
@@ -1708,6 +2108,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const mprMeasurementLinesBySlice = useMemo(() => getMprMeasurementLinesBySlice(annotations), [annotations]);
   const mprBoxAnnotationsBySlice = useMemo(() => getMprBoxAnnotationsBySlice(annotations), [annotations]);
   const mprCubeAnnotations = useMemo(() => getMprCubeAnnotations(annotations), [annotations]);
+  const selectedSegmentationSegment = useMemo(() => (
+    segmentationSegments.find((segment) => segment.id === selectedSegmentationSegmentId) || segmentationSegments[0] || null
+  ), [selectedSegmentationSegmentId, segmentationSegments]);
   const [pendingMeasurePoint, setPendingMeasurePoint] = useState(null);
   const [pendingBoxPoint, setPendingBoxPoint] = useState(null);
   const [mprAnnotationDraft, setMprAnnotationDraft] = useState(null);
@@ -1724,6 +2127,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const mprDragRef = useRef(null);
   const tileAnnotationDraftRef = useRef(null);
   const mprAnnotationDraftRef = useRef(null);
+  const segmentationDraftRef = useRef(null);
+  const segmentationMlCacheRef = useRef(new Map());
   const pendingMeasurePointRef = useRef(null);
   const pendingBoxPointRef = useRef(null);
   const fullscreenImageRef = useRef(null);
@@ -1745,6 +2150,19 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       },
     };
   }, [hierarchy, projectType]);
+
+  useEffect(() => {
+    if (segmentationSegments.length === 0) {
+      const firstSegment = createDefaultSegment(0);
+      setSegmentationSegments([firstSegment]);
+      setSelectedSegmentationSegmentId(firstSegment.id);
+      setEditingSegmentationSegmentId(firstSegment.id);
+      return;
+    }
+    if (!selectedSegmentationSegmentId || !segmentationSegments.some((segment) => segment.id === selectedSegmentationSegmentId)) {
+      setSelectedSegmentationSegmentId(segmentationSegments[0].id);
+    }
+  }, [selectedSegmentationSegmentId, segmentationSegments]);
   const leftRegion = inspectionHierarchy.regions[inspectionHierarchy.leftColumn];
   const rightRegion = inspectionHierarchy.regions[inspectionHierarchy.rightColumn];
   const inspectorRegion = inspectionHierarchy.regions.inspector;
@@ -2546,6 +2964,459 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     event.preventDefault();
   };
 
+  const openSegmentationHelper = () => {
+    const fallbackAxis = activeMprPane === 'volume' ? 'axial' : activeMprPane;
+    setSegmentationHelperAxis(MPR_AXES.includes(fallbackAxis) ? fallbackAxis : 'axial');
+    setSegmentationPendingSelection(null);
+    setSegmentationDraftShape(null);
+    segmentationDraftRef.current = null;
+    setSegmentationHelperOpen(true);
+  };
+
+  const closeSegmentationHelper = () => {
+    setSegmentationHelperOpen(false);
+    setSegmentationPendingSelection(null);
+    setSegmentationDraftShape(null);
+    setSegmentationPointerPreview(null);
+    segmentationDraftRef.current = null;
+  };
+
+  const addSegmentationSegment = () => {
+    setSegmentationSegments((prev) => {
+      const nextSegment = createDefaultSegment(prev.length);
+      setSelectedSegmentationSegmentId(nextSegment.id);
+      setEditingSegmentationSegmentId(nextSegment.id);
+      return [...prev, nextSegment];
+    });
+  };
+
+  const updateSegmentationSegment = (segmentId, patch) => {
+    setSegmentationSegments((prev) => prev.map((segment) => (
+      segment.id === segmentId ? { ...segment, ...patch } : segment
+    )));
+  };
+
+  const getSegmentationPointerPosition = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dimensions = getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions);
+    if (!rect.width || !rect.height || !dimensions.width || !dimensions.height) return null;
+    const displayX = Math.min(rect.width, Math.max(0, event.clientX - rect.left));
+    const displayY = Math.min(rect.height, Math.max(0, event.clientY - rect.top));
+    const x = (displayX / rect.width) * dimensions.width;
+    const y = (displayY / rect.height) * dimensions.height;
+    if (![x, y].every(Number.isFinite)) return null;
+    return {
+      x,
+      y,
+      displayX,
+      displayY,
+      stageWidth: rect.width,
+      stageHeight: rect.height,
+      imageWidth: dimensions.width,
+      imageHeight: dimensions.height,
+    };
+  };
+
+  const makeSegmentationShapeBase = (tool, position, overrides = {}) => ({
+    id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tool,
+    operation: segmentationOperation,
+    axis: segmentationHelperAxis,
+    sliceIndex: Number(slicePosition[segmentationHelperAxis] || 0),
+    imageWidth: position?.imageWidth || getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions).width,
+    imageHeight: position?.imageHeight || getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions).height,
+    brushSize: Number(segmentationBrushSize) || 18,
+    sensitivity: Number(segmentationSensitivity) || 28,
+    ...overrides,
+  });
+
+  const getSegmentationMlCacheKey = (axis = segmentationHelperAxis) => JSON.stringify({
+    partId: selectedPart?.id || '',
+    axis,
+    sliceIndex: Number(slicePosition[axis] || 0),
+    methodId: segmentationMlMethod,
+    parameters: segmentationMlParameters,
+    displayWindow,
+  });
+
+  const getSegmentationSliceDataUrl = (stageElement, axis = segmentationHelperAxis) => {
+    const renderedCanvas = stageElement?.querySelector?.('canvas.mpr-slice-canvas');
+    if (renderedCanvas?.toDataURL) {
+      return renderedCanvas.toDataURL('image/png');
+    }
+    const cachedCanvas = getCachedMprSliceCanvas(axis, slicePosition, mprDimensions, volumeCacheState.cache);
+    if (cachedCanvas?.toDataURL) {
+      return cachedCanvas.toDataURL('image/png');
+    }
+    return '';
+  };
+
+  const getSegmentationSliceCanvasForSelection = (stageElement, axis = segmentationHelperAxis) => {
+    const renderedCanvas = stageElement?.querySelector?.('canvas.mpr-slice-canvas');
+    if (renderedCanvas?.getContext) return renderedCanvas;
+    return getCachedMprSliceCanvas(axis, slicePosition, mprDimensions, volumeCacheState.cache);
+  };
+
+  const buildConnectedSegmentationSelection = (stageElement, position) => {
+    const canvas = getSegmentationSliceCanvasForSelection(stageElement, segmentationHelperAxis);
+    const ctx = canvas?.getContext?.('2d');
+    const width = Math.max(1, Number(canvas?.width) || Math.round(position?.imageWidth || 1));
+    const height = Math.max(1, Number(canvas?.height) || Math.round(position?.imageHeight || 1));
+    if (!ctx?.getImageData || !position || width <= 0 || height <= 0) {
+      const radius = Math.max(4, Number(segmentationSensitivity) || 28);
+      return makeSegmentationShapeBase('connected', position, {
+        seed: position,
+        radius,
+        points: [],
+        error: 'slice-pixels-unavailable',
+      });
+    }
+
+    let imageData;
+    try {
+      imageData = ctx.getImageData(0, 0, width, height);
+    } catch (_) {
+      imageData = null;
+    }
+    const data = imageData?.data;
+    if (!data || data.length < width * height * 4) {
+      return null;
+    }
+
+    const seedX = Math.max(0, Math.min(width - 1, Math.round((position.x / Math.max(1, position.imageWidth || width)) * (width - 1))));
+    const seedY = Math.max(0, Math.min(height - 1, Math.round((position.y / Math.max(1, position.imageHeight || height)) * (height - 1))));
+    const seedOffset = (seedY * width + seedX) * 4;
+    const seed = [
+      data[seedOffset],
+      data[seedOffset + 1],
+      data[seedOffset + 2],
+      data[seedOffset + 3],
+    ];
+    const sensitivity = Math.max(0, Number(segmentationSensitivity) || 28);
+    const maxDelta = sensitivity;
+    const visited = new Uint8Array(width * height);
+    const selected = new Uint8Array(width * height);
+    const stack = [seedY * width + seedX];
+    let areaPx = 0;
+    let minX = seedX;
+    let maxX = seedX;
+    let minY = seedY;
+    let maxY = seedY;
+
+    const matchesSeed = (index) => {
+      const offset = index * 4;
+      return Math.max(
+        Math.abs(data[offset] - seed[0]),
+        Math.abs(data[offset + 1] - seed[1]),
+        Math.abs(data[offset + 2] - seed[2]),
+        Math.abs(data[offset + 3] - seed[3]),
+      ) <= maxDelta;
+    };
+
+    while (stack.length > 0) {
+      const index = stack.pop();
+      if (visited[index]) continue;
+      visited[index] = 1;
+      if (!matchesSeed(index)) continue;
+      selected[index] = 1;
+      areaPx += 1;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (x > 0) stack.push(index - 1);
+      if (x < width - 1) stack.push(index + 1);
+      if (y > 0) stack.push(index - width);
+      if (y < height - 1) stack.push(index + width);
+    }
+
+    const scaleX = (position.imageWidth || width) / width;
+    const scaleY = (position.imageHeight || height) / height;
+    const pathParts = [];
+    for (let y = minY; y <= maxY; y += 1) {
+      let x = minX;
+      while (x <= maxX) {
+        const index = y * width + x;
+        if (!selected[index]) {
+          x += 1;
+          continue;
+        }
+        const startX = x;
+        while (x <= maxX && selected[y * width + x]) x += 1;
+        const runWidth = x - startX;
+        pathParts.push(`M ${startX * scaleX} ${y * scaleY} h ${runWidth * scaleX} v ${scaleY} h ${-runWidth * scaleX} Z`);
+      }
+    }
+
+    return makeSegmentationShapeBase('connected', position, {
+      seed: position,
+      points: [],
+      maskPath: pathParts.join(' '),
+      bbox: [minX * scaleX, minY * scaleY, (maxX + 1) * scaleX, (maxY + 1) * scaleY],
+      areaPx,
+      canvasWidth: width,
+      canvasHeight: height,
+      seedColor: seed,
+    });
+  };
+
+  const updateSegmentationMlParameter = (name, value) => {
+    setSegmentationMlParameters((prev) => ({ ...prev, [name]: value }));
+    setSegmentationPendingSelection(null);
+    setSegmentationMlStatus('');
+  };
+
+  const changeSegmentationMlGroup = (groupId) => {
+    const nextMethod = getDefaultSegmentationMlMethod(groupId);
+    setSegmentationMlGroup(groupId);
+    setSegmentationMlMethod(nextMethod);
+    setSegmentationMlParameters(getDefaultSegmentationMlParameters(nextMethod));
+    setSegmentationPendingSelection(null);
+    setSegmentationMlStatus('');
+  };
+
+  const changeSegmentationMlMethod = (methodId) => {
+    setSegmentationMlMethod(methodId);
+    setSegmentationMlParameters(getDefaultSegmentationMlParameters(methodId));
+    setSegmentationPendingSelection(null);
+    setSegmentationMlStatus('');
+  };
+
+  const makeShapeFromMlRegion = (region, position, cachedResult) => {
+    if (!region?.bbox) return null;
+    const dimensions = getMprAxisImageDimensions(segmentationHelperAxis, mprDimensions);
+    return makeSegmentationShapeBase('ml-helper', position, {
+      bbox: region.bbox,
+      seed: position,
+      points: [
+        position,
+        ...(Array.isArray(region.centroid) ? [{ x: region.centroid[0], y: region.centroid[1] }] : []),
+      ],
+      label: region.label,
+      areaPx: region.area_px,
+      className: region.class_name,
+      confidence: region.confidence,
+      methodId: segmentationMlMethod,
+      methodLabel: cachedResult?.method_id || segmentationMlMethod,
+      imageWidth: dimensions.width,
+      imageHeight: dimensions.height,
+    });
+  };
+
+  const selectRegionFromCachedMlResult = (cachedResult, position) => {
+    const regions = Array.isArray(cachedResult?.regions) ? cachedResult.regions : [];
+    const containsPosition = (region) => {
+      const bbox = Array.isArray(region?.bbox) ? region.bbox.map(Number) : [];
+      if (bbox.length < 4 || bbox.some((value) => !Number.isFinite(value))) return false;
+      return bbox[0] <= position.x && position.x <= bbox[2] && bbox[1] <= position.y && position.y <= bbox[3];
+    };
+    const containing = regions.filter((region) => {
+      return containsPosition(region);
+    });
+    const selectedRegion = containing.length > 0
+      ? containing.sort((left, right) => Number(left.area_px || Infinity) - Number(right.area_px || Infinity))[0]
+      : (containsPosition(cachedResult?.selected_region) ? cachedResult.selected_region : null);
+    const shape = makeShapeFromMlRegion(selectedRegion, position, cachedResult);
+    if (shape) {
+      setSegmentationPendingSelection(shape);
+      setSegmentationMlStatus(`Selected ML region ${selectedRegion.label} from ${regions.length} cached regions.`);
+    } else {
+      setSegmentationPendingSelection(null);
+      setSegmentationMlStatus(regions.length > 0 ? 'No ML segment contains that click.' : 'No ML segments were returned for this slice.');
+    }
+  };
+
+  const runSegmentationMlHelper = async (event, position) => {
+    if (!selectedPart?.id || !position) return;
+    const cacheKey = getSegmentationMlCacheKey(segmentationHelperAxis);
+    const cached = segmentationMlCacheRef.current.get(cacheKey);
+    if (cached) {
+      selectRegionFromCachedMlResult(cached, position);
+      return;
+    }
+    const imageData = getSegmentationSliceDataUrl(event.currentTarget, segmentationHelperAxis);
+    if (!imageData) {
+      setSegmentationMlStatus('Current slice image is still loading.');
+      return;
+    }
+    setSegmentationMlLoading(true);
+    setSegmentationMlStatus('Running ML helper on this slice...');
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/parts/${selectedPart.id}/slice-segmentation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          axis: segmentationHelperAxis,
+          slice_index: Number(slicePosition[segmentationHelperAxis] || 0),
+          method_id: segmentationMlMethod,
+          parameters: segmentationMlParameters,
+          image_data_base64: imageData,
+          filename: `${selectedPart.serial_number || selectedPart.id}-${segmentationHelperAxis}-${slicePosition[segmentationHelperAxis] || 0}.png`,
+          click_x: position.x,
+          click_y: position.y,
+        }),
+      });
+      if (!resp.ok) throw new Error(`ML helper failed (${resp.status})`);
+      const result = await resp.json();
+      segmentationMlCacheRef.current.set(cacheKey, result);
+      selectRegionFromCachedMlResult(result, position);
+    } catch (err) {
+      setSegmentationMlStatus(err.message || 'ML helper failed.');
+    } finally {
+      setSegmentationMlLoading(false);
+    }
+  };
+
+  const commitSegmentationShape = (shape, explicitOperation = segmentationOperation) => {
+    if (!shape || !selectedSegmentationSegment) return;
+    const nextShape = {
+      ...shape,
+      operation: explicitOperation,
+      color: selectedSegmentationSegment.color,
+      id: shape.id || `shape-${Date.now()}`,
+    };
+    setSegmentationSegments((prev) => prev.map((segment) => (
+      segment.id === selectedSegmentationSegment.id
+        ? { ...segment, areas: [...(segment.areas || []), nextShape] }
+        : segment
+    )));
+    setSegmentationPendingSelection(null);
+    setSegmentationDraftShape(null);
+    segmentationDraftRef.current = null;
+  };
+
+  const commitPendingSegmentationSelection = (operation = segmentationOperation) => {
+    if (!segmentationPendingSelection) return;
+    commitSegmentationShape(segmentationPendingSelection, operation);
+  };
+
+  const handleSegmentationHelperWheel = (event) => {
+    event.preventDefault();
+    stepSlicePosition(segmentationHelperAxis, event.deltaY > 0 ? 1 : -1);
+  };
+
+  const handleSegmentationStagePointerDown = (event) => {
+    if (!selectedSegmentationSegment || (event.button !== undefined && event.button !== 0)) return;
+    const position = getSegmentationPointerPosition(event);
+    if (!position) return;
+    setSegmentationPointerPreview(position);
+    event.preventDefault();
+    event.stopPropagation();
+    const operation = segmentationTool === 'eraser' ? 'subtract' : segmentationOperation;
+    const tool = segmentationTool === 'eraser' ? 'brush' : segmentationTool;
+    if (tool === 'ml-helper') {
+      runSegmentationMlHelper(event, position);
+      return;
+    }
+    if (tool === 'brush' || tool === 'scissors') {
+      const shape = makeSegmentationShapeBase(tool, position, { operation, points: [position] });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (tool === 'circle') {
+      const shape = makeSegmentationShapeBase(tool, position, { center: position, edge: position, radius: 0, points: [position] });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (tool === 'rectangle') {
+      const shape = makeSegmentationShapeBase(tool, position, { start: position, end: position, points: [position] });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (tool === 'connected') {
+      setSegmentationPendingSelection(buildConnectedSegmentationSelection(event.currentTarget, position));
+      return;
+    }
+    if (['threshold', 'level-trace'].includes(tool)) {
+      const radius = Math.max(6, Number(segmentationSensitivity) || 28);
+      setSegmentationPendingSelection(makeSegmentationShapeBase(tool, position, {
+        seed: position,
+        radius,
+        points: SEGMENTATION_POINT_MARKER_TOOLS.has(tool) ? [position] : [],
+      }));
+      return;
+    }
+    if (tool === 'polygon') {
+      const existing = segmentationDraftRef.current?.tool === 'polygon' ? segmentationDraftRef.current : null;
+      const points = [...(existing?.points || []), position];
+      const shape = makeSegmentationShapeBase(tool, position, { ...(existing || {}), points, closed: false });
+      segmentationDraftRef.current = shape;
+      setSegmentationDraftShape(shape);
+    }
+  };
+
+  const handleSegmentationStagePointerMove = (event) => {
+    const position = getSegmentationPointerPosition(event);
+    if (position) setSegmentationPointerPreview(position);
+    const draft = segmentationDraftRef.current;
+    if (!draft || draft.tool === 'polygon') return;
+    if (!position) return;
+    event.preventDefault();
+    if (draft.tool === 'brush' || draft.tool === 'scissors') {
+      const next = { ...draft, points: [...(draft.points || []), position] };
+      segmentationDraftRef.current = next;
+      setSegmentationDraftShape(next);
+      return;
+    }
+    if (draft.tool === 'circle') {
+      const radius = Math.hypot(position.x - draft.center.x, position.y - draft.center.y);
+      const next = { ...draft, edge: position, radius, points: [draft.center, position] };
+      segmentationDraftRef.current = next;
+      setSegmentationDraftShape(next);
+      return;
+    }
+    if (draft.tool === 'rectangle') {
+      const next = { ...draft, end: position, points: [draft.start, position] };
+      segmentationDraftRef.current = next;
+      setSegmentationDraftShape(next);
+    }
+  };
+
+  const handleSegmentationStagePointerLeave = () => {
+    setSegmentationPointerPreview(null);
+  };
+
+  const handleSegmentationStagePointerUp = (event) => {
+    const draft = segmentationDraftRef.current;
+    if (!draft || draft.tool === 'polygon') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (draft.tool === 'brush' || draft.tool === 'scissors') {
+      if ((draft.points || []).length > 0) commitSegmentationShape(draft, draft.operation);
+    } else {
+      setSegmentationPendingSelection(draft);
+      setSegmentationDraftShape(null);
+      segmentationDraftRef.current = null;
+    }
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const completeSegmentationPolygon = (event) => {
+    if (segmentationTool !== 'polygon') return;
+    const draft = segmentationDraftRef.current;
+    if (!draft || draft.tool !== 'polygon' || (draft.points || []).length < 3) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const closed = { ...draft, closed: true };
+    setSegmentationPendingSelection(closed);
+    setSegmentationDraftShape(null);
+    segmentationDraftRef.current = null;
+  };
+
+  const cancelSegmentationDraft = () => {
+    setSegmentationDraftShape(null);
+    setSegmentationPendingSelection(null);
+    segmentationDraftRef.current = null;
+  };
+
   const adjustZoom = (delta) => {
     setViewportTransform((prev) => {
       const nextZoom = Math.min(4, Math.max(0.5, Number((prev.zoom + delta).toFixed(2))));
@@ -3234,6 +4105,16 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                 {mlActionLoading.measurement ? 'Running Measurements...' : 'Run Measurements'}
               </button>
               <button type="button" className="btn btn-secondary btn-sm" onClick={resetViewport}>Reset 3D</button>
+              {projectType === 'PT3' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={openSegmentationHelper}
+                  disabled={!selectedPart}
+                >
+                  Segmentation Helpers
+                </button>
+              )}
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMprAnnotationTool(activeMprPane === 'volume' ? 'axial' : activeMprPane, 'measure')}>Measure</button>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMprAnnotationTool(activeMprPane === 'volume' ? 'axial' : activeMprPane, 'box')}>Draw Box</button>
             </div>
@@ -4046,6 +4927,399 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
               <button type="button" className="btn btn-secondary" onClick={closeAnnotationEditModal}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={updateAnnotationFromModal}>Save</button>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSegmentationHelperModal = () => {
+    if (!segmentationHelperOpen) return null;
+    const axis = MPR_AXES.includes(segmentationHelperAxis) ? segmentationHelperAxis : 'axial';
+    const dimensions = getMprAxisImageDimensions(axis, mprDimensions);
+    const upper = Math.max(0, (mprDimensions[axis] || 1) - 1);
+    const config = MPR_AXIS_CONFIG[axis] || MPR_AXIS_CONFIG.axial;
+    const fallbackImage = getFallbackProjectionImage(axis, shellImageLayers);
+    const crosshairStyle = getMprCrosshairStyle(axis, slicePosition, mprDimensions, mprProjectionMirror);
+    const activeTool = SEGMENTATION_HELPER_TOOLS.find((tool) => tool.id === segmentationTool) || SEGMENTATION_HELPER_TOOLS[0];
+    const visibleSegmentShapes = segmentationSegments.flatMap((segment) => (
+      (segment.areas || [])
+        .filter((shape) => shape.axis === axis && Number(shape.sliceIndex) === Number(slicePosition[axis] || 0))
+        .map((shape) => ({ ...shape, segmentId: segment.id, color: segment.color }))
+    ));
+    const draftPoints = [
+      ...getSegmentationShapePoints(segmentationDraftShape),
+      ...getSegmentationShapePoints(segmentationPendingSelection),
+    ];
+    const brushPointerVisible = ['brush', 'eraser'].includes(segmentationTool) && segmentationPointerPreview;
+    const brushPointerDiameter = Math.max(2, Number(segmentationBrushSize) || 18);
+
+    return (
+      <div className="modal segmentation-helper-modal" style={{ display: 'flex' }} onClick={closeSegmentationHelper}>
+        <div
+          className="modal-content segmentation-helper-modal-content"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Segmentation Helpers"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="modal-header segmentation-helper-header">
+            <div>
+              <h3>Segmentation Helpers</h3>
+              <p className="muted">Slice tools for building local segment masks on PT3 volumes.</p>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              aria-label="Close Segmentation Helpers"
+              onClick={closeSegmentationHelper}
+            >
+              &times;
+            </button>
+          </div>
+
+          <div className="segmentation-helper-body">
+            <aside className="segmentation-helper-sidebar" aria-label="Segmentation helper controls">
+              <div className="segmentation-orientation-switcher" aria-label="View orientation">
+                {MPR_AXES.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={axis === option ? 'active' : ''}
+                    style={{ '--segment-axis-color': MPR_AXIS_CONFIG[option]?.color }}
+                    onClick={() => {
+                      setSegmentationHelperAxis(option);
+                      setActiveMprPane(option);
+                      cancelSegmentationDraft();
+                    }}
+                  >
+                    {MPR_AXIS_CONFIG[option]?.label || option}
+                  </button>
+                ))}
+              </div>
+
+              <div className="segmentation-slice-sliders" aria-label="Slice navigation">
+                {MPR_AXES.map((sliceAxis) => {
+                  const sliceUpper = Math.max(0, (mprDimensions[sliceAxis] || 1) - 1);
+                  return (
+                    <label key={sliceAxis} htmlFor={`segmentation-helper-slice-${sliceAxis}`}>
+                      <span>{MPR_AXIS_CONFIG[sliceAxis]?.sliceLabel || sliceAxis.toUpperCase()}</span>
+                      <input
+                        id={`segmentation-helper-slice-${sliceAxis}`}
+                        type="range"
+                        min="0"
+                        max={sliceUpper}
+                        value={slicePosition[sliceAxis]}
+                        onChange={(event) => updateSlicePosition(sliceAxis, event.target.value, mprDimensions)}
+                      />
+                      <output>{slicePosition[sliceAxis]} / {sliceUpper}</output>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="segmentation-segment-panel">
+                <div className="segmentation-panel-title">
+                  <h4>Segments</h4>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={addSegmentationSegment}>
+                    Add new segment
+                  </button>
+                </div>
+                <ul className="segmentation-segment-list" data-testid="segmentation-segment-list">
+                  {segmentationSegments.map((segment) => {
+                    const selected = selectedSegmentationSegment?.id === segment.id;
+                    const editing = editingSegmentationSegmentId === segment.id;
+                    return (
+                      <li
+                        key={segment.id}
+                        className={`segmentation-segment-row ${selected ? 'selected' : ''}`}
+                        style={{ borderColor: selected ? segment.color : undefined }}
+                      >
+                        <button
+                          type="button"
+                          className="segmentation-segment-select"
+                          onClick={() => setSelectedSegmentationSegmentId(segment.id)}
+                        >
+                          <span className="segmentation-segment-color" style={{ backgroundColor: segment.color }} />
+                          <span>{segment.name}</span>
+                          <small>{(segment.areas || []).length} areas</small>
+                        </button>
+                        <button
+                          type="button"
+                          className="annotation-entry-edit"
+                          aria-label={`Edit ${segment.name}`}
+                          onClick={() => {
+                            setSelectedSegmentationSegmentId(segment.id);
+                            setEditingSegmentationSegmentId(editing ? '' : segment.id);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        {editing && (
+                          <div className="segmentation-segment-editor">
+                            <label htmlFor={`segmentation-segment-name-${segment.id}`}>
+                              Name
+                              <input
+                                id={`segmentation-segment-name-${segment.id}`}
+                                type="text"
+                                value={segment.name}
+                                onChange={(event) => updateSegmentationSegment(segment.id, { name: event.target.value })}
+                              />
+                            </label>
+                            <label htmlFor={`segmentation-segment-color-${segment.id}`}>
+                              Color
+                              <input
+                                id={`segmentation-segment-color-${segment.id}`}
+                                type="color"
+                                value={segment.color}
+                                onChange={(event) => updateSegmentationSegment(segment.id, { color: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </aside>
+
+            <main className="segmentation-helper-main" aria-label="Segmentation helper slice workspace">
+              <div className="segmentation-helper-toolbar">
+                <div className="segmentation-operation-buttons" aria-label="Selection operation">
+                  <button
+                    type="button"
+                    className={segmentationOperation === 'add' ? 'active' : ''}
+                    onClick={() => setSegmentationOperation('add')}
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    className={segmentationOperation === 'subtract' ? 'active' : ''}
+                    onClick={() => setSegmentationOperation('subtract')}
+                  >
+                    Subtract
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!segmentationPendingSelection}
+                    onClick={() => commitPendingSegmentationSelection('add')}
+                  >
+                    Add selection
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!segmentationPendingSelection}
+                    onClick={() => commitPendingSegmentationSelection('subtract')}
+                  >
+                    Subtract selection
+                  </button>
+                </div>
+                <div className="segmentation-helper-current">
+                  <span className="segmentation-segment-color" style={{ backgroundColor: selectedSegmentationSegment?.color || DEFAULT_SEGMENT_COLOR }} />
+                  <strong>{selectedSegmentationSegment?.name || 'No segment'}</strong>
+                  <span>{config.sliceLabel} {slicePosition[axis]} / {upper}</span>
+                </div>
+              </div>
+
+              <div className="segmentation-tools-grid" aria-label="Segmentation tools">
+                {SEGMENTATION_HELPER_TOOLS.map((tool) => (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    className={segmentationTool === tool.id ? 'active' : ''}
+                    title={tool.detail}
+                    aria-label={`${tool.label}: ${tool.detail}`}
+                    data-tooltip={`${tool.label}: ${tool.detail}`}
+                    onClick={() => {
+                      setSegmentationTool(tool.id);
+                      cancelSegmentationDraft();
+                    }}
+                  >
+                    <SegmentationToolIcon icon={tool.icon} />
+                    <span className="segmentation-tool-label">{tool.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="segmentation-tool-parameters">
+                <label htmlFor="segmentation-brush-size">
+                  Brush size
+                  <input
+                    id="segmentation-brush-size"
+                    type="range"
+                    min="2"
+                    max="80"
+                    value={segmentationBrushSize}
+                    onChange={(event) => setSegmentationBrushSize(Number(event.target.value))}
+                  />
+                  <output>{segmentationBrushSize}px</output>
+                </label>
+                <label htmlFor="segmentation-sensitivity">
+                  Sensitivity
+                  <input
+                    id="segmentation-sensitivity"
+                    type="range"
+                    min="2"
+                    max="96"
+                    value={segmentationSensitivity}
+                    onChange={(event) => setSegmentationSensitivity(Number(event.target.value))}
+                  />
+                  <output>{segmentationSensitivity}</output>
+                </label>
+                <p className="muted">{activeTool.detail}</p>
+                {SEGMENTATION_POINT_MARKER_TOOLS.has(segmentationTool) && (
+                  <p className="muted">Defined points are shown as dots on the slice. Double-click closes polygon selections.</p>
+                )}
+              </div>
+
+              {segmentationTool === 'ml-helper' && (
+                <div className="segmentation-ml-panel" aria-label="ML helper options">
+                  <label htmlFor="segmentation-ml-group">
+                    Method family
+                    <select
+                      id="segmentation-ml-group"
+                      value={segmentationMlGroup}
+                      onChange={(event) => changeSegmentationMlGroup(event.target.value)}
+                    >
+                      {SEGMENTATION_ML_METHOD_GROUPS.map((group) => (
+                        <option key={group.id} value={group.id}>{group.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label htmlFor="segmentation-ml-method">
+                    Segment function
+                    <select
+                      id="segmentation-ml-method"
+                      value={segmentationMlMethod}
+                      onChange={(event) => changeSegmentationMlMethod(event.target.value)}
+                    >
+                      {getSegmentationMlMethods(segmentationMlGroup).map((method) => (
+                        <option key={method.id} value={method.id}>{method.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {(SEGMENTATION_ML_PARAMETER_FIELDS[segmentationMlMethod] || []).map((field) => (
+                    <label key={field.name} htmlFor={`segmentation-ml-${field.name}`}>
+                      {field.label}
+                      {field.type === 'select' ? (
+                        <select
+                          id={`segmentation-ml-${field.name}`}
+                          value={segmentationMlParameters[field.name] ?? ''}
+                          onChange={(event) => updateSegmentationMlParameter(field.name, event.target.value)}
+                        >
+                          {(field.options || []).map((option) => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id={`segmentation-ml-${field.name}`}
+                          type={field.type}
+                          min={field.min}
+                          max={field.max}
+                          step={field.step}
+                          value={segmentationMlParameters[field.name] ?? ''}
+                          onChange={(event) => updateSegmentationMlParameter(
+                            field.name,
+                            field.type === 'number' ? Number(event.target.value) : event.target.value,
+                          )}
+                        />
+                      )}
+                    </label>
+                  ))}
+                  <p className="muted">
+                    {segmentationMlLoading ? 'Running analysis for this slice.' : (segmentationMlStatus || 'Click the slice to run once, cache this method result, and select the clicked segment.')}
+                  </p>
+                </div>
+              )}
+
+              <div
+                className={`segmentation-slice-stage ${brushPointerVisible ? 'show-brush-pointer' : ''}`}
+                style={{
+                  '--segment-axis-color': config.color,
+                  '--brush-pointer-x': brushPointerVisible ? `${segmentationPointerPreview.displayX}px` : '50%',
+                  '--brush-pointer-y': brushPointerVisible ? `${segmentationPointerPreview.displayY}px` : '50%',
+                  '--brush-pointer-size': `${brushPointerDiameter}px`,
+                  ...crosshairStyle,
+                }}
+                onWheel={handleSegmentationHelperWheel}
+                onMouseDown={handleSegmentationStagePointerDown}
+                onMouseMove={handleSegmentationStagePointerMove}
+                onMouseUp={handleSegmentationStagePointerUp}
+                onMouseLeave={handleSegmentationStagePointerLeave}
+                onDoubleClick={completeSegmentationPolygon}
+                data-testid="segmentation-helper-stage"
+              >
+                {volumeImageStack.length > 0 ? (
+                  <MprSliceCanvas
+                    axis={axis}
+                    volumeCache={volumeCacheState.cache}
+                    volumeCacheStatus={volumeCacheState.status}
+                    slicePosition={slicePosition}
+                    dimensions={mprDimensions}
+                    displayWindow={displayWindow}
+                    displayDomain={displayValueDomain}
+                  />
+                ) : fallbackImage ? (
+                  <MprWindowedImage
+                    className="mpr-fallback-projection"
+                    src={fallbackImage.url}
+                    alt={`${config.label} segmentation helper fallback`}
+                    displayWindow={displayWindow}
+                    displayDomain={displayValueDomain}
+                  />
+                ) : (
+                  <span className="mpr-empty-volume">No volume stack images</span>
+                )}
+                <svg
+                  className="segmentation-helper-overlay"
+                  viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+                  preserveAspectRatio="none"
+                  aria-label="Segmentation helper overlay"
+                >
+                  {visibleSegmentShapes.map((shape, index) => (
+                    <g
+                      key={getSegmentationShapeKey(shape, index)}
+                      className={shape.segmentId === selectedSegmentationSegment?.id ? 'active-segment' : ''}
+                    >
+                      {renderSegmentationShape(shape, {
+                        color: shape.color,
+                        fillColor: shape.color,
+                        fillOpacity: shape.operation === 'subtract' ? 0.08 : 0.2,
+                      })}
+                    </g>
+                  ))}
+                  {segmentationPendingSelection && renderSegmentationShape(segmentationPendingSelection, {
+                    color: '#fde047',
+                    fillColor: '#fde047',
+                    fillOpacity: 0.18,
+                    preview: true,
+                    strokeWidth: 3,
+                  })}
+                  {segmentationDraftShape && renderSegmentationShape(segmentationDraftShape, {
+                    color: '#f8fafc',
+                    fillColor: selectedSegmentationSegment?.color || DEFAULT_SEGMENT_COLOR,
+                    fillOpacity: 0.15,
+                    preview: true,
+                    strokeWidth: 3,
+                  })}
+                </svg>
+                <div className="segmentation-helper-point-layer" aria-hidden="true">
+                  {draftPoints.map((point, index) => (
+                    <span
+                      key={`segmentation-point-${index}-${point.x}-${point.y}`}
+                      className="segmentation-helper-point"
+                      style={{
+                        left: `${Math.max(0, Math.min(100, (point.x / Math.max(1, dimensions.width)) * 100))}%`,
+                        top: `${Math.max(0, Math.min(100, (point.y / Math.max(1, dimensions.height)) * 100))}%`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </main>
           </div>
         </div>
       </div>
@@ -5367,6 +6641,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      )}
 	      {renderOtherAnnotationModal()}
       {renderAnnotationEditModal()}
+      {renderSegmentationHelperModal()}
 	      {renderFullscreenImageModal()}
 	    </section>
 	  );

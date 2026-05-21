@@ -451,6 +451,28 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
         }),
       });
     }
+    if (url.includes('/slice-segmentation') && options.method === 'POST') {
+      const payload = JSON.parse(options.body || '{}');
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          run_id: 'slice-seg-run-1',
+          part_id: mutableParts[0]?.id || 'part',
+          axis: payload.axis || 'axial',
+          slice_index: payload.slice_index || 0,
+          method_id: payload.method_id || 'segmentation.connected_components',
+          status: 'completed',
+          cached: false,
+          regions: [
+            { label: 1, area_px: 256, bbox: [6, 6, 26, 26], centroid: [16, 16] },
+            { label: 2, area_px: 324, bbox: [34, 34, 60, 60], centroid: [47, 47] },
+          ],
+          selected_region: { label: 2, area_px: 324, bbox: [34, 34, 60, 60], centroid: [47, 47] },
+          summary: { region_count: 2 },
+          warnings: [],
+        }),
+      });
+    }
     if (url.includes('/measurement-runs') && options.method === 'POST') {
       return Promise.resolve({
         ok: true,
@@ -1646,6 +1668,185 @@ describe('InspectionWorkbenchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Part Selection' }));
     expect(screen.getByRole('heading', { name: 'Part Selection' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close Part Selection' })).toBeInTheDocument();
+  });
+
+  test('opens PT3 segmentation helpers with editable segments and slice drawing tools', async () => {
+    mockWorkbenchFetch(scenarioByUser[2]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByTestId('mpr-panel')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Segmentation Helpers' }));
+    expect(screen.getByRole('dialog', { name: 'Segmentation Helpers' })).toBeInTheDocument();
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('Segment A');
+    expect(screen.getByLabelText('View orientation')).toHaveTextContent('XY');
+    expect(screen.getByLabelText('View orientation')).toHaveTextContent('XZ');
+    expect(screen.getByLabelText('View orientation')).toHaveTextContent('YZ');
+    expect(screen.getByLabelText('Slice navigation')).toHaveTextContent('Z');
+    expect(screen.getByRole('button', { name: /Connected: Seed a contiguous area/i })).toHaveAttribute('data-tooltip', expect.stringContaining('Connected'));
+    expect(screen.getByRole('button', { name: /Level Trace: Trace an equal-intensity contour/i })).toHaveAttribute('data-tooltip', expect.stringContaining('Level Trace'));
+    expect(screen.getByRole('button', { name: /Scissors: Mark cut paths/i })).toHaveAttribute('data-tooltip', expect.stringContaining('Scissors'));
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit Segment A/i }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Void core' } });
+    fireEvent.change(screen.getByLabelText('Color'), { target: { value: '#e11d48' } });
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('Void core');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add new segment' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('Segment B');
+
+    fireEvent.click(screen.getByRole('button', { name: 'XZ' }));
+    fireEvent.change(screen.getByLabelText('Y'), { target: { value: '12' } });
+    expect(screen.getAllByText('Y 12 / 95').length).toBeGreaterThan(0);
+
+    const stage = screen.getByTestId('segmentation-helper-stage');
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 });
+    fireEvent.wheel(stage, { deltaY: 80 });
+    expect(screen.getAllByText('Y 13 / 95').length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Brush size'), { target: { value: '32' } });
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 120 });
+    expect(stage).toHaveClass('show-brush-pointer');
+    expect(stage.style.getPropertyValue('--brush-pointer-size')).toBe('32px');
+
+    fireEvent.click(screen.getByRole('button', { name: /Connected/i }));
+    const connectedCanvas = stage.querySelector('canvas.mpr-slice-canvas');
+    const connectedWidth = 80;
+    const connectedHeight = 96;
+    const connectedPixels = new Uint8ClampedArray(connectedWidth * connectedHeight * 4);
+    for (let index = 0; index < connectedWidth * connectedHeight; index += 1) {
+      const offset = index * 4;
+      connectedPixels[offset] = 255;
+      connectedPixels[offset + 1] = 255;
+      connectedPixels[offset + 2] = 255;
+      connectedPixels[offset + 3] = 255;
+    }
+    for (let y = 20; y < 36; y += 1) {
+      for (let x = 20; x < 44; x += 1) {
+        const offset = (y * connectedWidth + x) * 4;
+        connectedPixels[offset] = 0;
+        connectedPixels[offset + 1] = 0;
+        connectedPixels[offset + 2] = 0;
+        connectedPixels[offset + 3] = 255;
+      }
+    }
+    connectedCanvas.width = connectedWidth;
+    connectedCanvas.height = connectedHeight;
+    Object.defineProperty(connectedCanvas, 'getContext', {
+      configurable: true,
+      value: jest.fn(() => ({
+        getImageData: jest.fn(() => ({ width: connectedWidth, height: connectedHeight, data: connectedPixels })),
+      })),
+    });
+    fireEvent.mouseDown(stage, { clientX: 120, clientY: 90, button: 0 });
+    expect(stage.querySelector('.segmentation-helper-point')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Segmentation helper overlay').querySelector('ellipse')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add selection' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('1 areas');
+
+    fireEvent.click(screen.getByRole('button', { name: /Polygon/i }));
+    fireEvent.mouseDown(stage, { clientX: 80, clientY: 70, button: 0 });
+    fireEvent.mouseDown(stage, { clientX: 180, clientY: 80, button: 0 });
+    fireEvent.mouseDown(stage, { clientX: 140, clientY: 160, button: 0 });
+    expect(stage.querySelectorAll('.segmentation-helper-point').length).toBeGreaterThanOrEqual(3);
+    fireEvent.doubleClick(stage, { clientX: 140, clientY: 160, button: 0 });
+    fireEvent.click(screen.getByRole('button', { name: 'Subtract selection' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('2 areas');
+
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = jest.fn(() => 'data:image/png;base64,c2xpY2U=');
+    fireEvent.click(screen.getByRole('button', { name: /ML Helper/i }));
+    expect(screen.getByLabelText('ML helper options')).toHaveTextContent('OpenCV');
+    fireEvent.change(screen.getByLabelText('Method family'), { target: { value: 'sam' } });
+    expect(screen.getByLabelText('Segment function')).toHaveValue('ml.sam.segment_anything');
+    fireEvent.change(screen.getByLabelText('Variant'), { target: { value: 'sam_vit_b' } });
+    const beforeMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
+    fireEvent.mouseDown(stage, { clientX: 220, clientY: 110, button: 0 });
+    await waitFor(() => expect(screen.getByText(/Selected ML region 2/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add selection' }));
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('3 areas');
+    const afterFirstMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
+    expect(afterFirstMlCalls).toBe(beforeMlCalls + 1);
+    const mlPayload = JSON.parse(global.fetch.mock.calls.find((call) => call[0].includes('/slice-segmentation'))[1].body);
+    expect(mlPayload.method_id).toBe('ml.sam.segment_anything');
+    expect(mlPayload.parameters.variant).toBe('sam_vit_b');
+
+    fireEvent.mouseDown(stage, { clientX: 221, clientY: 111, button: 0 });
+    expect(global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length).toBe(afterFirstMlCalls);
+    HTMLCanvasElement.prototype.toDataURL = originalToDataURL;
+  });
+
+  test('connected segmentation helper selects distinct contiguous black and white shapes at default sensitivity', async () => {
+    mockWorkbenchFetch(scenarioByUser[2]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByTestId('mpr-panel')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Segmentation Helpers' }));
+
+    const stage = screen.getByTestId('segmentation-helper-stage');
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 480, right: 400, bottom: 480 });
+    const canvas = stage.querySelector('canvas.mpr-slice-canvas');
+    expect(canvas).toBeInTheDocument();
+
+    const installSlicePixels = ({ background, shape }) => {
+      const width = 80;
+      const height = 96;
+      const data = new Uint8ClampedArray(width * height * 4);
+      for (let index = 0; index < width * height; index += 1) {
+        const offset = index * 4;
+        data[offset] = background;
+        data[offset + 1] = background;
+        data[offset + 2] = background;
+        data[offset + 3] = 255;
+      }
+      for (let y = shape.y; y < shape.y + shape.height; y += 1) {
+        for (let x = shape.x; x < shape.x + shape.width; x += 1) {
+          const offset = (y * width + x) * 4;
+          data[offset] = shape.value;
+          data[offset + 1] = shape.value;
+          data[offset + 2] = shape.value;
+          data[offset + 3] = 255;
+        }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      Object.defineProperty(canvas, 'getContext', {
+        configurable: true,
+        value: jest.fn(() => ({
+          getImageData: jest.fn(() => ({ width, height, data })),
+        })),
+      });
+    };
+
+    const assertConnectedShape = (shape) => {
+      installSlicePixels(shape);
+      fireEvent.click(screen.getByRole('button', { name: /Connected/i }));
+      fireEvent.mouseDown(stage, {
+        clientX: ((shape.shape.x + Math.floor(shape.shape.width / 2)) / 80) * 400,
+        clientY: ((shape.shape.y + Math.floor(shape.shape.height / 2)) / 96) * 480,
+        button: 0,
+      });
+      const path = screen.getByLabelText('Segmentation helper overlay').querySelector('.segmentation-helper-shape.preview');
+      expect(path).toBeInTheDocument();
+      const pathData = path.getAttribute('d');
+      expect(pathData).toContain(`M ${shape.shape.x} ${shape.shape.y} h ${shape.shape.width}`);
+      expect((pathData.match(new RegExp(`h ${shape.shape.width}`, 'g')) || []).length).toBe(shape.shape.height);
+      expect(pathData).not.toContain('h 80');
+      expect(stage.querySelector('.segmentation-helper-point')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Add selection' }));
+    };
+
+    assertConnectedShape({
+      background: 255,
+      shape: { x: 18, y: 24, width: 20, height: 16, value: 0 },
+    });
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('1 areas');
+
+    assertConnectedShape({
+      background: 0,
+      shape: { x: 42, y: 50, width: 14, height: 18, value: 255 },
+    });
+    expect(screen.getByTestId('segmentation-segment-list')).toHaveTextContent('2 areas');
   });
 
   test('renders a fast visual shell fallback for PT3 parts without volume metadata', async () => {

@@ -178,6 +178,40 @@ class InspectionSegmentationInvokeResponse(BaseModel):
     created_at: datetime
 
 
+class InspectionSliceSegmentationRequest(BaseModel):
+    axis: str = Field(default="axial", pattern=r"^(axial|coronal|sagittal)$")
+    slice_index: int = Field(default=0, ge=0)
+    method_id: str = Field(..., min_length=1, max_length=128, pattern=r"^[a-z0-9_.-]+$")
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    image_data_base64: str = Field(..., min_length=1)
+    filename: str = Field(default="slice.png", min_length=1, max_length=255)
+    click_x: float = Field(..., ge=0)
+    click_y: float = Field(..., ge=0)
+
+
+class InspectionSliceSegmentRegion(BaseModel):
+    label: int
+    area_px: float
+    bbox: List[float]
+    centroid: Optional[List[float]] = None
+    confidence: Optional[float] = None
+    class_name: Optional[str] = None
+
+
+class InspectionSliceSegmentationResponse(BaseModel):
+    run_id: uuid.UUID
+    part_id: uuid.UUID
+    axis: str
+    slice_index: int
+    method_id: str
+    status: str
+    cached: bool = False
+    regions: List[InspectionSliceSegmentRegion] = Field(default_factory=list)
+    selected_region: Optional[InspectionSliceSegmentRegion] = None
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class InspectionMeasurementInvokeRequest(BaseModel):
     measurement_profile: str = Field(default="default", min_length=1, max_length=64)
     include_overlays: List[str] = Field(default_factory=list)
