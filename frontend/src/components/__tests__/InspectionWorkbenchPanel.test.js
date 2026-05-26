@@ -921,7 +921,7 @@ describe('InspectionWorkbenchPanel', () => {
     window.innerWidth = 1800;
     window.dispatchEvent(new Event('resize'));
 
-    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT2" />);
 
     await waitFor(() => {
       expect(screen.getByText(`Batches: ${scenario.batches.length}`)).toBeInTheDocument();
@@ -977,7 +977,7 @@ describe('InspectionWorkbenchPanel', () => {
 
   test('switches center pane between inspector images and selected image metadata', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
-    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT2" />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Basic Part').length).toBeGreaterThan(0);
@@ -995,7 +995,7 @@ describe('InspectionWorkbenchPanel', () => {
 
   test('deletes annotations from the main annotations list', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
-    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT2" />);
 
     await waitFor(() => expect(screen.getByTestId('annotation-list')).toHaveTextContent('seed-basic'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete annotation seed-basic' }));
@@ -1318,7 +1318,7 @@ describe('InspectionWorkbenchPanel', () => {
 
     const topLeftCorner = await screen.findByLabelText('Reposition topLeft corner for Drawn bounding box');
     fireEvent.click(topLeftCorner, { clientX: 80, clientY: 40 });
-    expect(screen.getByTestId('fullscreen-measurement-zoom-lens')).toBeInTheDocument();
+    expect(screen.queryByTestId('fullscreen-measurement-zoom-lens')).not.toBeInTheDocument();
     fireEvent.click(fullscreenImage, { clientX: 100, clientY: 60 });
 
     await waitFor(() => {
@@ -1397,7 +1397,7 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
-  test('highlights, repositions, and deletes fullscreen measurement endpoints', async () => {
+  test('highlights, repositions, and deletes fullscreen measurement endpoints (PT2 lens)', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
       parts: [{
@@ -1428,10 +1428,8 @@ describe('InspectionWorkbenchPanel', () => {
     const endpointDot = await screen.findByLabelText('Reposition end endpoint for Endpoint check');
     expect(screen.getByLabelText('Reposition start endpoint for Endpoint check')).toBeInTheDocument();
     fireEvent.click(endpointDot, { clientX: 282, clientY: 160 });
-    expect(screen.getByTestId('fullscreen-measurement-zoom-lens')).toBeInTheDocument();
-    fireEvent.wheel(fullscreenImage, { deltaY: -80, clientX: 282, clientY: 160 });
-    expect(screen.getByTestId('fullscreen-measurement-zoom-lens').style.backgroundSize).toBe('4400px 2200px');
-    fireEvent.click(endpointDot, { clientX: 280, clientY: 160 });
+    expect(screen.queryByTestId('fullscreen-measurement-zoom-lens')).not.toBeInTheDocument();
+        fireEvent.click(endpointDot, { clientX: 280, clientY: 160 });
 
     await waitFor(() => {
       const patchCall = global.fetch.mock.calls.find((call) => call[0].includes('/annotations/measurement-endpoint-a') && call[1]?.method === 'PATCH');
@@ -1474,7 +1472,7 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
-  test('renders transparent line and endpoint overlay inside fine-tune zoom lens', async () => {
+  test('does not render fine-tune zoom lens overlay while editing endpoints', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
       parts: [{
@@ -1505,14 +1503,10 @@ describe('InspectionWorkbenchPanel', () => {
     const endDot = await screen.findByLabelText('Reposition end endpoint for Lens overlay check');
     fireEvent.click(endDot, { clientX: 260, clientY: 120 });
 
-    const zoomOverlay = screen.getByLabelText('Measurement fine-tune overlay');
-    expect(zoomOverlay).toBeInTheDocument();
-    expect(zoomOverlay.querySelector('g')).toHaveAttribute('opacity', '0.45');
-    expect(zoomOverlay.querySelectorAll('line')).toHaveLength(1);
-    expect(zoomOverlay.querySelectorAll('circle')).toHaveLength(2);
+    expect(screen.queryByLabelText('Measurement fine-tune overlay')).not.toBeInTheDocument();
   });
 
-  test('commits endpoint using zoom-lens tracked pointer position for pixel-accurate registration', async () => {
+  test('commits endpoint using zoom-lens tracked pointer position for pixel-accurate registration (PT2)', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
       parts: [{

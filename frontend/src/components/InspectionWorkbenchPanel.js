@@ -6457,7 +6457,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     })}
 	                  </svg>
 	                </div>
-                {fullscreenZoomLens && (
+                {projectType !== 'PT1' && fullscreenZoomLens && (
                   <div
                     className="inspection-fullscreen-zoom-lens"
                     data-testid="fullscreen-measurement-zoom-lens"
