@@ -1,0 +1,22 @@
+# .github/workflows/push-to-upstream.yml
+name: Push Fork to Upstream
+
+on:
+  push:
+    branches:
+      - main # Change to your fork's development branch
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Fork Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+          fetch-depth: 0
+
+      - name: Push to Upstream
+        run: |
+          git remote add upstream https://github.com/sandialabs/VISTA
+          git push upstream HEAD:vista-tk
