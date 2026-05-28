@@ -11,6 +11,55 @@ export const VISTA_HIERARCHY_KEYS = [
 ];
 const VISTA_HIERARCHY_DELIMITER = '_';
 
+const CONFIG_ID_TO_METADATA_KEY = {
+  drawing_number: 'design_number',
+  design_number: 'design_number',
+  lot_number: 'lot_number',
+  serial_number: 'serial_number',
+  set_number: 'set_number',
+  batch_number: 'batch_number',
+  batch: 'batch_number',
+  part_number: 'set_number',
+  view: 'side',
+  side: 'side',
+  modality: 'modality',
+  overlay: 'overlay',
+};
+
+function normalizeConfigEntry(entry) {
+  const id = String(entry?.id || '').trim();
+  return {
+    id,
+    key: CONFIG_ID_TO_METADATA_KEY[id] || id,
+    abbreviation: String(entry?.abbreviation || '').trim(),
+  };
+}
+
+function buildConfiguredFilenameFields(fileNamingScheme) {
+  const hierarchyLevels = Array.isArray(fileNamingScheme?.hierarchy_levels)
+    ? fileNamingScheme.hierarchy_levels
+    : [];
+  const imageDescriptors = Array.isArray(fileNamingScheme?.image_descriptors)
+    ? fileNamingScheme.image_descriptors
+    : [];
+  const fields = [...hierarchyLevels, ...imageDescriptors]
+    .map(normalizeConfigEntry)
+    .filter((entry) => entry.key && entry.key !== 'revision' && entry.key !== 'timestamp' && entry.key !== 'operator');
+  if (fields.length > 0 && !fields.some((entry) => entry.key === 'overlay')) {
+    fields.push({ id: 'overlay', key: 'overlay', abbreviation: '' });
+  }
+  return fields;
+}
+
+function stripConfiguredAbbreviation(value, field) {
+  const raw = String(value ?? '').trim();
+  const abbreviation = String(field?.abbreviation || '').trim();
+  if (!abbreviation) return raw;
+  return raw.toLowerCase().startsWith(abbreviation.toLowerCase())
+    ? raw.slice(abbreviation.length)
+    : raw;
+}
+
 /**
  * FilenameMetadataExtractor - extracts key-value metadata from filenames.
  *
@@ -53,17 +102,32 @@ function extractValues(stem, mode, pattern) {
   }
 }
 
-function FilenameMetadataExtractor({ files, onConfigChange }) {
+function FilenameMetadataExtractor({ files, onConfigChange, fileNamingScheme = null }) {
   const [mode, setMode] = useState('simple');
   const [pattern, setPattern] = useState('');
   const [keysInput, setKeysInput] = useState('');
   const [userEditedConfig, setUserEditedConfig] = useState(false);
+
+  const configuredFields = useMemo(() => buildConfiguredFilenameFields(fileNamingScheme), [fileNamingScheme]);
 
   // The filename stem used for the live preview (first selected file).
   const previewStem = files.length > 0 ? stripExtension(files[0].name) : '';
 
   useEffect(() => {
     if (userEditedConfig || !previewStem || pattern || keysInput) return;
+    const candidateDelimiters = [VISTA_HIERARCHY_DELIMITER, '-', '.'];
+    const configuredMatch = configuredFields.length > 0
+      ? candidateDelimiters
+        .map((delimiter) => ({ delimiter, values: previewStem.split(delimiter) }))
+        .find((candidate) => candidate.values.length === configuredFields.length)
+      : null;
+    if (configuredMatch) {
+      setMode('simple');
+      setPattern(configuredMatch.delimiter);
+      setKeysInput(configuredFields.map((field) => field.key).join(', '));
+      return;
+    }
+
     const candidateValues = previewStem.split(VISTA_HIERARCHY_DELIMITER);
     if (candidateValues.length !== VISTA_HIERARCHY_KEYS.length) return;
     const hierarchyKeys = [...VISTA_HIERARCHY_KEYS];
@@ -73,7 +137,7 @@ function FilenameMetadataExtractor({ files, onConfigChange }) {
     setMode('simple');
     setPattern(VISTA_HIERARCHY_DELIMITER);
     setKeysInput(hierarchyKeys.join(', '));
-  }, [keysInput, pattern, previewStem, userEditedConfig]);
+  }, [configuredFields, keysInput, pattern, previewStem, userEditedConfig]);
 
   // Live-preview results for the first selected filename.
   // Also validates the regex pattern even when no file is selected.
@@ -136,11 +200,12 @@ function FilenameMetadataExtractor({ files, onConfigChange }) {
       if (error || values.length !== keys.length) return null;
       const obj = {};
       keys.forEach((k, i) => {
-        obj[k] = values[i];
+        const field = configuredFields[i];
+        obj[k] = mode === 'simple' ? stripConfiguredAbbreviation(values[i], field) : values[i];
       });
       return obj;
     };
-  }, [mode, pattern, keys]);
+  }, [mode, pattern, keys, configuredFields]);
 
   // Notify the parent of configuration changes.
   useEffect(() => {

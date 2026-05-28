@@ -334,6 +334,19 @@ def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
         "interface_layout": {
             "default_model": None,
         },
+        "file_naming_scheme": {
+            "hierarchy_levels": [
+                {"id": "drawing_number", "label": "Drawing Number", "abbreviation": "D"},
+                {"id": "part_number", "label": "Part Number", "abbreviation": "P"},
+                {"id": "lot_number", "label": "Lot Number", "abbreviation": "L"},
+                {"id": "serial_number", "label": "Serial Number", "abbreviation": "S"},
+                {"id": "revision", "label": "Revision", "abbreviation": "R"},
+            ],
+            "image_descriptors": [
+                {"id": "view", "label": "View", "abbreviation": "V"},
+                {"id": "modality", "label": "Modality", "abbreviation": "M"},
+            ],
+        },
     }
 
 
