@@ -671,6 +671,52 @@ describe('InspectionWorkbenchPanel', () => {
     }
   }, 90000);
 
+
+  test('shows filename-decoded image to part mappings in inspection workbench', async () => {
+    const decodedScenario = {
+      user: 'filename-decoding',
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+      workspaceState: { selected_part_id: 'part-decoded-1' },
+      batches: [],
+      parts: [
+        {
+          id: 'part-decoded-1',
+          batch_id: null,
+          serial_number: '9',
+          display_name: '100 22 7 9',
+          review_state: 'unreviewed',
+          metadata: {
+            design_number: '100',
+            lot_number: '22',
+            set_number: '7',
+            serial_number: '9',
+            configured_views: ['left', 'right'],
+            modalities: ['thermal', 'visual'],
+            view_images: {
+              left: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png',
+              right: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png',
+            },
+            source_images: [
+              { filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png', image_id: 'img-left', side: 'left', modality: 'visual', overlay: false },
+              { filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png', image_id: 'img-right', side: 'right', modality: 'thermal', overlay: false },
+            ],
+            annotations: [],
+          },
+        },
+      ],
+    };
+
+    mockWorkbenchFetch(decodedScenario);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('100 22 7 9').length).toBeGreaterThan(0);
+    });
+    expect(screen.getByRole('button', { name: 'LEFT' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'RIGHT' })).toBeInTheDocument();
+    expect(screen.getByTestId('selected-image-panel')).toBeInTheDocument();
+  });
+
   test.each(projectTypes)('applies configurable inspector hotkeys for %s', async (projectType) => {
     for (const scenario of scenarioByUser) {
       const workspaceTracker = mockWorkbenchFetch(scenario);

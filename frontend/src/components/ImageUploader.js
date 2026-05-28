@@ -17,17 +17,25 @@ function normalizeBoolean(value) {
   return ['true', '1', 'yes', 'y'].includes(value.trim().toLowerCase());
 }
 
+function firstNonEmptyValue(candidate, keys) {
+  for (const key of keys) {
+    const value = candidate?.[key];
+    if (value !== undefined && value !== null && String(value).trim()) return value;
+  }
+  return '';
+}
+
 function normalizeHierarchyMetadata(candidate) {
   if (!candidate || typeof candidate !== 'object') return null;
   const normalized = {
     ...candidate,
-    design_number: String(candidate.design_number || '').trim(),
-    lot_number: String(candidate.lot_number || '').trim(),
-    set_number: String(candidate.set_number || '').trim(),
-    batch_number: String(candidate.batch_number || '').trim(),
-    serial_number: String(candidate.serial_number || '').trim(),
-    side: String(candidate.side || candidate.side_identifier || '').trim().toLowerCase(),
-    modality: String(candidate.modality || '').trim().toLowerCase(),
+    design_number: String(firstNonEmptyValue(candidate, ['design_number', 'drawing_number', 'drawing', 'design'])).trim(),
+    lot_number: String(firstNonEmptyValue(candidate, ['lot_number', 'lot'])).trim(),
+    set_number: String(firstNonEmptyValue(candidate, ['set_number', 'part_number', 'part', 'part_group'])).trim(),
+    batch_number: String(firstNonEmptyValue(candidate, ['batch_number', 'batch'])).trim(),
+    serial_number: String(firstNonEmptyValue(candidate, ['serial_number', 'serial', 'sn'])).trim(),
+    side: String(firstNonEmptyValue(candidate, ['side', 'side_identifier', 'view', 'view_name'])).trim().toLowerCase(),
+    modality: String(firstNonEmptyValue(candidate, ['modality', 'image_modality'])).trim().toLowerCase(),
     overlay: normalizeBoolean(candidate.overlay),
   };
   const hasRequiredHierarchy = HIERARCHY_KEYS
@@ -187,7 +195,7 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
   };
 }
 
-function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setError }) {
+function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = null, onUploadComplete, setError }) {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadMetadata, setUploadMetadata] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -442,6 +450,7 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
           <FilenameMetadataExtractor
             files={selectedFiles}
             onConfigChange={handleExtractorChange}
+            fileNamingScheme={projectConfiguration?.file_naming_scheme}
           />
 
           {extractorConfig.keys && extractorConfig.keys.length > 0 && (

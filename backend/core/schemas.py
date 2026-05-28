@@ -348,6 +348,16 @@ class InspectionProjectInterfaceLayoutConfig(BaseModel):
     default_model: Optional[Dict[str, Any]] = None
 
 
+class InspectionProjectFileNamingEntryConfig(BaseModel):
+    id: str = Field(default="other", max_length=128)
+    label: str = Field(default="", max_length=255)
+    abbreviation: str = Field(default="", max_length=64)
+
+
+class InspectionProjectFileNamingSchemeConfig(BaseModel):
+    hierarchy_levels: List[InspectionProjectFileNamingEntryConfig] = Field(default_factory=list)
+    image_descriptors: List[InspectionProjectFileNamingEntryConfig] = Field(default_factory=list)
+
 
 class InspectionProjectOwnerConfig(BaseModel):
     name: str = Field(default="", max_length=255)
@@ -366,6 +376,7 @@ class InspectionProjectConfiguration(BaseModel):
     display_settings: InspectionProjectDisplaySettingsConfig = Field(default_factory=InspectionProjectDisplaySettingsConfig)
     phase_settings: InspectionProjectPhaseSettingsConfig = Field(default_factory=InspectionProjectPhaseSettingsConfig)
     interface_layout: InspectionProjectInterfaceLayoutConfig = Field(default_factory=InspectionProjectInterfaceLayoutConfig)
+    file_naming_scheme: InspectionProjectFileNamingSchemeConfig = Field(default_factory=InspectionProjectFileNamingSchemeConfig)
     project_owner: InspectionProjectOwnerConfig = Field(default_factory=InspectionProjectOwnerConfig)
     current_user: InspectionProjectCurrentUserConfig = Field(default_factory=InspectionProjectCurrentUserConfig)
 

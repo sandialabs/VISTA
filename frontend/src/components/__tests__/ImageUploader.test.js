@@ -343,6 +343,122 @@ describe('ImageUploader', () => {
         { id: 'img-back', filename: 'D1001_LOT01_SET01_SN0001_back_visual_false.jpg' },
       ]);
     });
+
+    test('uses saved filename hierarchy abbreviations to decode uploaded filenames into inspection parts', async () => {
+      const projectConfiguration = {
+        file_naming_scheme: {
+          hierarchy_levels: [
+            { id: 'drawing_number', label: 'Drawing', abbreviation: 'DWG' },
+            { id: 'lot_number', label: 'Lot', abbreviation: 'LT' },
+            { id: 'part_number', label: 'Part', abbreviation: 'PN' },
+            { id: 'serial_number', label: 'Serial', abbreviation: 'SN' },
+          ],
+          image_descriptors: [
+            { id: 'view', label: 'View', abbreviation: 'VW' },
+            { id: 'modality', label: 'Modality', abbreviation: 'MD' },
+          ],
+        },
+      };
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-left', filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-right', filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 }, discrepancies: [] }) });
+
+      renderUploader({ projectConfiguration });
+      selectFiles([
+        makeFile('DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png'),
+        makeFile('DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png'),
+      ]);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Delimiter')).toHaveValue('_');
+        expect(screen.getByLabelText('Keys (comma-separated)')).toHaveValue('design_number, lot_number, set_number, serial_number, side, modality, overlay');
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      expect(JSON.parse(fetchSpy.mock.calls[0][1].body.get('metadata'))).toEqual(expect.objectContaining({
+        design_number: '100',
+        lot_number: '22',
+        set_number: '7',
+        serial_number: '9',
+        side: 'left',
+        modality: 'visual',
+        overlay: false,
+      }));
+      expect(JSON.parse(fetchSpy.mock.calls[2][1].body)).toEqual({
+        batches: [],
+        unassigned_parts: [
+          expect.objectContaining({
+            serial_number: '9',
+            display_name: '100 22 7 9',
+            metadata: expect.objectContaining({
+              design_number: '100',
+              lot_number: '22',
+              set_number: '7',
+              serial_number: '9',
+              configured_views: ['left', 'right'],
+              modalities: ['thermal', 'visual'],
+              view_images: {
+                left: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png',
+                right: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png',
+              },
+              source_images: expect.arrayContaining([
+                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png', image_id: 'img-left' }),
+                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png', image_id: 'img-right' }),
+              ]),
+            }),
+          }),
+        ],
+      });
+    });
+
+    test('supports hyphen-delimited batch naming convention from saved filename hierarchy', async () => {
+      const projectConfiguration = {
+        file_naming_scheme: {
+          hierarchy_levels: [
+            { id: 'drawing_number', label: 'Drawing', abbreviation: 'D' },
+            { id: 'lot_number', label: 'Lot', abbreviation: 'L' },
+            { id: 'batch', label: 'Batch', abbreviation: 'B' },
+            { id: 'serial_number', label: 'Serial', abbreviation: 'S' },
+          ],
+          image_descriptors: [
+            { id: 'view', label: 'View', abbreviation: 'V' },
+            { id: 'modality', label: 'Modality', abbreviation: 'M' },
+          ],
+        },
+      };
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-front', filename: 'D200-L03-B55-S888-Vfront-Mvisual-false.jpg' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 }, discrepancies: [] }) });
+
+      renderUploader({ projectConfiguration });
+      selectFiles([makeFile('D200-L03-B55-S888-Vfront-Mvisual-false.jpg')]);
+
+      await waitFor(() => expect(screen.getByLabelText('Delimiter')).toHaveValue('-'));
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).toEqual({
+        batches: [
+          expect.objectContaining({
+            name: '200_03_55',
+            parts: [
+              expect.objectContaining({
+                serial_number: '888',
+                metadata: expect.objectContaining({
+                  batch_number: '55',
+                  view_images: { front: 'D200-L03-B55-S888-Vfront-Mvisual-false.jpg' },
+                }),
+              }),
+            ],
+          }),
+        ],
+        unassigned_parts: [],
+      });
+    });
+
   });
 
   describe('buildInspectionPartIngestPayload', () => {

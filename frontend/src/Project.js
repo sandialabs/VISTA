@@ -337,6 +337,7 @@ function Project({ currentUserGroups = [] }) {
                 <ImageUploader
                   projectId={id}
                   projectType={project?.project_type}
+                  projectConfiguration={projectConfiguration}
                   onUploadComplete={handleUploadComplete}
                   setError={setError}
                 />
@@ -492,6 +493,7 @@ function Project({ currentUserGroups = [] }) {
     project?.is_archived,
     project?.name,
     project?.project_type,
+    projectConfiguration,
     refreshProjectCounts,
     refreshRecentlyDeletedOverlays,
     requestIngestValidation,
