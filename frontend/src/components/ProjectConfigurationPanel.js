@@ -770,8 +770,8 @@ function ProjectConfigurationPanel({
             </article>
           </div>
 
-
-          <section className="part-detail-panel" aria-label="Project owner">
+          <div className="configuration-sections-grid" data-testid="configuration-sections-grid">
+            <section className="part-detail-panel" aria-label="Project owner">
             <h3>Project Owner</h3>
             <div className="workbench-controls-row">
               <label htmlFor="project-owner-name">Owner Name</label>
@@ -879,6 +879,40 @@ function ProjectConfigurationPanel({
                 }}
               />
               Require disposition on submit
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                aria-label="Require measurement for critical defects"
+                checked={Boolean(config.process_settings?.require_measurement_for_critical)}
+                onChange={(event) => {
+                  setConfig((previous) => ({
+                    ...previous,
+                    process_settings: {
+                      ...previous.process_settings,
+                      require_measurement_for_critical: event.target.checked,
+                    },
+                  }));
+                }}
+              />
+              Require measurement for critical defects
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                aria-label="Require second reviewer for rejects"
+                checked={Boolean(config.process_settings?.require_second_reviewer_for_reject)}
+                onChange={(event) => {
+                  setConfig((previous) => ({
+                    ...previous,
+                    process_settings: {
+                      ...previous.process_settings,
+                      require_second_reviewer_for_reject: event.target.checked,
+                    },
+                  }));
+                }}
+              />
+              Require second reviewer for rejects
             </label>
             <div className="workbench-controls-row">
               <label htmlFor="hotkey-accept">Accept hotkey</label>
@@ -1274,6 +1308,43 @@ function ProjectConfigurationPanel({
               <option value="magma">magma</option>
               <option value="viridis">viridis</option>
             </select>
+            <label htmlFor="anomaly-colormap">Anomaly colormap</label>
+            <select
+              id="anomaly-colormap"
+              aria-label="Anomaly colormap"
+              value={config.display_settings?.anomaly_colormap || 'viridis'}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setConfig((previous) => ({
+                  ...previous,
+                  display_settings: {
+                    ...previous.display_settings,
+                    anomaly_colormap: nextValue,
+                  },
+                }));
+              }}
+            >
+              <option value="grayscale">grayscale</option>
+              <option value="magma">magma</option>
+              <option value="viridis">viridis</option>
+            </select>
+            <label>
+              <input
+                type="checkbox"
+                aria-label="Use grayscale base image"
+                checked={Boolean(config.display_settings?.grayscale_base_image)}
+                onChange={(event) => {
+                  setConfig((previous) => ({
+                    ...previous,
+                    display_settings: {
+                      ...previous.display_settings,
+                      grayscale_base_image: event.target.checked,
+                    },
+                  }));
+                }}
+              />
+              Use grayscale base image
+            </label>
           </section>
 
           <section className="part-detail-panel" aria-label="Copy configuration">
@@ -1317,8 +1388,9 @@ function ProjectConfigurationPanel({
               </button>
             </div>
           </section>
+          </div>
 
-          <div className="workbench-controls-row">
+          <div className="workbench-controls-row configuration-action-bar">
             <button className="btn btn-primary" type="button" disabled={saving} onClick={saveConfiguration}>
               {saving ? 'Saving...' : 'Save Configuration'}
             </button>

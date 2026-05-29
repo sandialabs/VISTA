@@ -7410,3 +7410,37 @@ ul li:hover {
   align-items: center;
   padding: 0.2rem 0;
 }
+
+.configuration-sections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.configuration-sections-grid .part-detail-panel {
+  height: 100%;
+  margin-bottom: 0;
+}
+
+.project-configuration-panel .configuration-action-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.96);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+}
+
+@media (max-width: 760px) {
+  .configuration-sections-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-configuration-panel .configuration-action-bar {
+    position: static;
+  }
+}
