@@ -940,17 +940,27 @@ function getAnalyzeOverlayDisplayLabel(label) {
 function getPartImageRefs(part) {
   const refs = [];
   const seen = new Set();
+  const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
+  const sourceImageByFilename = sourceImages.reduce((acc, record) => {
+    const filename = String(record?.filename || '');
+    if (filename && !acc[filename]) acc[filename] = record;
+    return acc;
+  }, {});
+  const getRecordModality = (record) => String(record?.modality || record?.metadata?.modality || '').toLowerCase();
   const imagesByView = part?.metadata?.view_images;
   if (imagesByView && typeof imagesByView === 'object') {
     Object.entries(imagesByView).forEach(([viewName, imageRef]) => {
       const ref = String(imageRef || '');
       if (!ref || seen.has(ref)) return;
+      const sourceRecord = sourceImageByFilename[ref] || {};
       seen.add(ref);
       refs.push({
         id: `${part.id}-view-${viewName}`,
         viewName: String(viewName || '').toLowerCase(),
+        modality: getRecordModality(sourceRecord),
         label: String(viewName || 'image').toUpperCase(),
         imageRef: ref,
+        imageId: sourceRecord.image_id ? String(sourceRecord.image_id) : '',
         overlay: false,
       });
     });
@@ -973,12 +983,14 @@ function getPartImageRefs(part) {
     const imageRef = String(record.image_id || record.filename || '');
     if (!imageRef || seen.has(imageRef)) return;
     seen.add(imageRef);
+    const modality = getRecordModality(record);
     const label = overlay
-      ? getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || 'Analyze Overlay')
+      ? getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay')
       : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
     refs.push({
       id: `${part.id}-${overlay ? 'analysis' : 'source'}-${index}`,
       viewName: String(record.side || record.modality || (overlay ? 'overlay' : 'image')).toLowerCase(),
+      modality,
       label,
       imageRef,
       filename: String(record.filename || ''),
@@ -988,12 +1000,9 @@ function getPartImageRefs(part) {
       overlayBaseFilename: record.overlay_base_filename ? String(record.overlay_base_filename) : '',
     });
   };
-  const sourceImages = part?.metadata?.source_images;
-  if (Array.isArray(sourceImages)) {
-    sourceImages.forEach((record, index) => {
-      pushRecord(record, index, isAnalyzeOutputRecord(record));
-    });
-  }
+  sourceImages.forEach((record, index) => {
+    pushRecord(record, index, isAnalyzeOutputRecord(record));
+  });
   const analysisOutputs = part?.metadata?.analysis_outputs;
   if (Array.isArray(analysisOutputs)) {
     analysisOutputs.forEach((record, index) => {
@@ -2531,12 +2540,15 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   }, [selectedPart]);
   const visibleSelectedPartImageRefs = useMemo(() => {
     const hidden = new Set(hiddenViewNames.map((name) => String(name).toLowerCase()));
+    const enabled = new Set(enabledModalities.map((name) => String(name).toLowerCase()));
     return selectedPartImageRefs.filter((entry) => {
       const category = entry.overlay ? 'overlay' : 'source';
       if (!renderCategories.includes(category)) return false;
-      return !hidden.has(String(entry.viewName || '').toLowerCase());
+      if (hidden.has(String(entry.viewName || '').toLowerCase())) return false;
+      const modality = String(entry.modality || '').toLowerCase();
+      return !modality || modality === 'analyze-overlay' || enabled.has(modality);
     });
-  }, [hiddenViewNames, renderCategories, selectedPartImageRefs]);
+  }, [enabledModalities, hiddenViewNames, renderCategories, selectedPartImageRefs]);
   const tileColumnMax = Math.max(1, selectedPartImageRefs.length || visibleSelectedPartImageRefs.length || 1);
   const normalizedTileColumnCount = Math.round(clampRange(
     tileColumnCount,
@@ -3448,6 +3460,17 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       : [...prev, key]));
   };
 
+  const toggleModalityVisibility = (modality) => {
+    const key = String(modality || '').toLowerCase();
+    if (!key) return;
+    setEnabledModalities((prev) => {
+      const normalized = prev.map((entry) => String(entry).toLowerCase());
+      return normalized.includes(key)
+        ? prev.filter((entry) => String(entry).toLowerCase() !== key)
+        : [...prev, key];
+    });
+  };
+
   const toggleMprProjectionMirror = (axis) => {
     setMprProjectionMirror((prev) => ({
       ...prev,
@@ -3970,6 +3993,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     const isSelected = part.id === selectedPart?.id;
                     const viewImages = part?.metadata?.view_images || {};
                     const imageEntries = Object.entries(viewImages);
+                    const partModalities = getModalities(part);
+                    const partImageRefs = getPartImageRefs(part);
                     return (
                       <article
                         key={part.id}
@@ -3989,24 +4014,54 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                             Defects: {defectCount} • Annotations: {annotationCount}
                           </div>
                           {imageEntries.length > 0 && (
-                            <div className="part-summary-images">
+                            <div className="part-summary-images" aria-label={`${part.display_name || part.serial_number} view filters`}>
                               {imageEntries.map(([viewName, imageRef]) => {
-                                const isHidden = hiddenViewNames.includes(String(viewName).toLowerCase());
+                                const normalizedViewName = String(viewName).toLowerCase();
+                                const isHidden = hiddenViewNames.includes(normalizedViewName);
                                 return (
-                                <button
-                                  type="button"
-                                  key={`${part.id}-${viewName}`}
-                                  className={`btn btn-secondary btn-sm ${isSelected && activeViewName === viewName ? 'active' : ''} ${isHidden ? 'muted-toggle' : ''}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setSelectedPartId(part.id);
-                                    toggleViewVisibility(viewName);
-                                    setSelectedViewName(viewName);
-                                    setSelectedImageRef(String(imageRef || ''));
-                                  }}
-                                >
-                                  {viewName.toUpperCase()}
-                                </button>
+                                  <button
+                                    type="button"
+                                    key={`${part.id}-${viewName}`}
+                                    className={`btn btn-secondary btn-sm ${isSelected && activeViewName === normalizedViewName ? 'active' : ''} ${isHidden ? 'muted-toggle' : ''}`}
+                                    aria-pressed={!isHidden}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelectedPartId(part.id);
+                                      toggleViewVisibility(viewName);
+                                      setSelectedViewName(normalizedViewName);
+                                      setSelectedImageRef(String(imageRef || ''));
+                                    }}
+                                  >
+                                    {viewName.toUpperCase()}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {partModalities.length > 0 && (
+                            <div className="part-summary-images part-summary-modalities" aria-label={`${part.display_name || part.serial_number} modality filters`}>
+                              {partModalities.map((modality) => {
+                                const normalizedModality = String(modality).toLowerCase();
+                                const isEnabled = enabledModalities.map((entry) => String(entry).toLowerCase()).includes(normalizedModality);
+                                const matchingImage = partImageRefs.find((entry) => String(entry.modality || '').toLowerCase() === normalizedModality);
+                                return (
+                                  <button
+                                    type="button"
+                                    key={`${part.id}-modality-${normalizedModality}`}
+                                    className={`btn btn-secondary btn-sm ${isEnabled ? 'active' : 'muted-toggle'}`}
+                                    aria-pressed={isEnabled}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelectedPartId(part.id);
+                                      toggleModalityVisibility(normalizedModality);
+                                      if (matchingImage) {
+                                        setSelectedViewName(String(matchingImage.viewName || '').toLowerCase());
+                                        setSelectedImageRef(String(matchingImage.imageRef || matchingImage.imageId || ''));
+                                      }
+                                    }}
+                                  >
+                                    {normalizedModality.toUpperCase()}
+                                  </button>
                                 );
                               })}
                             </div>
