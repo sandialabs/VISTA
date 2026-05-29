@@ -1,4 +1,6 @@
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ProjectConfigurationPanel from '../ProjectConfigurationPanel';
 
@@ -294,6 +296,121 @@ describe('ProjectConfigurationPanel', () => {
     expect(screen.queryByLabelText('Descriptor 3')).not.toBeInTheDocument();
   });
 
+
+  test('persists edits for every configuration field exposed by the configuration tab', async () => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    const { container } = render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByTestId('configuration-sections-grid')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Owner Name'), { target: { value: 'Ada Inspector' } });
+    fireEvent.change(screen.getByLabelText('Owner Email'), { target: { value: 'ada@example.com' } });
+    fireEvent.change(screen.getByLabelText('Active Username'), { target: { value: 'manual-reviewer' } });
+
+    fireEvent.change(screen.getByLabelText('Level 1'), { target: { value: 'batch' } });
+    fireEvent.change(container.querySelector('#hierarchy-level-abbreviation-0'), { target: { value: 'BT' } });
+    fireEvent.change(screen.getByLabelText('Descriptor 1'), { target: { value: 'operator' } });
+    fireEvent.change(container.querySelector('#image-descriptor-abbreviation-0'), { target: { value: 'OP' } });
+
+    fireEvent.click(screen.getByLabelText('Require disposition on submit'));
+    fireEvent.click(screen.getByLabelText('Require measurement for critical defects'));
+    fireEvent.click(screen.getByLabelText('Require second reviewer for rejects'));
+    fireEvent.change(screen.getByLabelText('Accept hotkey'), { target: { value: 'q' } });
+    fireEvent.change(screen.getByLabelText('Reject hotkey'), { target: { value: 'w' } });
+    fireEvent.change(screen.getByLabelText('Help hotkey'), { target: { value: 'e' } });
+
+    fireEvent.click(screen.getByLabelText('Track serial number at batch level'));
+    fireEvent.click(screen.getByLabelText('Organize each batch into sub-batches'));
+    fireEvent.click(screen.getByLabelText('Track serial number at sub-batch level'));
+    fireEvent.click(screen.getByLabelText('Track serial number at part level'));
+
+    fireEvent.click(screen.getByLabelText('Manually choose current project phase'));
+    fireEvent.change(screen.getByLabelText('Manual project phase'), { target: { value: 'reporting' } });
+
+    fireEvent.change(screen.getByLabelText('Image modality label 1'), { target: { value: 'Thermal image' } });
+    fireEvent.change(screen.getByLabelText('Image modality id 1'), { target: { value: 'thermal' } });
+    fireEvent.click(screen.getByLabelText('Image modality calibration required 1'));
+    fireEvent.click(screen.getByLabelText('Image modality example uploaded 1'));
+
+    fireEvent.change(screen.getByLabelText('Defect type name 1'), { target: { value: 'Crack' } });
+    fireEvent.change(screen.getByLabelText('Defect type color 1'), { target: { value: '#123abc' } });
+    fireEvent.change(screen.getByLabelText('Defect type definition 1'), { target: { value: 'Linear fracture' } });
+
+    fireEvent.change(screen.getByLabelText('Part view label 1'), { target: { value: 'Top view' } });
+    fireEvent.change(screen.getByLabelText('Part view id 1'), { target: { value: 'top' } });
+    fireEvent.change(screen.getByLabelText('Part view required modalities 1'), { target: { value: 'thermal' } });
+    fireEvent.change(screen.getByLabelText('Part view required modalities 2'), { target: { value: 'thermal' } });
+    fireEvent.change(screen.getByLabelText('Part view source 1'), { target: { value: 'auto' } });
+
+    fireEvent.change(screen.getByLabelText('Default colormap'), { target: { value: 'magma' } });
+    fireEvent.change(screen.getByLabelText('Anomaly colormap'), { target: { value: 'grayscale' } });
+    fireEvent.click(screen.getByLabelText('Use grayscale base image'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/projects/proj-1/configuration',
+        expect.objectContaining({ method: 'PUT' }),
+      );
+    });
+
+    const putCall = global.fetch.mock.calls.find(
+      ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+    );
+    const savedConfig = JSON.parse(putCall[1].body).config;
+
+    expect(savedConfig).toEqual(expect.objectContaining({
+      project_owner: { name: 'Ada Inspector', email: 'ada@example.com' },
+      current_user: { username: 'manual-reviewer', sso_authenticated: false },
+      process_settings: {
+        require_disposition_on_submit: false,
+        require_measurement_for_critical: true,
+        require_second_reviewer_for_reject: true,
+        configurable_hotkeys: {
+          accept_classification: 'q',
+          reject_classification: 'w',
+          toggle_shortcut_help: 'e',
+        },
+      },
+      serial_number_scheme: {
+        batch_sn_enabled: false,
+        sub_batching_enabled: true,
+        sub_batch_sn_enabled: true,
+        part_sn_enabled: false,
+      },
+      phase_settings: {
+        manual_phase_selection_enabled: true,
+        manual_phase: 'reporting',
+      },
+      display_settings: {
+        default_colormap: 'magma',
+        anomaly_colormap: 'grayscale',
+        grayscale_base_image: false,
+      },
+    }));
+    expect(savedConfig.file_naming_scheme.hierarchy_levels[0]).toEqual({ id: 'batch', label: 'Batch', abbreviation: 'BT' });
+    expect(savedConfig.file_naming_scheme.image_descriptors[0]).toEqual({ id: 'operator', label: 'Operator', abbreviation: 'OP' });
+    expect(savedConfig.image_modalities[0]).toEqual({
+      id: 'thermal',
+      label: 'Thermal image',
+      calibration_required: true,
+      example_image_uploaded: false,
+    });
+    expect(savedConfig.defect_types[0]).toEqual({
+      name: 'Crack',
+      color: '#123abc',
+      definition: 'Linear fracture',
+    });
+    expect(savedConfig.part_views[0]).toEqual({
+      id: 'top',
+      label: 'Top view',
+      required_modalities: ['thermal'],
+      source: 'auto',
+    });
+  });
+
   test('adds backend service diagnostics when project configuration fetch fails', async () => {
     let configRequestCount = 0;
     global.fetch = jest.fn((url) => {
@@ -335,6 +452,58 @@ describe('ProjectConfigurationPanel', () => {
     expect(screen.getByText(/API health: responded at \/api\/health \(200 OK/)).toBeInTheDocument();
     expect(screen.getByText(/Projects list \(Postgres\): responded at \/api\/projects\/ \(200 OK/)).toBeInTheDocument();
     expect(screen.getByText(/Project configuration \(Postgres\): error at \/api\/projects\/proj-1\/configuration \(503 Service Unavailable/)).toBeInTheDocument();
+  });
+
+
+  test('documents downstream implementation status for every saved configuration field', () => {
+    const srcRoot = path.join(process.cwd(), 'src');
+    const collectSource = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === '__tests__') return [];
+        return collectSource(fullPath);
+      }
+      if (!entry.name.endsWith('.js')) return [];
+      if (fullPath.endsWith(path.join('components', 'ProjectConfigurationPanel.js'))) return [];
+      return [fs.readFileSync(fullPath, 'utf8')];
+    }).join('\n');
+
+    const downstreamSource = collectSource(srcRoot);
+    const fieldsWithDownstreamEffects = [
+      'phase_settings',
+      'manual_phase_selection_enabled',
+      'manual_phase',
+      'file_naming_scheme',
+      'configurable_hotkeys',
+      'defect_types',
+    ];
+    fieldsWithDownstreamEffects.forEach((fieldName) => {
+      expect(downstreamSource).toContain(fieldName);
+    });
+
+    const persistedOnlyFields = [
+      'project_owner',
+      'current_user',
+      'serial_number_scheme',
+      'batch_sn_enabled',
+      'sub_batching_enabled',
+      'sub_batch_sn_enabled',
+      'part_sn_enabled',
+      'display_settings',
+      'default_colormap',
+      'anomaly_colormap',
+      'grayscale_base_image',
+      'require_disposition_on_submit',
+      'require_measurement_for_critical',
+      'require_second_reviewer_for_reject',
+      'image_modalities',
+      'calibration_required',
+      'example_image_uploaded',
+      'part_views',
+    ];
+    persistedOnlyFields.forEach((fieldName) => {
+      expect(downstreamSource).not.toContain(fieldName);
+    });
   });
 
   projectTypes.forEach((projectType) => {
