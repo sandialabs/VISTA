@@ -5882,7 +5882,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       setFullscreenCalibrationPromptVisible(true);
       return;
     }
-	    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
 	    setFullscreenCalibrationPromptVisible(false);
 	    setFullscreenBoxActive(false);
 	    setPendingBoxPoint(null);
@@ -5903,7 +5902,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      setFullscreenAnnotationPreview(null);
 	      return;
 	    }
-	    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
 	    setFullscreenMeasureActive(false);
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
@@ -5931,7 +5929,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    setPendingBoxPoint(null);
 	    pendingBoxPointRef.current = null;
 	    setFullscreenAnnotationPreview(null);
-	    setFullscreenBoxActive(false);
 	  };
 
   const commitFullscreenMeasureLine = async (line) => {
@@ -6209,7 +6206,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       : { x: Number(line.x2), y: Number(line.y2) };
 	    setFullscreenMeasureActive(false);
 	    setFullscreenBoxActive(false);
-	    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
 	    setPendingBoxPoint(null);
@@ -6237,7 +6233,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     const anchor = getAnnotationBoxCornerPoints(box)[corner];
     setFullscreenMeasureActive(false);
     setFullscreenBoxActive(false);
-    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
     setPendingMeasurePoint(null);
     pendingMeasurePointRef.current = null;
     setPendingBoxPoint(null);

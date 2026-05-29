@@ -1329,22 +1329,38 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('4.20 mm');
   });
 
-  test('draws and labels bounding boxes in the fullscreen view', async () => {
+  test('preserves fullscreen zoom while drawing repeated bounding boxes', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
-	    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
-	    fireEvent.click(screen.getByAltText('front view'));
-	    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
-	    expect(screen.getByText(/Press and drag to draw a bounding box/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
+    fireEvent.click(screen.getByAltText('front view'));
 
-	    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
-	    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 500 });
-	    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 250 });
-	    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 250, right: 500, bottom: 250 });
-	    fireEvent.mouseDown(fullscreenImage, { clientX: 80, clientY: 40, button: 0 });
-	    fireEvent.mouseMove(fullscreenImage, { clientX: 180, clientY: 100 });
-	    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 5.00 mm'));
-	    fireEvent.mouseUp(fullscreenImage, { clientX: 230, clientY: 120, button: 0 });
+    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
+    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 500 });
+    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 250 });
+    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 250, right: 500, bottom: 250 });
+
+    fireEvent.wheel(fullscreenImage, { deltaY: -80, clientX: 250, clientY: 125 });
+    const zoomLayer = document.querySelector('.inspection-fullscreen-image-zoom-layer');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+    expect(zoomLayer.style.transformOrigin).toBe('50% 50%');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Measure' }));
+    expect(screen.getByRole('button', { name: 'Measure' })).toHaveClass('active');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+    fireEvent.click(screen.getByRole('button', { name: 'Measure' }));
+    expect(screen.getByRole('button', { name: 'Measure' })).not.toHaveClass('active');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+    expect(screen.getByText(/Press and drag to draw a bounding box/i)).toBeInTheDocument();
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+    expect(zoomLayer.style.transformOrigin).toBe('50% 50%');
+
+    fireEvent.mouseDown(fullscreenImage, { clientX: 80, clientY: 40, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, { clientX: 180, clientY: 100 });
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 5.00 mm'));
+    fireEvent.mouseUp(fullscreenImage, { clientX: 230, clientY: 120, button: 0 });
 
     await waitFor(() => {
       const postCall = global.fetch.mock.calls.find((call) => {
@@ -1357,28 +1373,31 @@ describe('InspectionWorkbenchPanel', () => {
       expect(body.image_id).toBe('part-basic-1-image-1');
       expect(body.bbox).toEqual(expect.objectContaining({ x: 80, y: 40, width: 150, height: 80 }));
     });
-	    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 7.50 mm'));
-	    expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Height 4.00 mm');
-	    expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('Width 7.50 mm');
-	    expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active');
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 7.50 mm'));
+    expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Height 4.00 mm');
+    expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('Width 7.50 mm');
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
 
-    const topLeftCorner = await screen.findByLabelText('Reposition topLeft corner for Drawn bounding box');
-    fireEvent.click(topLeftCorner, { clientX: 80, clientY: 40 });
-    expect(screen.queryByTestId('fullscreen-measurement-zoom-lens')).not.toBeInTheDocument();
-    fireEvent.click(fullscreenImage, { clientX: 100, clientY: 60 });
+    fireEvent.mouseDown(fullscreenImage, { clientX: 260, clientY: 130, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, { clientX: 320, clientY: 170 });
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 3.00 mm'));
+    fireEvent.mouseUp(fullscreenImage, { clientX: 340, clientY: 180, button: 0 });
 
     await waitFor(() => {
-      const patchCall = global.fetch.mock.calls.find((call) => {
-        if (!call[0].includes('/annotations/annotation-1') || call[1]?.method !== 'PATCH') return false;
+      const boxPostCalls = global.fetch.mock.calls.filter((call) => {
+        if (!call[0].includes('/annotations') || call[1]?.method !== 'POST') return false;
         const body = JSON.parse(call[1].body);
         return body.geometry?.box;
       });
-      expect(patchCall).toBeDefined();
-      const body = JSON.parse(patchCall[1].body);
-      expect(body.bbox).toEqual(expect.objectContaining({ x: 90, y: 50, width: 140, height: 70 }));
-      expect(body.measurements).toEqual(expect.objectContaining({ width_mm: 7, height_mm: 3.5 }));
+      expect(boxPostCalls).toHaveLength(2);
+      const secondBody = JSON.parse(boxPostCalls[1][1].body);
+      expect(secondBody.bbox).toEqual(expect.objectContaining({ x: 260, y: 130, width: 80, height: 50 }));
     });
-	  });
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
+  });
 
   test('shares source-image annotations across Analyze overlays and saves overlay measurements to the source image', async () => {
     mockWorkbenchFetch({
