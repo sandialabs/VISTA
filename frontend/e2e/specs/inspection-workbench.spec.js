@@ -7,7 +7,47 @@ const pr08ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr08-project
 const pr09ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr09-inspector-modalities-measurements.png');
 const pr11ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr11-project-configuration.png');
 const pr14ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr14-report-normalization-advanced.png');
+const projectDataLayoutScreenshotPath = path.resolve(__dirname, '../../artifacts/project-data-load-images-layout.png');
 const simulatedUsers = ['basic', 'intermediate', 'advanced'];
+
+test.describe('Project Data load images layout', () => {
+  test('places Images to Parts before Batches and keeps upload left of compact export', async ({ page }) => {
+    const { projectId } = await mockInspectionWorkbenchRoutes(page, { type: 'PT1', scenario: 'basic' });
+
+    await page.goto(`/project/${projectId}`, { waitUntil: 'networkidle' });
+    await page.getByRole('tab', { name: 'Project Data' }).click();
+
+    await expect(page.getByRole('tab', { name: 'Load Images' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Images to Parts' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Batches' })).toBeVisible();
+
+    const loadImagesTabBox = await page.getByRole('tab', { name: 'Load Images' }).boundingBox();
+    const imagesToPartsTabBox = await page.getByRole('tab', { name: 'Images to Parts' }).boundingBox();
+    const batchesTabBox = await page.getByRole('tab', { name: 'Batches' }).boundingBox();
+    expect(
+      loadImagesTabBox
+        && imagesToPartsTabBox
+        && batchesTabBox
+        && loadImagesTabBox.x < imagesToPartsTabBox.x
+        && imagesToPartsTabBox.x < batchesTabBox.x
+    ).toBeTruthy();
+
+    await expect(page.getByRole('heading', { name: 'Upload Images' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Export Data' })).toBeVisible();
+    const uploadCardBox = await page.locator('.project-data-upload-first .upload-section').boundingBox();
+    const exportCardBox = await page.locator('.project-data-upload-first .export-section').boundingBox();
+    expect(
+      uploadCardBox
+        && exportCardBox
+        && uploadCardBox.x < exportCardBox.x
+        && uploadCardBox.width > exportCardBox.width
+    ).toBeTruthy();
+
+    await page.locator('.project-data-tab-panel[aria-label="Load Images"]').screenshot({
+      path: projectDataLayoutScreenshotPath,
+    });
+  });
+});
 
 for (const projectType of ['PT1', 'PT2', 'PT3']) {
   for (const simulatedUser of simulatedUsers) {
