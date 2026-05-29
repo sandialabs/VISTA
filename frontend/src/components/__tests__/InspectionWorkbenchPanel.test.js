@@ -1613,6 +1613,47 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
+  test('part summary modality buttons toggle matching images in the view window', async () => {
+    mockWorkbenchFetch({
+      user: 'modality-toggle',
+      batches: [{ id: 'batch-modal', name: 'Batch Modal' }],
+      parts: [
+        {
+          id: 'part-modal-1',
+          batch_id: 'batch-modal',
+          serial_number: 'SN-MODAL-1',
+          display_name: 'Modal Part',
+          review_state: 'in_review',
+          metadata: {
+            configured_views: ['front'],
+            modalities: ['visual', 'thermal'],
+            view_images: { front: 'modal-front-visual.png' },
+            source_images: [
+              { filename: 'modal-front-visual.png', image_id: 'modal-visual-image', side: 'front', modality: 'visual', overlay: false },
+              { filename: 'modal-front-thermal.png', image_id: 'modal-thermal-image', side: 'front', modality: 'thermal', overlay: true },
+            ],
+          },
+        },
+      ],
+      workspaceState: { inspector: { image_enabled: true, modalities: ['visual'], view_name: 'front' } },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getAllByText('Modal Part').length).toBeGreaterThan(0));
+    expect(screen.getAllByAltText('front view')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'THERMAL' }));
+    await waitFor(() => expect(screen.getAllByAltText('front view')).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'VISUAL' }));
+    await waitFor(() => expect(screen.getAllByAltText('front view')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'FRONT' }));
+    await waitFor(() => expect(screen.queryByAltText('front view')).not.toBeInTheDocument());
+  });
+
   test('does not duplicate original front and back images from source_images when view_images exists', async () => {
     mockWorkbenchFetch({
       user: 'dedupe-originals',
