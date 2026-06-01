@@ -10,6 +10,7 @@ RUN microdnf install -y --nodocs \
     gcc \
     gcc-c++ \
     libpq-devel \
+    sqlite-libs \
     git \
     wget \
     ca-certificates \
