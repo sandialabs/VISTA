@@ -695,6 +695,13 @@ async def delete_image(
     if not db_image.deleted_at:
         prev_state = {"deleted_at": None}
         db_image = await crud.soft_delete_image(db, db_image, actor_user_id=actor_user_id, reason=body.reason, retention_days=retention_days)
+        await crud.remove_image_from_inspection_parts(
+            db,
+            project_id,
+            filename=db_image.filename,
+            image_id=db_image.id,
+            updated_by=current_user.email,
+        )
         await crud.create_image_deletion_event(db, image=db_image, actor_user_id=actor_user_id, action="soft_delete", reason=body.reason, previous_state=prev_state)
     if body.force and not db_image.storage_deleted:
         # Future: verify current_user is project owner/admin; placeholder uses membership only.

@@ -17,11 +17,11 @@ test.describe('Project Data load images layout', () => {
     await page.goto(`/project/${projectId}`, { waitUntil: 'networkidle' });
     await page.getByRole('tab', { name: 'Project Data' }).click();
 
-    await expect(page.getByRole('tab', { name: 'Load Images' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Load Images', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('tab', { name: 'Images to Parts' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Batches' })).toBeVisible();
 
-    const loadImagesTabBox = await page.getByRole('tab', { name: 'Load Images' }).boundingBox();
+    const loadImagesTabBox = await page.getByRole('tab', { name: 'Load Images', exact: true }).boundingBox();
     const imagesToPartsTabBox = await page.getByRole('tab', { name: 'Images to Parts' }).boundingBox();
     const batchesTabBox = await page.getByRole('tab', { name: 'Batches' }).boundingBox();
     expect(
@@ -59,7 +59,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         await page.getByRole('tab', { name: 'Project Data' }).click();
 
         await expect(page.getByTestId('project-data-summary')).toBeVisible();
-        await expect(page.getByRole('tab', { name: 'Load Images' })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByRole('tab', { name: 'Load Images', exact: true })).toHaveAttribute('aria-selected', 'true');
         await expect(page.getByRole('tab', { name: 'Batches' })).toBeVisible();
         await expect(page.getByRole('heading', { name: 'Upload Images' })).toBeVisible();
         await expect(page.getByRole('heading', { name: 'Data Validation' })).toBeVisible();
@@ -68,7 +68,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         await expect(page.getByTestId('project-metadata-tree')).toContainText('inspection_profile');
         await page.getByRole('tab', { name: 'Project Data' }).click();
         const summaryBox = await page.getByTestId('project-data-summary').boundingBox();
-        const tabsBox = await page.getByRole('tab', { name: 'Load Images' }).boundingBox();
+        const tabsBox = await page.getByRole('tab', { name: 'Load Images', exact: true }).boundingBox();
         expect(summaryBox && tabsBox && summaryBox.y < tabsBox.y).toBeTruthy();
         await page.getByTestId('request-ingest-validation').click();
         await expect(page.getByTestId('ingest-validation-result')).toContainText('Ingest validation complete');

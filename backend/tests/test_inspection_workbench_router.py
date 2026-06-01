@@ -1735,3 +1735,88 @@ def test_bulk_ingest_supports_progressive_users_with_discrepancy_counters(client
             assert len(parts) == 1
             assert parts[0]["batch_id"] is None
             assert parts[0]["metadata"]["set_number"] == "SET01"
+
+
+def _create_project_for_part_image_tests(client, name="Part Image Project"):
+    headers = {"X-User-Id": "parts-images@example.com", "X-User-Groups": '["parts-images"]'}
+    response = client.post(
+        "/api/projects/",
+        json={"name": name, "description": None, "meta_group_id": "parts-images", "project_type": "PT1"},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"], headers
+
+
+def _upload_part_test_image(client, project_id, headers, filename="part-image.png"):
+    image = Image.new("RGB", (8, 8), (12, 34, 56))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = client.post(
+        f"/api/projects/{project_id}/images",
+        files={"file": (filename, buffer, "image/png")},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_image_assignment_can_move_image_back_to_unassigned(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Unassign image project")
+    uploaded = _upload_part_test_image(client, project_id, headers, "assignable.png")
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-UNASSIGN", "display_name": "Unassign Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_response.status_code == 200, assign_response.text
+
+    unassign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": None},
+        headers=headers,
+    )
+    assert unassign_response.status_code == 200, unassign_response.text
+    assert unassign_response.json()["from_part_id"] == part_id
+    assert unassign_response.json()["to_part_id"] is None
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200
+    assert parts_response.json()[0]["metadata"]["source_images"] == []
+
+
+def test_delete_part_removes_part_without_deleting_images(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Delete part project")
+    uploaded = _upload_part_test_image(client, project_id, headers, "survives-part-delete.png")
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-DELETE", "display_name": "Delete Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+    assign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_response.status_code == 200, assign_response.text
+
+    delete_response = client.delete(f"/api/projects/{project_id}/parts/{part_id}", headers=headers)
+    assert delete_response.status_code == 204, delete_response.text
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200
+    assert parts_response.json() == []
+    images_response = client.get(f"/api/projects/{project_id}/images", headers=headers)
+    assert images_response.status_code == 200
+    assert [image["filename"] for image in images_response.json()] == [uploaded["filename"]]

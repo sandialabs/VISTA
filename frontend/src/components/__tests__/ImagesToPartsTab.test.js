@@ -241,6 +241,80 @@ describe('ImagesToPartsTab', () => {
     });
   });
 
+
+  test('filters unloaded images out of part buckets', () => {
+    render(
+      <ImagesToPartsTab
+        projectId="proj-1"
+        parts={[{
+          id: 'part-1',
+          serial_number: 'SN-001',
+          display_name: 'Part 1',
+          metadata: { source_images: [{ filename: 'unloaded.png', image_id: 'img-unloaded' }] },
+        }]}
+        images={[{ id: 'img-unloaded', filename: 'unloaded.png', deleted_at: '2026-05-29T00:00:00Z' }]}
+      />
+    );
+
+    expect(screen.queryByText('unloaded.png')).not.toBeInTheDocument();
+    expect(screen.getByText('No mapped images.')).toBeInTheDocument();
+  });
+
+  test('drags an image from a part back to unassigned', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    render(
+      <ImagesToPartsTab
+        projectId="proj-1"
+        parts={[{
+          id: 'part-1',
+          serial_number: 'SN-001',
+          display_name: 'Part 1',
+          metadata: { source_images: [{ filename: 'assigned-a.png', image_id: 'img-assigned-a' }] },
+        }]}
+        images={[{ id: 'img-assigned-a', filename: 'assigned-a.png' }]}
+      />
+    );
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'assigned-a.png' }));
+    fireEvent.drop(screen.getByTestId('images-to-parts-unassigned-target'));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: 'assigned-a.png', to_part_id: null }),
+      });
+    });
+    await waitFor(() => expect(screen.getByTestId('images-to-parts-unassigned-target')).toHaveTextContent('assigned-a.png'));
+  });
+
+  test('deletes a part and moves its images to unassigned', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <ImagesToPartsTab
+        projectId="proj-1"
+        parts={[{
+          id: 'part-1',
+          serial_number: 'SN-001',
+          display_name: 'Part 1',
+          metadata: { source_images: [{ filename: 'assigned-a.png', image_id: 'img-assigned-a' }] },
+        }]}
+        images={[{ id: 'img-assigned-a', filename: 'assigned-a.png' }]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete part Part 1' }));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/part-1', { method: 'DELETE' });
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Part 1' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('images-to-parts-unassigned-target')).toHaveTextContent('assigned-a.png'));
+  });
+
   test('toggles inline image thumbnails on and off', () => {
     const { container } = render(
       <ImagesToPartsTab
