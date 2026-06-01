@@ -1008,6 +1008,25 @@ async def update_inspection_part_review_state(
     return _serialize_inspection_part(updated)
 
 
+@router.delete("/projects/{project_id}/parts/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_inspection_part(
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    deleted = await crud.delete_inspection_part(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        deleted_by=current_user.email,
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    return None
+
+
 @router.post(
     "/projects/{project_id}/parts/image-assignments",
     response_model=schemas.InspectionPartImageAssignmentResponse,
@@ -1019,9 +1038,11 @@ async def assign_image_to_part(
     current_user: schemas.User = Depends(get_current_user),
 ):
     await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    target_part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=payload.to_part_id)
-    if not target_part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target part not found")
+    target_part = None
+    if payload.to_part_id:
+        target_part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=payload.to_part_id)
+        if not target_part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target part not found")
 
     all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
     filename = payload.filename.strip()
@@ -1076,22 +1097,23 @@ async def assign_image_to_part(
             "slice_index": image_metadata.get("slice_index"),
         }
 
-    target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
-    target_source_images = target_metadata.get("source_images")
-    target_source_images = target_source_images if isinstance(target_source_images, list) else []
-    target_source_images = [
-        record for record in target_source_images
-        if not (isinstance(record, dict) and str(record.get("filename") or "").strip() == filename)
-    ]
-    target_source_images.append(source_entry)
-    normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
-    await crud.update_inspection_part_metadata(
-        db=db,
-        project_id=project_id,
-        part_id=target_part.id,
-        metadata_patch=normalized_target,
-        updated_by=current_user.email,
-    )
+    if target_part:
+        target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
+        target_source_images = target_metadata.get("source_images")
+        target_source_images = target_source_images if isinstance(target_source_images, list) else []
+        target_source_images = [
+            record for record in target_source_images
+            if not (isinstance(record, dict) and str(record.get("filename") or "").strip() == filename)
+        ]
+        target_source_images.append(source_entry)
+        normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
+        await crud.update_inspection_part_metadata(
+            db=db,
+            project_id=project_id,
+            part_id=target_part.id,
+            metadata_patch=normalized_target,
+            updated_by=current_user.email,
+        )
 
     return schemas.InspectionPartImageAssignmentResponse(
         project_id=project_id,

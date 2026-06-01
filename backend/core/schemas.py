@@ -448,14 +448,14 @@ class InspectionBulkIngestResponse(BaseModel):
 
 class InspectionPartImageAssignmentRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=1024)
-    to_part_id: uuid.UUID
+    to_part_id: Optional[uuid.UUID] = None
 
 
 class InspectionPartImageAssignmentResponse(BaseModel):
     project_id: uuid.UUID
     filename: str
     from_part_id: Optional[uuid.UUID] = None
-    to_part_id: uuid.UUID
+    to_part_id: Optional[uuid.UUID] = None
 
 
 # ImageGroup schemas

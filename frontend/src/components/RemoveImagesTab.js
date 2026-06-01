@@ -86,7 +86,7 @@ function RemoveImagesTab({ projectId, parts = [], images = [], onImagesRemoved, 
         const response = await fetch(`/api/projects/${projectId}/images/${imageId}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reason: 'Removed from Project Data Remove Images tab' }),
+          body: JSON.stringify({ reason: 'Unloaded from Project Data Unload Images tab' }),
         });
         if (!response.ok) throw new Error(`Failed to delete image ${imageId} (${response.status})`);
       }
@@ -94,7 +94,7 @@ function RemoveImagesTab({ projectId, parts = [], images = [], onImagesRemoved, 
       if (setError) setError(null);
       if (onImagesRemoved) await onImagesRemoved();
     } catch (err) {
-      if (setError) setError(err.message || 'Failed to remove selected images');
+      if (setError) setError(err.message || 'Failed to unload selected images');
     } finally {
       setIsRemoving(false);
     }
@@ -108,15 +108,15 @@ function RemoveImagesTab({ projectId, parts = [], images = [], onImagesRemoved, 
   );
 
   return (
-    <div className="project-data-tab-panel" role="tabpanel" aria-label="Remove Images">
+    <div className="project-data-tab-panel" role="tabpanel" aria-label="Unload Images">
       <section className="workbench-panel">
         <header className="workbench-header">
           <div>
-            <h2>Remove Images</h2>
-            <p>Review image hierarchy by part or unassigned, then remove all or filtered subsets.</p>
+            <h2>Unload Images</h2>
+            <p>Review image hierarchy by part or unassigned, then unload all or filtered subsets.</p>
           </div>
           <button type="button" className="btn btn-danger" onClick={removeSelectedImages} disabled={selectedImageIds.size === 0 || isRemoving}>
-            {isRemoving ? 'Removing...' : `Remove Selected (${selectedImageIds.size})`}
+            {isRemoving ? 'Unloading...' : `Unload Selected (${selectedImageIds.size})`}
           </button>
         </header>
 

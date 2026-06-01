@@ -29,7 +29,7 @@ const PROJECT_DATA_TABS = {
   load_images: { label: 'Load Images' },
   images_to_parts: { label: 'Images to Parts' },
   batches: { label: 'Batches' },
-  remove_images: { label: 'Remove Images' },
+  remove_images: { label: 'Unload Images' },
   recently_deleted: { label: 'Recently Deleted' },
 };
 

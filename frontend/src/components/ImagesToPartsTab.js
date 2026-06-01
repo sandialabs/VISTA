@@ -3,7 +3,7 @@ import React, { useMemo, useRef, useState } from 'react';
 function buildImageLookup(images) {
   return (Array.isArray(images) ? images : []).reduce((lookup, image) => {
     const filename = typeof image?.filename === 'string' ? image.filename : '';
-    if (filename) lookup.set(filename, image);
+    if (filename && !image?.deleted_at) lookup.set(filename, image);
     return lookup;
   }, new Map());
 }
@@ -26,14 +26,14 @@ function buildBuckets({ parts, images }) {
     const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
     const filenames = sourceImages
       .map((record) => (typeof record?.filename === 'string' ? record.filename : ''))
-      .filter(Boolean);
+      .filter((filename) => filename && imageLookup.has(filename));
     filenames.forEach((filename) => filenameToPartId.set(filename, part.id));
     return {
       id: part.id,
       serialNumber: part.serial_number,
       displayName: part.display_name || part.serial_number,
       images: sourceImages
-        .map((record) => (typeof record?.filename === 'string' ? buildImageRef(record.filename, imageLookup, record) : null))
+        .map((record) => (typeof record?.filename === 'string' && imageLookup.has(record.filename) ? buildImageRef(record.filename, imageLookup, record) : null))
         .filter(Boolean),
     };
   });
@@ -132,12 +132,12 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
   };
 
   const assignFilenamesToPart = async (filenames, toPartId) => {
-    if (!filenames.length || !toPartId) return;
+    if (!filenames.length) return;
     try {
       for (const filename of filenames) {
         const response = await fetch(`/api/projects/${projectId}/parts/image-assignments`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename, to_part_id: toPartId }),
+          body: JSON.stringify({ filename, to_part_id: toPartId || null }),
         });
         if (!response.ok) throw new Error(`Failed to move image (${response.status})`);
       }
@@ -153,7 +153,10 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
               .sort((left, right) => left.filename.localeCompare(right.filename)),
           };
         }),
-        unassigned: localBuckets.unassigned.filter((image) => !movedSet.has(image.filename)),
+        unassigned: toPartId
+          ? localBuckets.unassigned.filter((image) => !movedSet.has(image.filename))
+          : [...localBuckets.unassigned, ...movedImages.filter((img) => !localBuckets.unassigned.some((existing) => existing.filename === img.filename))]
+            .sort((left, right) => left.filename.localeCompare(right.filename)),
       };
       setLocalBuckets(nextBuckets);
       setSelectedUnassigned((prev) => prev.filter((name) => !movedSet.has(name)));
@@ -168,6 +171,30 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
 
   const handleDropToPart = async (toPartId) => {
     await assignFilenamesToPart(movingFilenames, toPartId);
+  };
+
+  const handleDropToUnassigned = async () => {
+    await assignFilenamesToPart(movingFilenames, null);
+  };
+
+  const handleDeletePart = async (part) => {
+    const confirmed = window.confirm(`Delete ${part.displayName}? Images assigned to this part will move to Unassigned.`);
+    if (!confirmed) return;
+    try {
+      const response = await fetch(`/api/projects/${projectId}/parts/${encodeURIComponent(String(part.id))}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Failed to delete part (${response.status})`);
+      setLocalBuckets((previous) => ({
+        partBuckets: previous.partBuckets.filter((entry) => entry.id !== part.id),
+        unassigned: [...previous.unassigned, ...part.images]
+          .filter((image, index, all) => all.findIndex((candidate) => candidate.filename === image.filename) === index)
+          .sort((left, right) => left.filename.localeCompare(right.filename)),
+      }));
+      setSelectedUnassigned([]);
+      if (onAssignmentsChanged) await onAssignmentsChanged();
+      if (setError) setError(null);
+    } catch (err) {
+      if (setError) setError(err.message || 'Failed to delete part');
+    }
   };
 
   const handleChipDragStart = (filename) => {
@@ -255,7 +282,7 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
             <span className="thumbnail-switch-track" aria-hidden="true"><span className="thumbnail-switch-thumb" /></span><span>Thumbnails</span></label></header>
 
         <div className="images-to-parts-grid">
-          <div className="images-to-parts-column" onDragOver={(event) => event.preventDefault()}>
+          <div className="images-to-parts-column" onDragOver={(event) => event.preventDefault()} onDrop={handleDropToUnassigned} data-testid="images-to-parts-unassigned-target">
             <div className="unassigned-header-row"><h3>Unassigned</h3><div className="unassigned-actions"><button type="button" className="btn-secondary btn-sm" onClick={() => setSelectedUnassigned(localBuckets.unassigned.map((img) => img.filename))}>All</button><button type="button" className="btn-secondary btn-sm" onClick={() => setShowSomeModal(true)}>Some</button><button type="button" className="btn-secondary btn-sm" onClick={() => setSelectedUnassigned([])}>None</button></div></div>
             {localBuckets.unassigned.length === 0 ? <p className="muted">No unassigned images.</p> : null}
             <div className="unassigned-selection-surface" onMouseDown={startDragSelect} ref={unassignedRef}>
@@ -268,7 +295,10 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
             <div className="parts-column-header"><h3>Parts</h3><button type="button" className="btn-secondary btn-sm" onClick={handleCreatePart}>Create new part</button></div>
             {localBuckets.partBuckets.map((part) => (
               <div key={part.id} className="images-to-parts-part-card" onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropToPart(part.id)} data-testid={`images-to-parts-target-${part.id}`}>
-                <h3><button type="button" className="part-heading-button" onClick={() => openPartModal(part)}>{part.displayName}</button></h3>
+                <div className="part-card-header-row">
+                  <h3><button type="button" className="part-heading-button" onClick={() => openPartModal(part)}>{part.displayName}</button></h3>
+                  <button type="button" className="part-delete-button" onClick={() => handleDeletePart(part)} aria-label={`Delete part ${part.displayName}`} title="Delete part">×</button>
+                </div>
                 <p className="muted">Serial: {part.serialNumber}</p>
                 <div className="image-part-chip-list">{part.images.length === 0 ? <p className="muted">No mapped images.</p> : part.images.map((img) => renderImageChip(img, false))}</div>
               </div>
