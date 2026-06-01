@@ -866,6 +866,7 @@ def test_project_configuration_round_trip_supports_progressive_users(client, pro
                     "default_colormap": "grayscale",
                     "anomaly_colormap": "viridis",
                     "grayscale_base_image": True,
+                    "simulation_speed_at_impact": 0.5,
                 },
             },
         },
@@ -914,6 +915,7 @@ def test_project_configuration_round_trip_supports_progressive_users(client, pro
                     "default_colormap": "grayscale",
                     "anomaly_colormap": "magma",
                     "grayscale_base_image": True,
+                    "simulation_speed_at_impact": 0.2,
                 },
             },
         },
@@ -975,6 +977,7 @@ def test_project_configuration_round_trip_supports_progressive_users(client, pro
                     "default_colormap": "grayscale",
                     "anomaly_colormap": "turbo",
                     "grayscale_base_image": False,
+                    "simulation_speed_at_impact": 0.1,
                 },
             },
         },
@@ -1009,6 +1012,7 @@ def test_project_configuration_round_trip_supports_progressive_users(client, pro
             {"name": f"DefectType2_{project_type}", "color": "#f59e0b", "definition": ""},
             {"name": f"DefectType3_{project_type}", "color": "#3b82f6", "definition": ""},
         ]
+        assert initial_config["display_settings"]["simulation_speed_at_impact"] == 0.25
 
         save_resp = client.put(
             f"/api/projects/{project_id}/configuration",
@@ -1175,7 +1179,12 @@ def test_project_configuration_clone_supports_progressive_users(client, project_
                 "require_second_reviewer_for_reject": index == 3,
                 "configurable_hotkeys": scenario["hotkeys"],
             },
-            "display_settings": {"default_colormap": "grayscale", "anomaly_colormap": "viridis", "grayscale_base_image": index < 3},
+            "display_settings": {
+                "default_colormap": "grayscale",
+                "anomaly_colormap": "viridis",
+                "grayscale_base_image": index < 3,
+                "simulation_speed_at_impact": 0.25,
+            },
         }
         save_resp = client.put(
             f"/api/projects/{source_project_id}/configuration",
