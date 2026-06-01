@@ -3,6 +3,7 @@
 FROM registry.access.redhat.com/ubi9/ubi-minimal AS base
 
 # Install Python 3.11, Node.js, and system dependencies
+# Explicit sqlite-libs keeps Python's _sqlite3 extension aligned with the UBI runtime.
 RUN microdnf install -y --nodocs \
     python3.11 \
     python3.11-pip \
@@ -10,6 +11,7 @@ RUN microdnf install -y --nodocs \
     gcc \
     gcc-c++ \
     libpq-devel \
+    sqlite-libs \
     git \
     wget \
     ca-certificates \
@@ -39,6 +41,9 @@ RUN microdnf install -y --nodocs \
 # Create symlinks for python
 RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# Fail image builds early if Python cannot load the OS SQLite runtime.
+RUN python3 -c "import sqlite3; print(f'SQLite runtime: {sqlite3.sqlite_version}')"
 
 # Create a Python virtual environment
 RUN python3 -m venv /opt/venv
