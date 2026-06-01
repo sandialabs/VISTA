@@ -11,6 +11,14 @@ function normalizeLower(value) {
   return (value || '').trim().toLowerCase();
 }
 
+function normalizeSimulationSpeedAtImpact(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 0.25;
+  }
+  return Math.min(1, Math.max(0.01, numericValue));
+}
+
 async function parseJsonSafely(response) {
   try {
     return await response.json();
@@ -107,7 +115,11 @@ function getCloneConfigOrThrow(cloneResponseData) {
     typeof clonedConfig.process_settings.configurable_hotkeys.toggle_shortcut_help === 'string' &&
     typeof clonedConfig.display_settings.default_colormap === 'string' &&
     typeof clonedConfig.display_settings.anomaly_colormap === 'string' &&
-    typeof clonedConfig.display_settings.grayscale_base_image === 'boolean';
+    typeof clonedConfig.display_settings.grayscale_base_image === 'boolean' &&
+    (
+      clonedConfig.display_settings.simulation_speed_at_impact === undefined ||
+      typeof clonedConfig.display_settings.simulation_speed_at_impact === 'number'
+    );
 
   if (!hasValidSettingsFields) {
     throw new Error('Failed to copy project configuration (invalid config settings fields)');
@@ -119,7 +131,14 @@ function getCloneConfigOrThrow(cloneResponseData) {
       (partView) => !partView.source || partView.source === 'manual' || partView.source === 'auto',
     ) &&
     allowedColormaps.has(clonedConfig.display_settings.default_colormap) &&
-    allowedColormaps.has(clonedConfig.display_settings.anomaly_colormap);
+    allowedColormaps.has(clonedConfig.display_settings.anomaly_colormap) &&
+    (
+      clonedConfig.display_settings.simulation_speed_at_impact === undefined ||
+      (
+        clonedConfig.display_settings.simulation_speed_at_impact >= 0.01 &&
+        clonedConfig.display_settings.simulation_speed_at_impact <= 1
+      )
+    );
 
   if (!hasValidDomainFields) {
     throw new Error('Failed to copy project configuration (invalid config domain fields)');
@@ -229,6 +248,11 @@ function validateConfiguration(config) {
     errors.push('Hotkeys must be unique across accept, reject, and help actions.');
   }
 
+  const simulationSpeedAtImpact = Number(config.display_settings?.simulation_speed_at_impact);
+  if (!Number.isFinite(simulationSpeedAtImpact) || simulationSpeedAtImpact < 0.01 || simulationSpeedAtImpact > 1) {
+    errors.push('Speed at impact must be between 0.01x and 1x.');
+  }
+
   return errors;
 }
 
@@ -250,6 +274,7 @@ const EMPTY_CONFIG = {
     default_colormap: 'grayscale',
     anomaly_colormap: 'viridis',
     grayscale_base_image: true,
+    simulation_speed_at_impact: 0.25,
   },
   serial_number_scheme: {
     batch_sn_enabled: true,
@@ -331,6 +356,15 @@ function normalizePhaseSettings(config) {
   };
 }
 
+function normalizeDisplaySettings(config) {
+  const candidate = config?.display_settings || {};
+  return {
+    ...EMPTY_CONFIG.display_settings,
+    ...candidate,
+    simulation_speed_at_impact: normalizeSimulationSpeedAtImpact(candidate.simulation_speed_at_impact),
+  };
+}
+
 function normalizeProjectConfiguration(config, projectType) {
   const incomingConfig = config && typeof config === 'object' ? config : {};
   const defectTypes = Array.isArray(incomingConfig.defect_types)
@@ -341,6 +375,7 @@ function normalizeProjectConfiguration(config, projectType) {
     ...EMPTY_CONFIG,
     ...incomingConfig,
     defect_types: defectTypes,
+    display_settings: normalizeDisplaySettings(incomingConfig),
     serial_number_scheme: normalizeSerialNumberScheme(incomingConfig),
     phase_settings: normalizePhaseSettings(incomingConfig),
     file_naming_scheme: normalizeFileNamingScheme(incomingConfig),
@@ -528,6 +563,7 @@ function ProjectConfigurationPanel({
           ...previous,
           ...payload.config,
           serial_number_scheme: normalizeSerialNumberScheme(payload.config),
+          display_settings: normalizeDisplaySettings(payload.config),
           phase_settings: normalizePhaseSettings(payload.config),
           file_naming_scheme: normalizeFileNamingScheme(payload.config),
         }));
@@ -718,6 +754,7 @@ function ProjectConfigurationPanel({
         ...EMPTY_CONFIG,
         ...clonedConfig,
         serial_number_scheme: normalizeSerialNumberScheme(clonedConfig),
+        display_settings: normalizeDisplaySettings(clonedConfig),
         phase_settings: normalizePhaseSettings(clonedConfig),
         file_naming_scheme: normalizeFileNamingScheme(clonedConfig),
       });
@@ -1345,6 +1382,30 @@ function ProjectConfigurationPanel({
               />
               Use grayscale base image
             </label>
+            <label htmlFor="simulation-speed-at-impact">Speed at impact</label>
+            <input
+              id="simulation-speed-at-impact"
+              aria-label="Speed at impact"
+              type="number"
+              min="0.01"
+              max="1"
+              step="0.01"
+              value={config.display_settings?.simulation_speed_at_impact ?? 0.25}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setConfig((previous) => ({
+                  ...previous,
+                  display_settings: {
+                    ...previous.display_settings,
+                    simulation_speed_at_impact: nextValue === '' ? '' : Number(nextValue),
+                  },
+                }));
+              }}
+            />
+            <p className="muted">
+              Playback multiplier used at and beyond the first floor impact. Use 1x for real-time playback or a
+              smaller value, such as 0.25x, to slow the impact sequence.
+            </p>
           </section>
 
           <section className="part-detail-panel" aria-label="Copy configuration">
