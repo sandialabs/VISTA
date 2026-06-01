@@ -41,7 +41,6 @@ function makeConfig(projectType, syntheticUser) {
       default_colormap: complexity > 1 ? 'magma' : 'grayscale',
       anomaly_colormap: 'viridis',
       grayscale_base_image: true,
-      simulation_speed_at_impact: 0.25,
     },
     serial_number_scheme: {
       batch_sn_enabled: true,
@@ -347,7 +346,6 @@ describe('ProjectConfigurationPanel', () => {
     fireEvent.change(screen.getByLabelText('Default colormap'), { target: { value: 'magma' } });
     fireEvent.change(screen.getByLabelText('Anomaly colormap'), { target: { value: 'grayscale' } });
     fireEvent.click(screen.getByLabelText('Use grayscale base image'));
-    fireEvent.change(screen.getByLabelText('Speed at impact'), { target: { value: '0.15' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
@@ -390,7 +388,6 @@ describe('ProjectConfigurationPanel', () => {
         default_colormap: 'magma',
         anomaly_colormap: 'grayscale',
         grayscale_base_image: false,
-        simulation_speed_at_impact: 0.15,
       },
     }));
     expect(savedConfig.file_naming_scheme.hierarchy_levels[0]).toEqual({ id: 'batch', label: 'Batch', abbreviation: 'BT' });

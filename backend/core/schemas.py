@@ -337,15 +337,6 @@ class InspectionProjectDisplaySettingsConfig(BaseModel):
     default_colormap: str = Field(default="grayscale", min_length=1, max_length=64)
     anomaly_colormap: str = Field(default="viridis", min_length=1, max_length=64)
     grayscale_base_image: bool = True
-    simulation_speed_at_impact: float = Field(
-        default=0.25,
-        ge=0.01,
-        le=1.0,
-        description=(
-            "Playback speed multiplier used at and beyond the first floor impact; "
-            "1.0 keeps real-time display speed and lower values slow the simulation down."
-        ),
-    )
 
 
 class InspectionProjectPhaseSettingsConfig(BaseModel):

@@ -318,7 +318,6 @@ def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
             "default_colormap": "grayscale",
             "anomaly_colormap": "viridis",
             "grayscale_base_image": True,
-            "simulation_speed_at_impact": 0.25,
         },
         "phase_settings": {
             "manual_phase_selection_enabled": False,
@@ -349,20 +348,6 @@ def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
             ],
         },
     }
-
-
-def _resolve_project_configuration(raw_config: Optional[dict], project_type: Optional[str] = "PT1") -> dict:
-    """Merge persisted project configuration with current defaults, including nested settings."""
-    default_config = _default_project_configuration(project_type)
-    if not isinstance(raw_config, dict):
-        return default_config
-    resolved = dict(raw_config)
-    for nested_key in ("process_settings", "display_settings", "phase_settings", "interface_layout"):
-        default_nested = default_config.get(nested_key)
-        raw_nested = raw_config.get(nested_key)
-        if isinstance(default_nested, dict) and isinstance(raw_nested, dict):
-            resolved[nested_key] = {**default_nested, **raw_nested}
-    return resolved
 
 
 def _decode_slice_image_payload(value: str) -> bytes:
@@ -1613,8 +1598,9 @@ async def get_project_configuration(
         project_id=project_id,
         key=PROJECT_CONFIGURATION_KEY,
     )
-    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else None
-    resolved_config = _resolve_project_configuration(raw_config, project.project_type)
+    default_config = _default_project_configuration(project.project_type)
+    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else default_config
+    resolved_config = dict(raw_config)
     interface_layout = resolved_config.get("interface_layout")
     has_project_default_layout = (
         isinstance(interface_layout, dict)
@@ -1656,7 +1642,7 @@ async def update_project_configuration(
         ),
         created_by=current_user.email,
     )
-    persisted = _resolve_project_configuration(updated.value, project.project_type)
+    persisted = updated.value if isinstance(updated.value, dict) else _default_project_configuration(project.project_type)
     return {
         "project_id": project_id,
         "config": persisted,
@@ -1680,8 +1666,12 @@ async def save_project_default_interface_layout(
         project_id=project_id,
         key=PROJECT_CONFIGURATION_KEY,
     )
-    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else None
-    config = _resolve_project_configuration(raw_config, project.project_type)
+    default_config = _default_project_configuration(project.project_type)
+    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else default_config
+    config = {
+        **default_config,
+        **raw_config,
+    }
     config["interface_layout"] = {
         "default_model": _normalize_layout_model(payload.layout_model),
     }
@@ -1694,7 +1684,7 @@ async def save_project_default_interface_layout(
         ),
         created_by=current_user.email,
     )
-    persisted = _resolve_project_configuration(updated.value, project.project_type)
+    persisted = updated.value if isinstance(updated.value, dict) else _default_project_configuration(project.project_type)
     return {
         "project_id": project_id,
         "config": persisted,
@@ -1770,9 +1760,10 @@ async def clone_project_configuration(
         project_id=payload.source_project_id,
         key=PROJECT_CONFIGURATION_KEY,
     )
-    source_config = _resolve_project_configuration(
-        source_metadata.value if source_metadata and isinstance(source_metadata.value, dict) else None,
-        source_project.project_type,
+    source_config = (
+        source_metadata.value
+        if source_metadata and isinstance(source_metadata.value, dict)
+        else _default_project_configuration(source_project.project_type)
     )
     updated = await crud.create_or_update_project_metadata(
         db=db,
