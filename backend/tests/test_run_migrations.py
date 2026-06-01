@@ -15,11 +15,16 @@ def test_parse_head_revisions_extracts_revision_tokens() -> None:
 
 
 def test_parse_missing_revision_extracts_alembic_error_token() -> None:
-    stderr = "FAILED: Can't locate revision identified by 'removed_noop_rev'"
-    assert run_migrations._parse_missing_revision(stderr) == "removed_noop_rev"
+    output = "FAILED: Can't locate revision identified by 'removed_noop_rev'"
+    assert run_migrations._parse_missing_revision(output) == "removed_noop_rev"
 
 
-def test_run_merges_multiple_heads_then_upgrades(monkeypatch) -> None:
+def test_combined_output_includes_stdout_and_stderr() -> None:
+    result = _cp(stdout="stdout failure", stderr="stderr failure")
+    assert run_migrations._combined_output(result) == "stdout failure\nstderr failure"
+
+
+def test_run_upgrades_heads_without_generating_runtime_merge(monkeypatch) -> None:
     calls: list[tuple[str, ...]] = []
 
     def fake_run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -35,9 +40,7 @@ def test_run_merges_multiple_heads_then_upgrades(monkeypatch) -> None:
     assert rc == 0
     assert calls == [
         ("heads",),
-        ("merge", "-m", "auto-merge concurrent heads", "rev_a", "rev_b"),
-        ("heads",),
-        ("upgrade", "head"),
+        ("upgrade", "heads"),
     ]
 
 
@@ -96,6 +99,37 @@ def test_run_repairs_missing_metadata_only_revision_then_retries(monkeypatch, ca
         ("upgrade", "head"),
     ]
     assert "WARNING:" in capsys.readouterr().err
+
+
+def test_run_repairs_missing_revision_reported_on_stdout(monkeypatch) -> None:
+    calls: list[tuple[str, ...]] = []
+    repairs: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_run(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args == ("heads",):
+            return _cp(stdout="rev_present (head)\n")
+        if args == ("upgrade", "head") and len([call for call in calls if call == args]) == 1:
+            return _cp(returncode=255, stdout="FAILED: Can't locate revision identified by 'stdout_removed_rev'")
+        return _cp()
+
+    def fake_repair(missing_revision: str, local_heads: list[str]) -> bool:
+        repairs.append((missing_revision, tuple(local_heads)))
+        return True
+
+    monkeypatch.setattr(run_migrations, "_run_alembic_command", fake_run)
+    monkeypatch.setattr(run_migrations, "_repair_missing_metadata_only_revision", fake_repair)
+
+    rc = run_migrations.run()
+
+    assert rc == 0
+    assert repairs == [("stdout_removed_rev", ("rev_present",))]
+    assert calls == [
+        ("heads",),
+        ("upgrade", "head"),
+        ("heads",),
+        ("upgrade", "head"),
+    ]
 
 
 def test_run_does_not_retry_missing_revision_when_schema_diff_blocks_repair(monkeypatch) -> None:
