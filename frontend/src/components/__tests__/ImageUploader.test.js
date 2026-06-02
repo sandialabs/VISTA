@@ -122,6 +122,111 @@ describe('ImageUploader', () => {
     });
   });
 
+
+
+  describe('S3 file loading', () => {
+    test('lists S3 files and imports the selected files', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            bucket: 'source-bucket',
+            prefix: 'incoming',
+            objects: [
+              { key: 'incoming/a.png', filename: 'a.png', size: 12 },
+              { key: 'incoming/b.png', filename: 'b.png', size: 34 },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            imported: [{ id: 'img-a', filename: 'a.png' }],
+            failed: [],
+          }),
+        });
+      const { props } = renderUploader();
+
+      fireEvent.change(screen.getByLabelText('S3 URL (Optional)'), {
+        target: { value: 's3://source-bucket/incoming' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /load files from s3/i }));
+
+      expect(await screen.findByTestId('s3-file-picker')).toBeInTheDocument();
+      expect(screen.getByText('a.png')).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText(/b\.png/i));
+      fireEvent.click(screen.getByRole('button', { name: /load selected s3 files/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(fetchSpy.mock.calls[0][0]).toBe('/api/projects/proj-1/s3/list');
+      expect(JSON.parse(fetchSpy.mock.calls[0][1].body)).toEqual({ s3_url: 's3://source-bucket/incoming' });
+      expect(fetchSpy.mock.calls[1][0]).toBe('/api/projects/proj-1/s3/import');
+      expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).toEqual({
+        s3_url: 's3://source-bucket/incoming',
+        keys: ['incoming/a.png'],
+        per_file_metadata: {},
+        group_identifiers: {},
+      });
+      expect(props.onUploadComplete).toHaveBeenCalledWith([{ id: 'img-a', filename: 'a.png' }]);
+      expect(props.setError).toHaveBeenCalledWith(null);
+    });
+
+    test('loads S3 hierarchy filenames with extracted metadata and ingest payload', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            objects: [
+              {
+                key: 'incoming/D1001_LOT01_SET01_SN0001_front_visual_false.jpg',
+                filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg',
+                size: 12,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            imported: [{ id: 'img-front', filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg' }],
+            failed: [],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }),
+        });
+
+      renderUploader();
+      fireEvent.change(screen.getByLabelText('S3 URL (Optional)'), {
+        target: { value: 's3://source-bucket/incoming' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /load files from s3/i }));
+
+      await screen.findByTestId('s3-file-picker');
+      await waitFor(() => expect(screen.getByLabelText('Delimiter')).toHaveValue('_'));
+      fireEvent.click(screen.getByRole('button', { name: /load selected s3 files/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      expect(JSON.parse(fetchSpy.mock.calls[1][1].body).per_file_metadata).toEqual({
+        'incoming/D1001_LOT01_SET01_SN0001_front_visual_false.jpg': {
+          design_number: 'D1001',
+          lot_number: 'LOT01',
+          set_number: 'SET01',
+          serial_number: 'SN0001',
+          side: 'front',
+          modality: 'visual',
+          overlay: false,
+        },
+      });
+      expect(fetchSpy.mock.calls[2][0]).toBe('/api/projects/proj-1/ingest');
+      expect(JSON.parse(fetchSpy.mock.calls[2][1].body).unassigned_parts[0]).toEqual(expect.objectContaining({
+        serial_number: 'SN0001',
+        display_name: 'D1001 LOT01 SET01 SN0001',
+      }));
+    });
+  });
+
   describe('Load Test Data', () => {
     test.each([
       ['PT1', 16, 4],

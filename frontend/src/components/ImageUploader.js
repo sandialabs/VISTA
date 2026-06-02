@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import FilenameMetadataExtractor from './FilenameMetadataExtractor';
 
 const CONCURRENT_UPLOADS = 6;
+const S3_IMPORT_LIMIT = 100;
 const HIERARCHY_KEYS = [
   'design_number',
   'lot_number',
@@ -210,7 +211,17 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
   const [loadingTestData, setLoadingTestData] = useState(false);
   const [testDataResult, setTestDataResult] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
+  const [s3Url, setS3Url] = useState('');
+  const [s3Objects, setS3Objects] = useState([]);
+  const [selectedS3Keys, setSelectedS3Keys] = useState([]);
+  const [loadingS3Files, setLoadingS3Files] = useState(false);
+  const [importingS3Files, setImportingS3Files] = useState(false);
+  const [s3PickerOpen, setS3PickerOpen] = useState(false);
   const cancelledRef = useRef(false);
+
+  const extractorPreviewFiles = selectedFiles.length > 0
+    ? selectedFiles
+    : s3Objects.map((object) => ({ name: object.filename || object.key }));
 
   const handleExtractorChange = useCallback((config) => {
     setExtractorConfig(config);
@@ -376,6 +387,189 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setUploading(false);
   };
 
+  const getMergedMetadataForName = useCallback((filename, manualMetadata) => {
+    const extractedMetadata = extractorConfig.extractMetadata(filename);
+    const mergedMetadata = (extractedMetadata || manualMetadata)
+      ? { ...(extractedMetadata || {}), ...(manualMetadata || {}) }
+      : null;
+    const hierarchyMetadata = normalizeHierarchyMetadata(mergedMetadata);
+    return hierarchyMetadata
+      ? { ...mergedMetadata, ...hierarchyMetadata }
+      : mergedMetadata;
+  }, [extractorConfig]);
+
+  const parseManualMetadata = () => {
+    if (!uploadMetadata.trim()) return null;
+    try {
+      return JSON.parse(uploadMetadata);
+    } catch (err) {
+      setError('Invalid JSON format for metadata.');
+      return undefined;
+    }
+  };
+
+  const handleLoadS3Files = async () => {
+    if (!s3Url.trim()) {
+      setError('Please specify an S3 URL.');
+      return;
+    }
+    setLoadingS3Files(true);
+    setS3Objects([]);
+    setSelectedS3Keys([]);
+    setS3PickerOpen(false);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/s3/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ s3_url: s3Url.trim() }),
+      });
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json();
+          detail = payload?.detail || detail;
+        } catch (parseError) {
+          detail = response.statusText || detail;
+        }
+        throw new Error(detail);
+      }
+      const payload = await response.json();
+      const objects = payload.objects || [];
+      setS3Objects(objects);
+      setSelectedS3Keys(objects.map((object) => object.key).slice(0, S3_IMPORT_LIMIT));
+      setS3PickerOpen(true);
+      setError(objects.length ? null : 'No supported files were found at that S3 URL.');
+    } catch (err) {
+      const detail = err?.message ? ` ${err.message}` : '';
+      setError(`Failed to load files from S3.${detail}`);
+    } finally {
+      setLoadingS3Files(false);
+    }
+  };
+
+  const handleToggleS3Key = (key) => {
+    setSelectedS3Keys((current) => (
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key].slice(0, S3_IMPORT_LIMIT)
+    ));
+  };
+
+  const handleToggleAllS3Keys = () => {
+    setSelectedS3Keys((current) => (
+      current.length === s3Objects.length
+        ? []
+        : s3Objects.map((object) => object.key).slice(0, S3_IMPORT_LIMIT)
+    ));
+  };
+
+  const handleImportS3Files = async () => {
+    if (selectedS3Keys.length === 0) {
+      setError('Please choose at least one S3 file to load.');
+      return;
+    }
+    if (!extractorConfig.isValid) {
+      setError('Filename metadata extractor has errors. Please fix them before loading S3 files.');
+      return;
+    }
+    const manualMetadata = parseManualMetadata();
+    if (manualMetadata === undefined) return;
+
+    setImportingS3Files(true);
+    setUploadProgress({ completed: 0, failed: 0, total: selectedS3Keys.length });
+    try {
+      const selectedObjects = s3Objects.filter((object) => selectedS3Keys.includes(object.key));
+      const perFileMetadata = {};
+      const groupIdentifiers = {};
+      selectedObjects.forEach((object) => {
+        const metadataForUpload = getMergedMetadataForName(object.filename, manualMetadata);
+        if (metadataForUpload) {
+          perFileMetadata[object.key] = metadataForUpload;
+        }
+        const extractedMetadata = extractorConfig.extractMetadata(object.filename);
+        if (groupKey && extractedMetadata && extractedMetadata[groupKey]) {
+          groupIdentifiers[object.key] = extractedMetadata[groupKey];
+        }
+      });
+
+      const response = await fetch(`/api/projects/${projectId}/s3/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          s3_url: s3Url.trim(),
+          keys: selectedS3Keys,
+          per_file_metadata: perFileMetadata,
+          group_identifiers: groupIdentifiers,
+        }),
+      });
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json();
+          detail = payload?.detail || detail;
+        } catch (parseError) {
+          detail = response.statusText || detail;
+        }
+        throw new Error(detail);
+      }
+      const payload = await response.json();
+      const imported = payload.imported || [];
+      const failed = payload.failed || [];
+      setUploadProgress({ completed: imported.length + failed.length, failed: failed.length, total: selectedS3Keys.length });
+
+      let ingestError = null;
+      const uploadedRecords = selectedObjects
+        .map((object) => {
+          const image = imported.find((item) => item.metadata?.source_s3_key === object.key)
+            || imported.find((item) => item.filename === object.filename);
+          if (!image) return null;
+          return {
+            image,
+            filename: object.filename,
+            metadata: perFileMetadata[object.key] || {},
+          };
+        })
+        .filter(Boolean);
+      const ingestPayload = buildInspectionPartIngestPayload(uploadedRecords);
+      const partCount = ingestPayload.batches.reduce((acc, batch) => acc + batch.parts.length, 0)
+        + ingestPayload.unassigned_parts.length;
+      if (partCount > 0) {
+        try {
+          const ingestResponse = await fetch(`/api/projects/${projectId}/ingest`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ingestPayload),
+          });
+          if (!ingestResponse.ok) {
+            throw new Error(`HTTP ${ingestResponse.status}`);
+          }
+        } catch (err) {
+          ingestError = err;
+          console.error('Error ingesting S3-loaded images as inspection parts:', err);
+        }
+      }
+
+      if (imported.length > 0 && onUploadComplete) {
+        onUploadComplete(imported);
+      }
+      if (failed.length > 0) {
+        setError(`S3 load complete: ${imported.length} succeeded, ${failed.length} failed out of ${selectedS3Keys.length}.`);
+      } else if (ingestError) {
+        setError('S3 files loaded, but parts could not be created from filename metadata.');
+      } else {
+        setError(null);
+      }
+      setS3PickerOpen(false);
+      setSelectedS3Keys([]);
+    } catch (err) {
+      const detail = err?.message ? ` ${err.message}` : '';
+      setError(`Failed to import selected S3 files.${detail}`);
+    } finally {
+      setImportingS3Files(false);
+      setUploadProgress(null);
+    }
+  };
+
   const handleLoadTestData = async () => {
     setLoadingTestData(true);
     setTestDataResult(null);
@@ -447,8 +641,88 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
             />
           </div>
 
+          <div className="form-group" style={{ marginTop: '16px' }}>
+            <label htmlFor="s3-url-input">S3 URL (Optional)</label>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input
+                id="s3-url-input"
+                type="text"
+                className="form-control"
+                placeholder="s3://bucket/path/to/files/"
+                value={s3Url}
+                onChange={(e) => setS3Url(e.target.value)}
+                disabled={uploading || loadingTestData || loadingS3Files || importingS3Files}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleLoadS3Files}
+                disabled={uploading || loadingTestData || loadingS3Files || importingS3Files}
+              >
+                {loadingS3Files ? 'Loading S3 Files...' : 'Load Files from S3'}
+              </button>
+            </div>
+            <small className="form-text">
+              Enter an s3:// bucket or prefix, then choose which files to load into this project.
+            </small>
+          </div>
+
+          {s3PickerOpen && (
+            <div className="card" style={{ margin: '12px 0', border: '1px solid #dee2e6' }} data-testid="s3-file-picker">
+              <div className="card-header">
+                <h3 style={{ margin: 0 }}>Choose S3 Files</h3>
+              </div>
+              <div className="card-content">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span>{selectedS3Keys.length} / {s3Objects.length} selected</span>
+                  <button type="button" className="btn btn-secondary" onClick={handleToggleAllS3Keys}>
+                    {selectedS3Keys.length === s3Objects.length ? 'Clear Selection' : 'Select All'}
+                  </button>
+                </div>
+                <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid #e9ecef', borderRadius: '4px' }}>
+                  {s3Objects.map((object) => (
+                    <label
+                      key={object.key}
+                      style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '8px', borderBottom: '1px solid #f1f3f5' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedS3Keys.includes(object.key)}
+                        onChange={() => handleToggleS3Key(object.key)}
+                      />
+                      <span style={{ flex: 1 }}>
+                        <strong>{object.filename}</strong>
+                        <br />
+                        <small>{object.key} · {object.size || 0} bytes</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ marginTop: '12px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    onClick={handleImportS3Files}
+                    disabled={importingS3Files || selectedS3Keys.length === 0 || !extractorConfig.isValid}
+                  >
+                    {importingS3Files ? 'Loading Selected S3 Files...' : 'Load Selected S3 Files'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ marginLeft: '8px' }}
+                    onClick={() => setS3PickerOpen(false)}
+                    disabled={importingS3Files}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <FilenameMetadataExtractor
-            files={selectedFiles}
+            files={extractorPreviewFiles}
             onConfigChange={handleExtractorChange}
             fileNamingScheme={projectConfiguration?.file_naming_scheme}
           />
