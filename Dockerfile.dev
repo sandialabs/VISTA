@@ -62,6 +62,10 @@ COPY ./backend /app/backend
 COPY ./test_toolbox /app/test_toolbox
 COPY ./test /app/test
 
+# Backend tests validate frontend npm scripts, so keep package metadata
+# available in the backend-dev image even when only /app/backend is mounted.
+COPY ./frontend/package.json ./frontend/package-lock.json /app/frontend/
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
