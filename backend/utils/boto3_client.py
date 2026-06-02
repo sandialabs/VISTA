@@ -244,6 +244,136 @@ async def upload_file_to_s3(
         })
         return False
 
+
+async def list_s3_objects(bucket_name: str, prefix: str = "", max_keys: int = 1000) -> list[dict]:
+    """List objects in an S3 bucket/prefix using the configured client."""
+    if not boto3_client:
+        logger.error("Boto3 S3 client not initialized, cannot list objects")
+        return []
+
+    try:
+        safe_max_keys = max(1, min(int(max_keys or 1000), 1001))
+        paginator = boto3_client.get_paginator('list_objects_v2')
+        loop = asyncio.get_running_loop()
+
+        def _collect():
+            objects = []
+            for page in paginator.paginate(
+                Bucket=bucket_name,
+                Prefix=prefix or "",
+                PaginationConfig={'MaxItems': safe_max_keys, 'PageSize': min(safe_max_keys, 1000)},
+            ):
+                objects.extend(page.get('Contents', []))
+                if len(objects) >= safe_max_keys:
+                    break
+            return objects[:safe_max_keys]
+
+        raw_objects = await loop.run_in_executor(None, _collect)
+        return [
+            {
+                "key": obj.get("Key", ""),
+                "size": int(obj.get("Size") or 0),
+                "last_modified": obj.get("LastModified"),
+                "etag": obj.get("ETag"),
+            }
+            for obj in raw_objects
+        ]
+    except ClientError as e:
+        logger.error("S3 error listing objects", extra={
+            "bucket": sanitize_for_log(bucket_name),
+            "prefix": sanitize_for_log(prefix),
+            "error": str(e),
+        })
+        raise
+    except Exception as e:
+        logger.error("Unexpected error listing objects", extra={
+            "bucket": sanitize_for_log(bucket_name),
+            "prefix": sanitize_for_log(prefix),
+            "error": str(e),
+            "error_type": type(e).__name__,
+        })
+        raise
+
+
+async def get_s3_object_info(bucket_name: str, object_name: str) -> dict | None:
+    """Return metadata for an object in S3."""
+    if not boto3_client:
+        logger.error("Boto3 S3 client not initialized, cannot inspect object")
+        return None
+
+    try:
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: boto3_client.head_object(Bucket=bucket_name, Key=object_name),
+        )
+        return {
+            "content_type": response.get("ContentType"),
+            "size": int(response.get("ContentLength") or 0),
+            "metadata": response.get("Metadata") or {},
+            "last_modified": response.get("LastModified"),
+            "etag": response.get("ETag"),
+        }
+    except ClientError as e:
+        logger.error("S3 error inspecting object", extra={
+            "bucket": sanitize_for_log(bucket_name),
+            "object_name": sanitize_for_log(object_name),
+            "error": str(e),
+        })
+        return None
+    except Exception as e:
+        logger.error("Unexpected error inspecting object", extra={
+            "bucket": sanitize_for_log(bucket_name),
+            "object_name": sanitize_for_log(object_name),
+            "error": str(e),
+            "error_type": type(e).__name__,
+        })
+        return None
+
+
+async def copy_s3_object_to_s3(source_bucket: str, source_key: str, destination_bucket: str, destination_key: str) -> bool:
+    """Copy an object between S3 locations using the configured client."""
+    if not boto3_client:
+        logger.error("Boto3 S3 client not initialized, cannot copy object")
+        return False
+
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: boto3_client.copy_object(
+                Bucket=destination_bucket,
+                Key=destination_key,
+                CopySource={"Bucket": source_bucket, "Key": source_key},
+            ),
+        )
+        logger.info("Copied S3 object", extra={
+            "source_bucket": sanitize_for_log(source_bucket),
+            "source_key": sanitize_for_log(source_key),
+            "destination_bucket": sanitize_for_log(destination_bucket),
+            "destination_key": sanitize_for_log(destination_key),
+        })
+        return True
+    except ClientError as e:
+        logger.error("S3 error copying object", extra={
+            "source_bucket": sanitize_for_log(source_bucket),
+            "source_key": sanitize_for_log(source_key),
+            "destination_bucket": sanitize_for_log(destination_bucket),
+            "destination_key": sanitize_for_log(destination_key),
+            "error": str(e),
+        })
+        return False
+    except Exception as e:
+        logger.error("Unexpected error copying object", extra={
+            "source_bucket": sanitize_for_log(source_bucket),
+            "source_key": sanitize_for_log(source_key),
+            "destination_bucket": sanitize_for_log(destination_bucket),
+            "destination_key": sanitize_for_log(destination_key),
+            "error": str(e),
+            "error_type": type(e).__name__,
+        })
+        return False
+
 def get_presigned_download_url(bucket_name: str, object_name: str, expires_delta: timedelta = timedelta(hours=1)) -> str | None:
     if not boto3_client:
         logger.error("Boto3 S3 client not initialized, cannot generate URL")

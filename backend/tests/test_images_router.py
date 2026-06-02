@@ -380,3 +380,81 @@ def test_upload_and_list_5000_tiny_encoded_images(client, monkeypatch):
     assert {item["filename"] for item in items} == {
         f"encoded-{index:04d}.png" for index in range(1, image_count + 1)
     }
+
+
+def test_list_project_s3_files_filters_supported_objects(client, monkeypatch):
+    pid = _create_project(client, name="S3 List")
+
+    async def fake_list_s3_objects(bucket, prefix, max_keys=1000):
+        assert bucket == "source-bucket"
+        assert prefix == "incoming"
+        return [
+            {"key": "incoming/a.png", "size": 12},
+            {"key": "incoming/readme.txt", "size": 4},
+            {"key": "incoming/folder/", "size": 0},
+            {"key": "incoming/volume.npy", "size": 20},
+        ]
+
+    monkeypatch.setattr("routers.images.list_s3_objects", fake_list_s3_objects)
+    response = client.post(f"/api/projects/{pid}/s3/list", json={"s3_url": "s3://source-bucket/incoming"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["bucket"] == "source-bucket"
+    assert body["prefix"] == "incoming"
+    assert [obj["key"] for obj in body["objects"]] == ["incoming/a.png", "incoming/volume.npy"]
+
+
+def test_import_project_s3_files_creates_image_records(client, monkeypatch):
+    pid = _create_project(client, name="S3 Import")
+    copied = []
+
+    async def fake_get_s3_object_info(bucket, key):
+        assert bucket == "source-bucket"
+        return {"size": 12, "content_type": "image/png", "metadata": {}}
+
+    async def fake_copy_s3_object_to_s3(source_bucket, source_key, destination_bucket, destination_key):
+        copied.append((source_bucket, source_key, destination_bucket, destination_key))
+        return True
+
+    monkeypatch.setattr("routers.images.get_s3_object_info", fake_get_s3_object_info)
+    monkeypatch.setattr("routers.images.copy_s3_object_to_s3", fake_copy_s3_object_to_s3)
+
+    response = client.post(
+        f"/api/projects/{pid}/s3/import",
+        json={
+            "s3_url": "s3://source-bucket/incoming",
+            "keys": ["incoming/a.png"],
+            "per_file_metadata": {"incoming/a.png": {"lot": "LOT1"}},
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["failed"] == []
+    assert len(body["imported"]) == 1
+    imported = body["imported"][0]
+    assert imported["filename"] == "a.png"
+    assert imported["project_id"] == pid
+    assert imported["content_type"] == "image/png"
+    assert imported["metadata"]["source"] == "s3_import"
+    assert imported["metadata"]["source_s3_bucket"] == "source-bucket"
+    assert imported["metadata"]["source_s3_key"] == "incoming/a.png"
+    assert imported["metadata"]["lot"] == "LOT1"
+    assert copied[0][0] == "source-bucket"
+    assert copied[0][1] == "incoming/a.png"
+
+    listed = client.get(f"/api/projects/{pid}/images")
+    assert listed.status_code == 200
+    assert [item["filename"] for item in listed.json()] == ["a.png"]
+
+
+def test_import_project_s3_files_rejects_key_outside_prefix(client):
+    pid = _create_project(client, name="S3 Import Guard")
+    response = client.post(
+        f"/api/projects/{pid}/s3/import",
+        json={"s3_url": "s3://source-bucket/incoming", "keys": ["other/a.png"]},
+    )
+
+    assert response.status_code == 400
+    assert "outside the requested S3 URL prefix" in response.json()["detail"]

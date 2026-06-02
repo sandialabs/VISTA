@@ -2,6 +2,9 @@ import uuid
 import base64
 import io
 import os
+import mimetypes
+from urllib.parse import urlparse, unquote
+from pathlib import PurePosixPath
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Body
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +17,14 @@ from core.config import settings
 from core.group_auth_helper import is_user_in_group
 from utils.dependencies import get_current_user
 from utils.dependencies import get_project_or_403, get_project_or_403_writable, get_image_or_403_writable
-from utils.boto3_client import upload_file_to_s3, get_presigned_download_url, delete_file_from_s3
+from utils.boto3_client import (
+    upload_file_to_s3,
+    get_presigned_download_url,
+    delete_file_from_s3,
+    list_s3_objects,
+    get_s3_object_info,
+    copy_s3_object_to_s3,
+)
 from utils.serialization import to_data_instance_schema
 from utils.file_security import get_content_disposition_header
 from utils.cache_manager import get_cache
@@ -105,6 +115,225 @@ def _inspect_tiff_dimensionality(file: UploadFile) -> Optional[str]:
     finally:
         file.file.seek(0)
 
+
+SUPPORTED_S3_IMPORT_EXTENSIONS = {
+    ".bmp",
+    ".gif",
+    ".inspiro",
+    ".jpeg",
+    ".jpg",
+    ".npy",
+    ".npz",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+
+
+class S3ListRequest(BaseModel):
+    s3_url: str
+    max_keys: int = 1000
+
+
+class S3ObjectSummary(BaseModel):
+    key: str
+    filename: str
+    size: int
+    content_type: Optional[str] = None
+    last_modified: Optional[str] = None
+
+
+class S3ListResponse(BaseModel):
+    bucket: str
+    prefix: str
+    objects: List[S3ObjectSummary]
+    truncated: bool = False
+
+
+class S3ImportRequest(BaseModel):
+    s3_url: str
+    keys: List[str]
+    metadata: Optional[Dict[str, Any]] = None
+    per_file_metadata: Optional[Dict[str, Dict[str, Any]]] = None
+    group_identifiers: Optional[Dict[str, str]] = None
+
+
+class S3ImportResponse(BaseModel):
+    imported: List[schemas.DataInstance]
+    failed: List[Dict[str, str]]
+
+
+def _parse_s3_url(raw_url: str) -> tuple[str, str]:
+    value = (raw_url or "").strip()
+    if not value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="S3 URL is required")
+
+    parsed = urlparse(value)
+    if parsed.scheme == "s3":
+        bucket = parsed.netloc.strip()
+        prefix = unquote(parsed.path.lstrip("/"))
+    elif parsed.scheme in {"http", "https"}:
+        host_parts = parsed.netloc.split(".")
+        path_parts = [unquote(part) for part in parsed.path.split("/") if part]
+        if len(host_parts) >= 4 and host_parts[1] == "s3":
+            bucket = host_parts[0]
+            prefix = "/".join(path_parts)
+        elif parsed.netloc.startswith("s3.") or ".amazonaws.com" in parsed.netloc or "localhost" in parsed.netloc or ":" in parsed.netloc:
+            if not path_parts:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="S3 URL must include a bucket")
+            bucket = path_parts[0]
+            prefix = "/".join(path_parts[1:])
+        else:
+            if not path_parts:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="S3 URL must include a bucket")
+            bucket = path_parts[0]
+            prefix = "/".join(path_parts[1:])
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use an s3://, http://, or https:// S3 URL")
+
+    if not bucket:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="S3 URL must include a bucket")
+    return bucket, prefix
+
+
+def _filename_from_s3_key(key: str) -> str:
+    filename = PurePosixPath(key).name
+    if not filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="S3 object key must reference a file")
+    return filename
+
+
+def _is_supported_s3_file(key: str) -> bool:
+    return PurePosixPath(key).suffix.lower() in SUPPORTED_S3_IMPORT_EXTENSIONS
+
+
+def _ensure_key_under_prefix(key: str, prefix: str) -> None:
+    if not prefix:
+        return
+    normalized_prefix = prefix if prefix.endswith("/") else f"{prefix}/"
+    if key != prefix and not key.startswith(normalized_prefix):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Selected key is outside the requested S3 URL prefix: {key}")
+
+
+@router.post("/projects/{project_id}/s3/list", response_model=S3ListResponse)
+async def list_project_s3_files(
+    project_id: uuid.UUID,
+    request: S3ListRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    """List supported files under an S3 URL so the user can choose imports."""
+    await get_project_or_403(project_id, db, current_user)
+    bucket, prefix = _parse_s3_url(request.s3_url)
+    max_keys = max(1, min(request.max_keys or 1000, 1000))
+
+    try:
+        objects = await list_s3_objects(bucket, prefix, max_keys=max_keys + 1)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Unable to list S3 objects: {exc}") from exc
+
+    summaries: List[S3ObjectSummary] = []
+    for obj in objects[:max_keys]:
+        key = str(obj.get("key") or "")
+        if not key or key.endswith("/") or not _is_supported_s3_file(key):
+            continue
+        summaries.append(S3ObjectSummary(
+            key=key,
+            filename=_filename_from_s3_key(key),
+            size=int(obj.get("size") or 0),
+            content_type=mimetypes.guess_type(key)[0],
+            last_modified=obj.get("last_modified").isoformat() if hasattr(obj.get("last_modified"), "isoformat") else None,
+        ))
+
+    return S3ListResponse(
+        bucket=bucket,
+        prefix=prefix,
+        objects=summaries,
+        truncated=len(objects) > max_keys,
+    )
+
+
+@router.post("/projects/{project_id}/s3/import", response_model=S3ImportResponse, status_code=status.HTTP_201_CREATED)
+async def import_project_s3_files(
+    project_id: uuid.UUID,
+    request: S3ImportRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    """Copy selected S3 objects into the project bucket and create image records."""
+    if not request.keys:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one S3 file to import")
+    if len(request.keys) > 100:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Import at most 100 S3 files at a time")
+
+    db_project = await get_project_or_403_writable(project_id, db, current_user)
+    db_project_id = db_project.id
+    bucket, prefix = _parse_s3_url(request.s3_url)
+    max_size = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))
+    imported: List[schemas.DataInstance] = []
+    failed: List[Dict[str, str]] = []
+
+    for key in request.keys:
+        try:
+            _ensure_key_under_prefix(key, prefix)
+            if not _is_supported_s3_file(key):
+                raise ValueError("Unsupported file type")
+            filename = _filename_from_s3_key(key)
+            source_info = await get_s3_object_info(bucket, key)
+            if not source_info:
+                raise ValueError("S3 object not found or inaccessible")
+            size_bytes = int(source_info.get("size") or 0)
+            if size_bytes and size_bytes > max_size:
+                raise ValueError("File too large")
+
+            image_id = uuid.uuid4()
+            object_storage_key = f"{db_project_id}/{image_id}/{filename}"
+            copied = await copy_s3_object_to_s3(bucket, key, settings.S3_BUCKET, object_storage_key)
+            if not copied:
+                raise ValueError("Failed to copy file to project storage")
+
+            merged_metadata = {
+                "source": "s3_import",
+                "source_s3_url": request.s3_url,
+                "source_s3_bucket": bucket,
+                "source_s3_key": key,
+                **(request.metadata or {}),
+                **((request.per_file_metadata or {}).get(key) or {}),
+            }
+            content_type = source_info.get("content_type") or mimetypes.guess_type(filename)[0]
+
+            resolved_group_id: Optional[uuid.UUID] = None
+            group_identifier = (request.group_identifiers or {}).get(key)
+            if group_identifier and group_identifier.strip():
+                group = await crud.get_or_create_image_group(
+                    db, project_id, group_identifier.strip(), created_by=current_user.email
+                )
+                resolved_group_id = group.id
+
+            data_instance_create = schemas.DataInstanceCreate(
+                project_id=db_project_id,
+                filename=filename,
+                object_storage_key=object_storage_key,
+                content_type=content_type,
+                size_bytes=size_bytes,
+                metadata=merged_metadata,
+                uploaded_by_user_id=current_user.email,
+                group_id=resolved_group_id,
+            )
+            db_data_instance = await crud.create_data_instance(db=db, data_instance=data_instance_create)
+            imported.append(to_data_instance_schema(db_data_instance))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            failed.append({"key": key, "error": str(exc)})
+
+    if imported:
+        cache = get_cache()
+        cache.clear_pattern(f"project_images:{project_id}")
+
+    return S3ImportResponse(imported=imported, failed=failed)
+
 @router.post("/projects/{project_id}/images", response_model=schemas.DataInstance, status_code=status.HTTP_201_CREATED)
 async def upload_image_to_project(
     project_id: uuid.UUID,
@@ -184,11 +413,11 @@ async def upload_image_to_project(
         group_id=resolved_group_id,
     )
     db_data_instance = await crud.create_data_instance(db=db, data_instance=data_instance_create)
-    
+
     # Invalidate project images cache
     cache = get_cache()
     cache.clear_pattern(f"project_images:{project_id}")
-    
+
     # Use utility function for consistent metadata serialization
     return to_data_instance_schema(db_data_instance)
 
@@ -235,7 +464,7 @@ async def list_images_in_project(
 
     if cached_images is not None:
         return cached_images
-        
+
     # Get images for the project
     if deleted_only:
         images = await crud.get_deleted_images_for_project(db=db, project_id=project_id, skip=skip, limit=limit)
@@ -250,7 +479,7 @@ async def list_images_in_project(
             group_id=group_id,
             ungrouped=ungrouped,
         )
-    
+
     # Process images using utility function for consistent serialization
     response_images = []
     if images:
@@ -264,10 +493,10 @@ async def list_images_in_project(
                 print(f"Error serializing image {img.id}: {e}")
                 # Skip this image but continue processing others
                 continue
-    
+
     # Cache the result (30 minutes) - cache even if empty list
     cache.set(cache_key, response_images, expire=30*60)
-    
+
     return response_images
 
 # Add trailing slash version to handle frontend requests
@@ -366,10 +595,10 @@ async def get_image_download_url(
     )
     if not internal_url:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not generate download URL")
-    
+
     # Create a proxy URL that goes through our API
     proxy_url = f"/images/{image_id}/content"
-    
+
     return schemas.PresignedUrlResponse(url=proxy_url, object_key=db_image.object_storage_key)
 
 # Content types that browsers can display natively
@@ -522,12 +751,12 @@ async def get_image_thumbnail(
     """
     if width <= 0 or height <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Width and height must be positive integers")
-    
+
     # Check cache first
     cache = get_cache()
     cache_key = f"thumbnail:{image_id}:w:{width}:h:{height}"
     cached_thumbnail = cache.get(cache_key)
-    
+
     if cached_thumbnail:
         thumbnail_data, content_type, filename = cached_thumbnail
         return StreamingResponse(
@@ -537,11 +766,11 @@ async def get_image_thumbnail(
                 "Content-Disposition": get_content_disposition_header(filename, "inline")
             }
         )
-    
+
     db_image = await crud.get_data_instance(db=db, image_id=image_id)
     if db_image is None or (db_image.deleted_at and not include_deleted):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    
+
     # Check access permissions
     is_member = is_user_in_group(current_user.email, db_image.project.meta_group_id)
     if not is_member:
@@ -585,16 +814,16 @@ async def get_image_thumbnail(
     )
     if not internal_url:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not generate download URL")
-    
+
     # Use httpx to fetch the image from Minio
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(internal_url)
             response.raise_for_status()
-            
+
             # Get the image data
             image_data = await response.aread()
-            
+
             # Use PIL to resize the image
             try:
                 img = Image.open(io.BytesIO(image_data))
@@ -643,12 +872,12 @@ async def get_image_thumbnail(
                     'WEBP': 'image/webp'
                 }
                 content_type = content_type_map.get(img_format, 'image/jpeg')
-                
+
                 # Cache the thumbnail (24 hours)
                 thumbnail_filename = f"thumbnail_{db_image.filename}" if db_image.filename else "thumbnail"
                 thumbnail_data = output_buffer.getvalue()
                 cache.set(cache_key, (thumbnail_data, content_type, thumbnail_filename), expire=24*3600)
-                
+
                 # Return the thumbnail
                 output_buffer.seek(0)
                 return StreamingResponse(
@@ -775,7 +1004,7 @@ async def update_image_metadata(
     # Update the metadata
     current_metadata = db_image.metadata_json or {}
     current_metadata[metadata.key] = metadata.value
-    
+
     # Update the database
     await db.execute(
         update(models.DataInstance)
@@ -783,13 +1012,13 @@ async def update_image_metadata(
         .values(metadata_json=current_metadata)
     )
     await db.commit()
-    
+
     # Invalidate caches
     cache = get_cache()
     cache.clear_pattern(f"image:{image_id}:")
     cache.clear_pattern(f"project_images:{db_image.project_id}")
     cache.clear_pattern(f"thumbnail:{image_id}")
-    
+
     # Return the updated image; build response dict ensuring updated metadata is present
     await db.refresh(db_image)
     try:
@@ -828,7 +1057,7 @@ async def delete_image_metadata(
     current_metadata = db_image.metadata_json or {}
     if key in current_metadata:
         del current_metadata[key]
-    
+
     # Update the database
     await db.execute(
         update(models.DataInstance)
@@ -836,13 +1065,13 @@ async def delete_image_metadata(
         .values(metadata_json=current_metadata)
     )
     await db.commit()
-    
+
     # Invalidate caches
     cache = get_cache()
     cache.clear_pattern(f"image:{image_id}:")
     cache.clear_pattern(f"project_images:{db_image.project_id}")
     cache.clear_pattern(f"thumbnail:{image_id}")
-    
+
     # Return the updated image; build response dict ensuring updated metadata is present
     await db.refresh(db_image)
     try:
