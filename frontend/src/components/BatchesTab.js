@@ -31,6 +31,7 @@ function BatchesTab({ projectId, parts = [], onAssignmentsChanged, setError, onI
   const [selectedPartIds, setSelectedPartIds] = useState([]);
   const [selectionStart, setSelectionStart] = useState(null);
   const [selectionRect, setSelectionRect] = useState(null);
+  const [deletedBatchIds, setDeletedBatchIds] = useState([]);
   const partsPaneRef = useRef(null);
 
   useEffect(() => {
@@ -40,7 +41,10 @@ function BatchesTab({ projectId, parts = [], onAssignmentsChanged, setError, onI
         const resp = await fetch(`/api/projects/${projectId}/batches`);
         if (!resp.ok) throw new Error(`Failed to load batches (${resp.status})`);
         const payload = await resp.json();
-        if (!cancelled) setBatches(normalizeBatches(payload));
+        if (!cancelled) {
+          setBatches(normalizeBatches(payload));
+          setDeletedBatchIds([]);
+        }
       } catch (err) {
         if (!cancelled && setError) setError(err.message || 'Failed to load batches');
       }
@@ -55,13 +59,13 @@ function BatchesTab({ projectId, parts = [], onAssignmentsChanged, setError, onI
     const grouped = new Map();
     grouped.set('__unbatched__', []);
     parts.forEach((part) => {
-      const key = part?.batch_id || '__unbatched__';
+      const key = part?.batch_id && !deletedBatchIds.includes(part.batch_id) ? part.batch_id : '__unbatched__';
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key).push(part);
     });
     grouped.forEach((entries) => entries.sort((a, b) => String(a.display_name || a.serial_number || '').localeCompare(String(b.display_name || b.serial_number || ''))));
     return grouped;
-  }, [parts]);
+  }, [deletedBatchIds, parts]);
 
   const updateBatch = async (batchId, patch) => {
     try {
@@ -111,6 +115,26 @@ function BatchesTab({ projectId, parts = [], onAssignmentsChanged, setError, onI
     const payload = await resp.json();
     setBatches((prev) => [...prev, normalizeBatches([payload])[0]]);
     return payload;
+  };
+
+  const deleteBatch = async (batch) => {
+    if (!batch?.id) return;
+    const batchParts = partsByBatch.get(batch.id) || [];
+    const confirmed = window.confirm(
+      `Delete ${batch.name || 'this batch'}? ${batchParts.length} part${batchParts.length === 1 ? '' : 's'} assigned to this batch will move to Unbatched Parts.`,
+    );
+    if (!confirmed) return;
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/batches/${batch.id}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error(`Failed to delete batch (${resp.status})`);
+      setBatches((prev) => prev.filter((item) => item.id !== batch.id));
+      setDeletedBatchIds((prev) => (prev.includes(batch.id) ? prev : [...prev, batch.id]));
+      setSelectedPartIds((prev) => prev.filter((partId) => !(batchParts.some((part) => part.id === partId))));
+      if (onAssignmentsChanged) await onAssignmentsChanged();
+      if (setError) setError(null);
+    } catch (err) {
+      if (setError) setError(err.message || 'Failed to delete batch');
+    }
   };
 
   const renderPartChip = (part) => (
@@ -209,6 +233,15 @@ function BatchesTab({ projectId, parts = [], onAssignmentsChanged, setError, onI
                       onClick={() => onInspectBatch && onInspectBatch(batch)}
                     >
                       Inspect
+                    </button>
+                    <button
+                      type="button"
+                      className="batch-delete-button"
+                      onClick={() => deleteBatch(batch)}
+                      aria-label={`Delete batch ${batch.name || 'unnamed'}`}
+                      title="Delete batch"
+                    >
+                      ×
                     </button>
                   </div>
                   <div className="batch-summary muted">

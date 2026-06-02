@@ -7271,6 +7271,7 @@ ul li:hover {
 
 .batch-card {
   min-height: 130px;
+  position: relative;
 }
 
 .batch-card-header {
@@ -7278,6 +7279,28 @@ ul li:hover {
   gap: 10px;
   align-items: center;
   margin-bottom: 8px;
+  padding-right: 24px;
+}
+
+.batch-delete-button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #dc2626;
+  cursor: pointer;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 2px;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+}
+
+.batch-delete-button:hover,
+.batch-delete-button:focus {
+  color: #991b1b;
+  transform: scale(1.08);
 }
 
 .batch-summary {

@@ -58,4 +58,34 @@ describe('BatchesTab', () => {
     });
     await waitFor(() => expect(onAssignmentsChanged).toHaveBeenCalled());
   });
+
+  test('deletes a batch and refreshes assignments so parts move back to unbatched', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'batch-1', name: 'Batch 1', status: 'not_started', owner: '' }] })
+      .mockResolvedValueOnce({ ok: true, status: 204 });
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const onAssignmentsChanged = jest.fn().mockResolvedValue();
+
+    render(
+      <BatchesTab
+        projectId="proj-1"
+        parts={[{ id: 'part-1', batch_id: 'batch-1', display_name: 'Part A', serial_number: 'SN-1', metadata: {} }]}
+        onAssignmentsChanged={onAssignmentsChanged}
+      />,
+    );
+
+    await screen.findByDisplayValue('Batch 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete batch Batch 1' }));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/batches/batch-1', { method: 'DELETE' });
+    });
+    expect(window.confirm).toHaveBeenCalledWith(
+      'Delete Batch 1? 1 part assigned to this batch will move to Unbatched Parts.',
+    );
+    await waitFor(() => expect(onAssignmentsChanged).toHaveBeenCalled());
+    expect(screen.queryByDisplayValue('Batch 1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('batch-target-unbatched')).toHaveTextContent('Part A');
+  });
+
 });
