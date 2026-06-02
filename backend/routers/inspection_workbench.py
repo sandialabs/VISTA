@@ -913,6 +913,25 @@ async def list_inspection_batches(
     return await crud.list_inspection_batches(db=db, project_id=project_id)
 
 
+@router.delete("/projects/{project_id}/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_inspection_batch(
+    project_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    deleted = await crud.delete_inspection_batch(
+        db=db,
+        project_id=project_id,
+        batch_id=batch_id,
+        deleted_by=current_user.email,
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection batch not found")
+    return None
+
+
 @router.patch("/projects/{project_id}/batches/{batch_id}", response_model=schemas.InspectionBatch)
 async def update_inspection_batch(
     project_id: uuid.UUID,

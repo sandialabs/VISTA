@@ -376,6 +376,54 @@ async def update_inspection_batch(
     return db_batch
 
 
+async def delete_inspection_batch(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    deleted_by: Optional[str] = None,
+) -> bool:
+    batch = await db.execute(
+        select(models.InspectionBatch).where(
+            models.InspectionBatch.id == batch_id,
+            models.InspectionBatch.project_id == project_id,
+        )
+    )
+    db_batch = batch.scalars().first()
+    if not db_batch:
+        return False
+
+    parts_result = await db.execute(
+        select(models.InspectionPart.id).where(
+            models.InspectionPart.project_id == project_id,
+            models.InspectionPart.batch_id == batch_id,
+        )
+    )
+    moved_part_ids = [part_id for part_id in parts_result.scalars().all()]
+    if moved_part_ids:
+        await db.execute(
+            update(models.InspectionPart)
+            .where(
+                models.InspectionPart.project_id == project_id,
+                models.InspectionPart.batch_id == batch_id,
+            )
+            .values(batch_id=None)
+        )
+
+    await db.delete(db_batch)
+    await db.commit()
+    log_db_operation(
+        "DELETE",
+        "inspection_batches",
+        batch_id,
+        deleted_by or "system",
+        {
+            "project_id": str(project_id),
+            "parts_moved_to_unassigned": len(moved_part_ids),
+        },
+    )
+    return True
+
+
 async def create_inspection_part(
     db: AsyncSession,
     project_id: uuid.UUID,

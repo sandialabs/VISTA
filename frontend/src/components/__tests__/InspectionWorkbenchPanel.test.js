@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import InspectionWorkbenchPanel from '../InspectionWorkbenchPanel';
+import ImagesToPartsTab from '../ImagesToPartsTab';
 
 jest.setTimeout(90000);
 
@@ -580,6 +581,87 @@ function scenarioNameIncludesAdvanced(payload) {
 
 
 describe('InspectionWorkbenchPanel', () => {
+
+  test('hides an image from the inspection workbench after moving it from a part to unassigned', async () => {
+    let parts = [
+      {
+        id: 'part-1',
+        batch_id: 'batch-1',
+        serial_number: 'SN-001',
+        display_name: 'Part 1',
+        review_state: 'unreviewed',
+        metadata: {
+          configured_views: ['front'],
+          modalities: ['visual'],
+          view_images: { front: 'assigned-a.png' },
+          source_images: [
+            { filename: 'assigned-a.png', image_id: 'img-assigned-a', side: 'front', modality: 'visual', overlay: false },
+          ],
+          annotations: [],
+        },
+      },
+    ];
+    const images = [{ id: 'img-assigned-a', filename: 'assigned-a.png', metadata: { part_id: 'part-1', view_name: 'front' } }];
+    const rebuildPartImageMaps = (part, retainedSourceImages) => ({
+      ...part,
+      metadata: {
+        ...part.metadata,
+        source_images: retainedSourceImages,
+        configured_views: retainedSourceImages.map((record) => record.side).filter(Boolean),
+        modalities: retainedSourceImages.map((record) => record.modality).filter(Boolean),
+        view_images: retainedSourceImages.reduce((acc, record) => {
+          if (record.side && !record.overlay) acc[record.side] = record.filename;
+          return acc;
+        }, {}),
+        overlay_images: {},
+      },
+    });
+
+    jest.spyOn(global, 'fetch').mockImplementation((url, options = {}) => {
+      if (url.includes('/parts/image-assignments') && options.method === 'POST') {
+        const payload = JSON.parse(options.body || '{}');
+        parts = parts.map((part) => rebuildPartImageMaps(
+          part,
+          (part.metadata.source_images || []).filter((record) => record.filename !== payload.filename),
+        ));
+        return Promise.resolve({ ok: true, json: async () => ({ filename: payload.filename, from_part_id: 'part-1', to_part_id: payload.to_part_id }) });
+      }
+      if (url.includes('/batches')) return Promise.resolve({ ok: true, json: async () => [{ id: 'batch-1', name: 'Batch 1' }] });
+      if (url.includes('/parts/') && url.includes('/annotations') && (!options.method || options.method === 'GET')) {
+        return Promise.resolve({ ok: true, json: async () => ({ part_id: 'part-1', annotations: [] }) });
+      }
+      if (url.includes('/parts')) return Promise.resolve({ ok: true, json: async () => parts });
+      if (url.includes('/workspace-state')) return Promise.resolve({ ok: true, json: async () => ({ state: { selected_batch_id: 'batch-1', selected_part_id: 'part-1' } }) });
+      if (url.includes('/configuration')) return Promise.resolve({ ok: true, json: async () => ({ config: {} }) });
+      if (url.includes('/metadata-dict')) return Promise.resolve({ ok: true, json: async () => ({ calibration_default: defaultCalibration }) });
+      if (url.includes('/images?include_deleted=true&limit=5000')) return Promise.resolve({ ok: true, json: async () => images });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    });
+
+    const { unmount } = render(
+      <ImagesToPartsTab projectId="proj-1" parts={parts} images={images} />,
+    );
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'assigned-a.png' }));
+    fireEvent.drop(screen.getByTestId('images-to-parts-unassigned-target'));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: 'assigned-a.png', to_part_id: null }),
+      });
+    });
+    await waitFor(() => expect(parts[0].metadata.source_images).toHaveLength(0));
+    unmount();
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findByText('No mapped images for this part.')).toBeInTheDocument();
+    expect(screen.queryByAltText('front view')).not.toBeInTheDocument();
+    expect(screen.queryByText('assigned-a.png')).not.toBeInTheDocument();
+  });
+
   afterEach(() => {
     delete global.fetch;
   });
