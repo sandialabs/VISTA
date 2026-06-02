@@ -44,15 +44,6 @@ def _run_alembic_heads() -> subprocess.CompletedProcess[str]:
     return _run_alembic_command("heads")
 
 
-def _run_alembic_merge(heads: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return _run_alembic_command(
-        "merge",
-        "-m",
-        "auto-merge concurrent heads",
-        *heads,
-    )
-
-
 def _parse_head_revisions(heads_stdout: str) -> list[str]:
     revisions: list[str] = []
     for line in heads_stdout.splitlines():
@@ -64,8 +55,12 @@ def _parse_head_revisions(heads_stdout: str) -> list[str]:
     return revisions
 
 
-def _parse_missing_revision(stderr: str) -> str | None:
-    match = MISSING_REVISION_RE.search(stderr)
+def _combined_output(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(part for part in (result.stdout, result.stderr) if part)
+
+
+def _parse_missing_revision(output: str) -> str | None:
+    match = MISSING_REVISION_RE.search(output)
     if not match:
         return None
     return match.group("revision")
@@ -184,23 +179,15 @@ def run() -> int:
             result = heads_result
         else:
             heads = _parse_head_revisions(heads_result.stdout)
-            if len(heads) > 1:
-                merge_result = _run_alembic_merge(heads)
-                if merge_result.returncode != 0:
-                    result = merge_result
-                else:
-                    heads_result = _run_alembic_heads()
-                    heads = _parse_head_revisions(heads_result.stdout) if heads_result.returncode == 0 else []
-                    result = _run_alembic_upgrade("head")
-            else:
-                result = _run_alembic_upgrade("head")
+            upgrade_target = "heads" if len(heads) > 1 else "head"
+            result = _run_alembic_upgrade(upgrade_target)
 
         if result.returncode == 0:
             print("Database migrations applied successfully.")
             return 0
 
-        stderr = result.stderr.strip()
-        missing_revision = _parse_missing_revision(stderr)
+        output = _combined_output(result).strip()
+        missing_revision = _parse_missing_revision(output)
         if missing_revision and not repaired_missing_revision:
             repair_heads = heads
             if not repair_heads:
@@ -211,7 +198,7 @@ def run() -> int:
                 repaired_missing_revision = True
                 continue
 
-        if attempt < attempts and _is_connection_error(stderr):
+        if attempt < attempts and _is_connection_error(output):
             print(
                 f"Migration attempt {attempt}/{attempts} failed due to database connectivity; retrying in {delay_seconds:.1f}s...",
                 file=sys.stderr,
@@ -220,10 +207,8 @@ def run() -> int:
             continue
 
         print("Migration failed and cannot be retried automatically.", file=sys.stderr)
-        if result.stdout:
-            print(result.stdout, file=sys.stderr)
-        if stderr:
-            print(stderr, file=sys.stderr)
+        if output:
+            print(output, file=sys.stderr)
         return result.returncode
 
     return 1
