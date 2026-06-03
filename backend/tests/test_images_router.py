@@ -41,6 +41,15 @@ def _make_tiff_bytes(frame_count=1, size=(10, 10)):
     return buf
 
 
+def _make_uint16_tiff_bytes(values):
+    array = np.array(values, dtype=np.uint16)
+    img = Image.fromarray(array)
+    buf = io.BytesIO()
+    img.save(buf, format="TIFF")
+    buf.seek(0)
+    return buf
+
+
 def _make_raster_bytes(fmt: str, size=(12, 10), color=(64, 128, 192)):
     img = Image.new("RGB", size, color)
     buf = io.BytesIO()
@@ -205,6 +214,44 @@ def test_upload_tiff_marks_3d_load_mode(client):
     metadata = r.json().get("metadata") or {}
     assert metadata.get("tiff_dimensionality") == "3d"
     assert metadata.get("load_mode") == "volume"
+
+
+def test_convert_uint16_tiff_to_web_format_preserves_relative_contrast():
+    from routers.images import convert_to_web_format
+
+    payload = _make_uint16_tiff_bytes([[1024, 2048], [4096, 12000]])
+    converted, content_type = convert_to_web_format(payload.getvalue(), "image/tiff")
+
+    assert content_type == "image/png"
+    with Image.open(io.BytesIO(converted)) as image:
+        assert image.mode == "L"
+        pixels = list(image.getdata())
+
+    assert min(pixels) == 0
+    assert max(pixels) == 255
+    assert len(set(pixels)) > 2
+
+
+def test_upload_uint16_tiff_records_actual_intensity_range_for_pt3_window(client):
+    pr = client.post("/api/projects/", json={"name": "Tiff16PT3", "description": None, "meta_group_id": "g", "project_type": "PT3"})
+    pid = pr.json()["id"]
+
+    payload = _make_uint16_tiff_bytes([[1024, 2048], [4096, 12000]])
+    r = client.post(
+        f"/api/projects/{pid}/images",
+        files={"file": ("slice16.tif", payload, "image/tiff")},
+    )
+    assert r.status_code == 201
+    metadata = r.json().get("metadata") or {}
+    assert metadata.get("tiff_dimensionality") == "2d"
+    assert metadata.get("load_mode") == "single_image"
+    assert metadata.get("pixel_dtype") == "uint16"
+    assert metadata.get("voxel_dtype") == "uint16"
+    assert metadata.get("bit_depth") == 16
+    assert metadata.get("bits_per_sample") == 16
+    assert metadata.get("pixel_value_range") == {"min": 1024, "max": 12000}
+    assert metadata.get("value_range") == {"min": 1024, "max": 12000}
+    assert metadata.get("intensity_range") == {"min": 1024, "max": 12000}
 
 
 def test_upload_inspiro_voxel_data_accepts_3d_arrays(client):

@@ -1122,9 +1122,40 @@ async def assign_image_to_part(
             "crop_annotation_id",
             "crop_title",
             "crop_bbox",
+            "pixel_dtype",
+            "voxel_dtype",
+            "bit_depth",
+            "bits_per_sample",
+            "pixel_value_range",
+            "data_value_range",
+            "voxel_value_range",
+            "scalar_range",
+            "value_range",
+            "intensity_range",
+            "display_range",
+            "signed",
         ):
             if metadata_key in image_metadata:
                 source_entry[metadata_key] = image_metadata.get(metadata_key)
+        if any(key in image_metadata for key in ("pixel_value_range", "value_range", "intensity_range", "pixel_dtype", "voxel_dtype", "bit_depth")):
+            source_entry["metadata"] = {
+                key: image_metadata.get(key)
+                for key in (
+                    "pixel_dtype",
+                    "voxel_dtype",
+                    "bit_depth",
+                    "bits_per_sample",
+                    "pixel_value_range",
+                    "data_value_range",
+                    "voxel_value_range",
+                    "scalar_range",
+                    "value_range",
+                    "intensity_range",
+                    "display_range",
+                    "signed",
+                )
+                if key in image_metadata
+            }
 
     if target_part:
         target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
