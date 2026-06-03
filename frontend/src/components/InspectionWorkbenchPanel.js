@@ -889,22 +889,8 @@ function getDisplayDomainFromBitDepth(value, signed = false) {
   return { min: 0, max: (2 ** bits) - 1, step: 1, label: `${bits}-bit` };
 }
 
-function getDisplayDomainFromMetadata(metadata) {
+function getExplicitDisplayDomainFromMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
-  const dtypeDomain = getDisplayDomainFromDtype(
-    metadata.voxel_dtype
-      ?? metadata.pixel_dtype
-      ?? metadata.data_dtype
-      ?? metadata.dtype
-      ?? metadata.pixel_type
-      ?? metadata.data_type,
-  );
-  if (dtypeDomain) return dtypeDomain;
-  const bitDepthDomain = getDisplayDomainFromBitDepth(
-    metadata.bit_depth ?? metadata.bits_allocated ?? metadata.bits_per_sample,
-    metadata.signed === true || String(metadata.pixel_representation || '').toLowerCase() === 'signed',
-  );
-  if (bitDepthDomain) return bitDepthDomain;
   const explicitRange = [
     metadata.data_value_range,
     metadata.voxel_value_range,
@@ -919,25 +905,77 @@ function getDisplayDomainFromMetadata(metadata) {
     return {
       ...explicitRange,
       step: Number.isInteger(explicitRange.min) && Number.isInteger(explicitRange.max) ? 1 : Math.max(0.001, span / 1000),
-      label: 'metadata range',
+      label: 'loaded image range',
     };
   }
   return null;
 }
 
+function getDisplayDomainFromMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const explicitRangeDomain = getExplicitDisplayDomainFromMetadata(metadata);
+  if (explicitRangeDomain) return explicitRangeDomain;
+  const dtypeDomain = getDisplayDomainFromDtype(
+    metadata.voxel_dtype
+      ?? metadata.pixel_dtype
+      ?? metadata.data_dtype
+      ?? metadata.dtype
+      ?? metadata.pixel_type
+      ?? metadata.data_type,
+  );
+  if (dtypeDomain) return dtypeDomain;
+  const bitDepthDomain = getDisplayDomainFromBitDepth(
+    metadata.bit_depth ?? metadata.bits_allocated ?? metadata.bits_per_sample,
+    metadata.signed === true || String(metadata.pixel_representation || '').toLowerCase() === 'signed',
+  );
+  if (bitDepthDomain) return bitDepthDomain;
+  return null;
+}
+
+function combineDisplayDomains(domains) {
+  const validDomains = domains.filter(Boolean);
+  if (validDomains.length === 0) return null;
+  const min = Math.min(...validDomains.map((domain) => Number(domain.min)));
+  const max = Math.max(...validDomains.map((domain) => Number(domain.max)));
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return null;
+  const integerSteps = validDomains.every((domain) => Number(domain.step) === 1);
+  return {
+    min,
+    max,
+    step: integerSteps && Number.isInteger(min) && Number.isInteger(max) ? 1 : Math.max(0.001, (max - min) / 1000),
+    label: 'loaded image range',
+  };
+}
+
+function getSourceImageDisplayDomain(source, projectImageLookup = {}, explicitOnly = false) {
+  const metadataCandidates = [source?.metadata, source];
+  const filename = String(source?.filename || '');
+  const imageId = String(source?.image_id || '');
+  const imageRecord = projectImageLookup[imageId] || projectImageLookup[filename];
+  metadataCandidates.push(getImageMetadata(imageRecord));
+  for (const metadata of metadataCandidates) {
+    const domain = explicitOnly ? getExplicitDisplayDomainFromMetadata(metadata) : getDisplayDomainFromMetadata(metadata);
+    if (domain) return domain;
+  }
+  return null;
+}
+
 function getPartDisplayValueDomain(part, projectImageLookup = {}) {
+  const partExplicitDomain = getExplicitDisplayDomainFromMetadata(part?.metadata);
+  if (partExplicitDomain) return partExplicitDomain;
+
+  const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
+  const sourceExplicitDomain = combineDisplayDomains(
+    sourceImages.map((source) => getSourceImageDisplayDomain(source, projectImageLookup, true)),
+  );
+  if (sourceExplicitDomain) return sourceExplicitDomain;
+
   const partDomain = getDisplayDomainFromMetadata(part?.metadata);
   if (partDomain) return partDomain;
 
-  const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
   for (const source of sourceImages) {
-    const sourceDomain = getDisplayDomainFromMetadata(source?.metadata) || getDisplayDomainFromMetadata(source);
+    const sourceDomain = getSourceImageDisplayDomain(source, projectImageLookup);
     if (sourceDomain) return sourceDomain;
-    const filename = String(source?.filename || '');
-    const imageId = String(source?.image_id || '');
-    const imageRecord = projectImageLookup[imageId] || projectImageLookup[filename];
-    const imageDomain = getDisplayDomainFromMetadata(getImageMetadata(imageRecord));
-    if (imageDomain) return imageDomain;
   }
 
   return DEFAULT_DISPLAY_VALUE_DOMAIN;

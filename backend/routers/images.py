@@ -29,7 +29,7 @@ from utils.serialization import to_data_instance_schema
 from utils.file_security import get_content_disposition_header
 from utils.cache_manager import get_cache
 import json as _json
-from PIL import Image
+from PIL import Image, ImageSequence
 from utils.volume_loader import read_npy_header
 
 router = APIRouter(
@@ -38,6 +38,121 @@ router = APIRouter(
 
 VOXEL_DATA_EXTENSIONS = {".npy", ".npz", ".inspiro"}
 TIFF_EXTENSIONS = {".tif", ".tiff"}
+
+
+def _flatten_image_extrema(extrema: Any) -> list[tuple[float, float]]:
+    if not isinstance(extrema, tuple):
+        return []
+    if len(extrema) == 2 and all(isinstance(value, (int, float)) for value in extrema):
+        return [(float(extrema[0]), float(extrema[1]))]
+    ranges: list[tuple[float, float]] = []
+    for channel_range in extrema:
+        if (
+            isinstance(channel_range, tuple)
+            and len(channel_range) == 2
+            and all(isinstance(value, (int, float)) for value in channel_range)
+        ):
+            ranges.append((float(channel_range[0]), float(channel_range[1])))
+    return ranges
+
+
+def _dtype_from_pillow_mode(image: Image.Image) -> tuple[Optional[str], Optional[int], bool]:
+    mode = str(image.mode or '')
+    bits_per_sample = image.tag_v2.get(258) if hasattr(image, 'tag_v2') else None
+    if isinstance(bits_per_sample, tuple) and bits_per_sample:
+        bits_per_sample = bits_per_sample[0]
+    try:
+        bit_depth = int(bits_per_sample) if bits_per_sample is not None else None
+    except (TypeError, ValueError):
+        bit_depth = None
+
+    if mode in {'I;16', 'I;16L', 'I;16B', 'I;16N'}:
+        return 'uint16', bit_depth or 16, False
+    if mode == 'I':
+        return 'int32', bit_depth or 32, True
+    if mode == 'F':
+        return 'float32', bit_depth or 32, True
+    if mode in {'L', 'P'}:
+        return 'uint8', bit_depth or 8, False
+    if mode == '1':
+        return 'bool', 1, False
+    if bit_depth and bit_depth > 8:
+        return f'uint{bit_depth}', bit_depth, False
+    if bit_depth:
+        return f'uint{bit_depth}', bit_depth, False
+    return None, None, False
+
+
+def _is_high_bit_scalar_image(image: Image.Image) -> bool:
+    mode = str(image.mode or '')
+    _pixel_dtype, bit_depth, _signed = _dtype_from_pillow_mode(image)
+    high_bit_mode = mode in {'I;16', 'I;16L', 'I;16B', 'I;16N', 'I', 'F'}
+    high_bit_tag = bit_depth and bit_depth > 8 and mode not in {'RGB', 'RGBA', 'CMYK'}
+    return high_bit_mode or bool(high_bit_tag)
+
+
+def _normalize_scalar_image_to_uint8(image: Image.Image) -> Optional[Image.Image]:
+    if not _is_high_bit_scalar_image(image):
+        return None
+    extrema = _flatten_image_extrema(image.getextrema())
+    if not extrema:
+        return None
+    minimum = min(item[0] for item in extrema)
+    maximum = max(item[1] for item in extrema)
+    if maximum <= minimum:
+        return Image.new('L', image.size, 0)
+    scaled = image.convert('F').point(lambda value: ((value - minimum) * 255.0) / (maximum - minimum))
+    return scaled.convert('L')
+
+
+def _image_intensity_metadata(file: UploadFile) -> Dict[str, Any]:
+    filename = (file.filename or '').lower()
+    if not (filename.endswith('.tif') or filename.endswith('.tiff')):
+        return {}
+
+    try:
+        file.file.seek(0)
+        with Image.open(file.file) as image:
+            frame_ranges: list[tuple[float, float]] = []
+            frame_count = max(1, int(getattr(image, 'n_frames', 1) or 1))
+            pixel_dtype, bit_depth, signed = _dtype_from_pillow_mode(image)
+            for frame in ImageSequence.Iterator(image):
+                if pixel_dtype is None or bit_depth is None:
+                    candidate_dtype, candidate_bit_depth, candidate_signed = _dtype_from_pillow_mode(frame)
+                    pixel_dtype = pixel_dtype or candidate_dtype
+                    bit_depth = bit_depth or candidate_bit_depth
+                    signed = signed or candidate_signed
+                frame_ranges.extend(_flatten_image_extrema(frame.getextrema()))
+    except Exception:
+        return {}
+    finally:
+        file.file.seek(0)
+
+    if not frame_ranges:
+        return {}
+
+    minimum = min(item[0] for item in frame_ranges)
+    maximum = max(item[1] for item in frame_ranges)
+
+    def clean(value: float) -> int | float:
+        return int(value) if float(value).is_integer() else value
+
+    value_range = {'min': clean(minimum), 'max': clean(maximum)}
+    metadata: Dict[str, Any] = {
+        'pixel_value_range': value_range,
+        'value_range': value_range,
+        'intensity_range': value_range,
+        'frame_count': frame_count,
+    }
+    if pixel_dtype:
+        metadata['pixel_dtype'] = pixel_dtype
+        metadata['voxel_dtype'] = pixel_dtype
+    if bit_depth:
+        metadata['bit_depth'] = bit_depth
+        metadata['bits_per_sample'] = bit_depth
+    if signed:
+        metadata['signed'] = True
+    return metadata
 
 
 def _tiff_dimensionality_metadata(file: UploadFile) -> Dict[str, str]:
@@ -364,6 +479,7 @@ async def upload_image_to_project(
     if parsed_metadata is None:
         parsed_metadata = {}
     parsed_metadata.update(_tiff_dimensionality_metadata(file))
+    parsed_metadata.update(_image_intensity_metadata(file))
     # If metadata_json is None or empty string, parsed_metadata remains None
     # Basic validation
     _validate_voxel_data(file)
@@ -617,6 +733,12 @@ def convert_to_web_format(image_data: bytes, content_type: str) -> tuple[bytes, 
 
     try:
         img = Image.open(io.BytesIO(image_data))
+        normalized_scalar = _normalize_scalar_image_to_uint8(img)
+        if normalized_scalar is not None:
+            output_buffer = io.BytesIO()
+            normalized_scalar.save(output_buffer, format='PNG')
+            output_buffer.seek(0)
+            return output_buffer.getvalue(), 'image/png'
 
         # Determine output format based on image characteristics
         if img.mode in ('RGBA', 'LA', 'PA') or (img.mode == 'P' and 'transparency' in img.info):
@@ -831,9 +953,13 @@ async def get_image_thumbnail(
                 # Resize the image while maintaining aspect ratio
                 img.thumbnail((width, height))
 
+                normalized_scalar = _normalize_scalar_image_to_uint8(img)
+                if normalized_scalar is not None:
+                    img = normalized_scalar
+                    img_format = 'PNG'
                 # Convert to web-friendly format for thumbnails
                 # Handle TIFF, CMYK, 16-bit, and other non-web formats
-                if img.mode in ('LA', 'PA'):
+                elif img.mode in ('LA', 'PA'):
                     # Convert to RGBA to preserve transparency
                     img = img.convert('RGBA')
                     img_format = 'PNG'

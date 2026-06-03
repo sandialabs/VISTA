@@ -1972,6 +1972,63 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.queryByText('IMAGE 2')).not.toBeInTheDocument();
   });
 
+  test('uses loaded 16-bit TIFF value range for PT3 display window controls', async () => {
+    mockWorkbenchFetch({
+      user: 'pt3-uint16-window',
+      batches: [{ id: 'batch-uint16', name: 'Batch UInt16' }],
+      parts: [
+        {
+          id: 'part-uint16-1',
+          batch_id: 'batch-uint16',
+          serial_number: 'SN-U16-1',
+          display_name: 'UInt16 TIFF Part',
+          review_state: 'in_review',
+          metadata: {
+            voxel_dtype: 'uint16',
+            volume_shape: { axial: 2, coronal: 2, sagittal: 2 },
+            source_images: [
+              {
+                filename: 'slice-low.tif',
+                image_id: 'slice-low-id',
+                metadata: {
+                  slice_index: 0,
+                  pixel_dtype: 'uint16',
+                  bit_depth: 16,
+                  pixel_value_range: { min: 1024, max: 4096 },
+                },
+              },
+              {
+                filename: 'slice-high.tif',
+                image_id: 'slice-high-id',
+                metadata: {
+                  slice_index: 1,
+                  pixel_dtype: 'uint16',
+                  bit_depth: 16,
+                  pixel_value_range: { min: 2048, max: 12000 },
+                },
+              },
+            ],
+          },
+        },
+      ],
+      workspaceState: { selected_part_id: 'part-uint16-1' },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByText('UInt16 TIFF Part')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('3D view'), { target: { value: 'stack' } });
+
+    expect(screen.getByText('1024-12000 loaded image range')).toBeInTheDocument();
+    expect(screen.getByLabelText('Display window minimum handle')).toHaveAttribute('min', '1024');
+    expect(screen.getByLabelText('Display window maximum handle')).toHaveAttribute('max', '12000');
+    expect(screen.getAllByTestId('mpr-preview-axial')[0].querySelector('.mpr-slice-canvas')).toHaveAttribute('data-display-domain', '1024-12000');
+
+    fireEvent.change(screen.getByLabelText('Display window maximum handle'), { target: { value: '8000' } });
+    expect(screen.getByLabelText('Display window maximum')).toHaveValue(8000);
+  });
+
   test('defaults PT3 to focused four-quadrant MPR with modal access and wheel controls', async () => {
     mockWorkbenchFetch(scenarioByUser[2]);
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
