@@ -665,6 +665,79 @@ function getAnnotationListValue(annotation) {
   return '-';
 }
 
+
+function isBoundingBoxAnnotation(annotation) {
+  const bbox = annotation?.bbox || annotation?.geometry?.box || annotation;
+  if (!bbox || typeof bbox !== 'object') return false;
+  return ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(Number(bbox[key])))
+    && Number(bbox.width) > 0
+    && Number(bbox.height) > 0;
+}
+
+function getAnnotationCropBox(annotation) {
+  const bbox = annotation?.bbox || annotation?.geometry?.box || annotation || {};
+  const geometry = annotation?.geometry || {};
+  const x = Number(bbox.x);
+  const y = Number(bbox.y);
+  const width = Number(bbox.width);
+  const height = Number(bbox.height);
+  const imageWidth = Number(geometry.imageWidth || bbox.imageWidth || geometry.box?.imageWidth || annotation?.imageWidth);
+  const imageHeight = Number(geometry.imageHeight || bbox.imageHeight || geometry.box?.imageHeight || annotation?.imageHeight);
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  return {
+    x,
+    y,
+    width,
+    height,
+    imageWidth: Number.isFinite(imageWidth) && imageWidth > 0 ? imageWidth : null,
+    imageHeight: Number.isFinite(imageHeight) && imageHeight > 0 ? imageHeight : null,
+  };
+}
+
+function formatCropCoordinate(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0';
+  return String(Math.round(numeric * 100) / 100).replace(/\.0+$/, '');
+}
+
+function sanitizeCropFilename(value) {
+  return String(value || 'image')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180) || 'image';
+}
+
+function getCropImageTitle(annotation, parentImageName) {
+  const box = getAnnotationCropBox(annotation);
+  return `${formatCropCoordinate(box?.x)}_${formatCropCoordinate(box?.y)}_crop of ${parentImageName || 'image'}`;
+}
+
+function getCropUploadFilename(annotation, parentImageName) {
+  return `${sanitizeCropFilename(getCropImageTitle(annotation, parentImageName))}.png`;
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Failed to load source image for crop'));
+    image.src = src;
+  });
+}
+
+function canvasToBlob(canvas, type = 'image/png') {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('Failed to create cropped image'));
+      }
+    }, type);
+  });
+}
+
 function getMeasurementLabelViewBoxPosition(line, fontSize = 20) {
   const x = ((Number(line.x1) + Number(line.x2)) / (2 * Number(line.imageWidth))) * 1000;
   const y = ((Number(line.y1) + Number(line.y2)) / (2 * Number(line.imageHeight))) * 1000 - 6;
@@ -979,14 +1052,17 @@ function getPartImageRefs(part) {
     if (!record || typeof record !== 'object') return;
     if (record.overlay_delete_candidate || record.delete_candidate) return;
     const overlay = forceOverlay || record.overlay === true || record.analysis_output === true;
-    if (!overlay && hasViewRefs) return;
+    const cropChild = record.crop_child_image === true || record.cropChildImage === true;
+    if (!overlay && hasViewRefs && !cropChild) return;
     const imageRef = String(record.image_id || record.filename || '');
     if (!imageRef || seen.has(imageRef)) return;
     seen.add(imageRef);
     const modality = getRecordModality(record);
-    const label = overlay
-      ? getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay')
-      : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
+    const label = cropChild
+      ? String(record.crop_title || record.filename || `CROP ${index + 1}`)
+      : overlay
+        ? getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay')
+        : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
     refs.push({
       id: `${part.id}-${overlay ? 'analysis' : 'source'}-${index}`,
       viewName: String(record.side || record.modality || (overlay ? 'overlay' : 'image')).toLowerCase(),
@@ -996,6 +1072,7 @@ function getPartImageRefs(part) {
       filename: String(record.filename || ''),
       imageId: record.image_id ? String(record.image_id) : '',
       overlay,
+      cropChild,
       overlayBaseImageId: record.overlay_base_image_id ? String(record.overlay_base_image_id) : '',
       overlayBaseFilename: record.overlay_base_filename ? String(record.overlay_base_filename) : '',
     });
@@ -2126,6 +2203,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [mprAnnotationPreview, setMprAnnotationPreview] = useState(null);
   const [fullscreenAnnotationPreview, setFullscreenAnnotationPreview] = useState(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+  const [croppingAnnotationId, setCroppingAnnotationId] = useState(null);
   const [viewportWidth, setViewportWidth] = useState(() => (
     typeof window === 'undefined' ? Number.POSITIVE_INFINITY : window.innerWidth
   ));
@@ -3904,6 +3982,110 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     }
   };
 
+  const cropBoxAnnotation = async (annotation) => {
+    if (!selectedPart?.id || !annotation?.id || !isBoundingBoxAnnotation(annotation)) return;
+    const cropBox = getAnnotationCropBox(annotation);
+    if (!cropBox) return;
+    const annotationImageId = getAnnotationSourceImageIdForImage(annotation.image_id || annotation.imageId || annotation?.geometry?.image_id);
+    if (!annotationImageId) throw new Error('Annotation source image is unavailable for crop');
+    const parentImage = projectImageLookup[annotationImageId] || {};
+    const parentFilename = parentImage.filename || annotationImageId || 'image';
+    const cropFilename = getCropUploadFilename(annotation, parentFilename);
+    setCroppingAnnotationId(annotation.id);
+    setError(null);
+    try {
+      const sourceImage = await loadImageElement(`/api/images/${encodeURIComponent(String(annotationImageId))}/content`);
+      const naturalWidth = Number(sourceImage.naturalWidth || sourceImage.width || cropBox.imageWidth || 0);
+      const naturalHeight = Number(sourceImage.naturalHeight || sourceImage.height || cropBox.imageHeight || 0);
+      if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
+        throw new Error('Source image dimensions are unavailable for crop');
+      }
+      const sourceWidth = cropBox.imageWidth || naturalWidth;
+      const sourceHeight = cropBox.imageHeight || naturalHeight;
+      const scaleX = naturalWidth / sourceWidth;
+      const scaleY = naturalHeight / sourceHeight;
+      const sx = Math.max(0, Math.min(naturalWidth - 1, cropBox.x * scaleX));
+      const sy = Math.max(0, Math.min(naturalHeight - 1, cropBox.y * scaleY));
+      const sw = Math.max(1, Math.min(naturalWidth - sx, cropBox.width * scaleX));
+      const sh = Math.max(1, Math.min(naturalHeight - sy, cropBox.height * scaleY));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(sw));
+      canvas.height = Math.max(1, Math.round(sh));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Unable to prepare crop canvas');
+      context.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const blob = await canvasToBlob(canvas, 'image/png');
+      const metadata = {
+        crop_child_image: true,
+        parent_image_id: String(annotationImageId),
+        parent_image_filename: parentFilename,
+        crop_annotation_id: String(annotation.id),
+        crop_title: getCropImageTitle(annotation, parentFilename),
+        crop_bbox: {
+          x: cropBox.x,
+          y: cropBox.y,
+          width: cropBox.width,
+          height: cropBox.height,
+          imageWidth: cropBox.imageWidth || naturalWidth,
+          imageHeight: cropBox.imageHeight || naturalHeight,
+        },
+        part_id: String(selectedPart.id),
+        serial_number: selectedPart.serial_number || '',
+        modality: 'visual',
+        side: 'crop',
+      };
+      const formData = new FormData();
+      formData.append('file', blob, cropFilename);
+      formData.append('metadata', JSON.stringify(metadata));
+      const uploadResp = await fetch(`/api/projects/${projectId}/images`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!uploadResp.ok) throw new Error(`Failed to upload cropped image (${uploadResp.status})`);
+      const createdImage = await uploadResp.json();
+      const assignResp = await fetch(`/api/projects/${projectId}/parts/image-assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: createdImage.filename || cropFilename, to_part_id: selectedPart.id }),
+      });
+      if (!assignResp.ok) throw new Error(`Failed to add crop to inspection workbench (${assignResp.status})`);
+      const sourceEntry = {
+        filename: createdImage.filename || cropFilename,
+        image_id: String(createdImage.id || ''),
+        side: 'crop',
+        modality: 'visual',
+        overlay: false,
+        crop_child_image: true,
+        parent_image_id: String(annotationImageId),
+        parent_image_filename: parentFilename,
+        crop_annotation_id: String(annotation.id),
+        crop_bbox: metadata.crop_bbox,
+      };
+      setProjectImageLookup((prev) => ({
+        ...prev,
+        [sourceEntry.filename]: createdImage,
+        [sourceEntry.image_id]: createdImage,
+      }));
+      setParts((prev) => prev.map((part) => {
+        if (String(part.id) !== String(selectedPart.id)) return part;
+        const existingSourceImages = Array.isArray(part.metadata?.source_images) ? part.metadata.source_images : [];
+        const withoutDuplicate = existingSourceImages.filter((record) => String(record?.image_id || record?.filename || '') !== String(sourceEntry.image_id));
+        return {
+          ...part,
+          metadata: {
+            ...(part.metadata || {}),
+            source_images: [...withoutDuplicate, sourceEntry],
+          },
+        };
+      }));
+      setSelectedImageRef(sourceEntry.image_id || sourceEntry.filename);
+    } catch (err) {
+      setError(err.message || 'Failed to crop annotation');
+    } finally {
+      setCroppingAnnotationId(null);
+    }
+  };
+
   const renderPartSummaryPane = () => (
     <section
       className="workbench-tabbed-panel"
@@ -4717,6 +4899,21 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     <span className="annotation-entry-meta">{createdAt}</span>
                   </div>
                   <div className="annotation-entry-actions">
+                    {isBoundingBoxAnnotation(annotation) && (
+                      <button
+                        type="button"
+                        className="annotation-entry-crop"
+                        aria-label={`Crop annotation ${annotation.comment || annotation.defect_class || annotation.id}`}
+                        disabled={croppingAnnotationId === annotation.id}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          cropBoxAnnotation(annotation);
+                        }}
+                      >
+                        {croppingAnnotationId === annotation.id ? 'Cropping…' : 'Crop'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="annotation-entry-edit"
@@ -6576,6 +6773,20 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	                          <span className="inspection-fullscreen-annotation-title">{annotation.title || `Annotation ${index + 1}`}</span>
 	                          <span className="inspection-fullscreen-annotation-length">{annotation.summary}</span>
 	                        </button>
+	                        {annotation.annotationType === 'box' && (
+	                          <button
+	                            type="button"
+	                            className="inspection-fullscreen-annotation-crop"
+	                            aria-label={`Crop ${annotation.title || `annotation ${index + 1}`}`}
+	                            disabled={croppingAnnotationId === annotation.id}
+	                            onClick={(event) => {
+	                              event.stopPropagation();
+	                              cropBoxAnnotation(annotation);
+	                            }}
+	                          >
+	                            {croppingAnnotationId === annotation.id ? '…' : 'Crop'}
+	                          </button>
+	                        )}
 	                        <button
 	                          type="button"
 	                          className="inspection-fullscreen-annotation-delete"
