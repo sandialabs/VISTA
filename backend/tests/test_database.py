@@ -9,7 +9,7 @@ class TestDatabase:
 
     @pytest.mark.asyncio
     async def test_create_db_and_tables_success(self):
-        """Should succeed under sqlite memory DB configured in conftest."""
+        """Should succeed under PostgreSQL test DB configured in conftest."""
         await create_db_and_tables()
 
     @pytest.mark.asyncio

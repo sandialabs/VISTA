@@ -99,6 +99,21 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
     - uses: actions/checkout@v4
     
@@ -126,9 +141,10 @@ jobs:
 
     - name: Test container
       run: |
-        # Start the container (install dev deps for aiosqlite SQLite driver)
+        # Start the container against PostgreSQL to match the backend test dialect.
         docker run -d --name test-container \
-          -e DATABASE_URL="sqlite+aiosqlite:///./test.db" \
+          --network host \
+          -e DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres" \
           -e FAST_TEST_MODE=true \
           -e DEBUG=true \
           -e SKIP_HEADER_CHECK=true \
@@ -136,7 +152,7 @@ jobs:
           -e POSTGRES_PASSWORD=postgres \
           -e POSTGRES_DB=postgres \
           -e POSTGRES_SERVER=localhost \
-          -p 8000:8000 \
+          -e POSTGRES_PORT=5432 \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
           bash -c "uv sync --frozen && uvicorn main:app --host 0.0.0.0 --port 8000"
         
@@ -166,7 +182,8 @@ jobs:
     - name: Run tests in container
       run: |
         docker run --rm \
-          -e DATABASE_URL="sqlite+aiosqlite:///./test.db" \
+          --network host \
+          -e DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres" \
           -e FAST_TEST_MODE=true \
           -e DEBUG=true \
           -e SKIP_HEADER_CHECK=true \
@@ -174,6 +191,7 @@ jobs:
           -e POSTGRES_PASSWORD=postgres \
           -e POSTGRES_DB=postgres \
           -e POSTGRES_SERVER=localhost \
+          -e POSTGRES_PORT=5432 \
           --workdir /app \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
           bash -c "uv sync --frozen && bash test/run_tests.sh --backend"
