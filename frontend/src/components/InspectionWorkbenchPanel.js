@@ -2648,15 +2648,32 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const visibleSelectedPartImageRefs = useMemo(() => {
     const hidden = new Set(hiddenViewNames.map((name) => String(name).toLowerCase()));
     const enabled = new Set(enabledModalities.map((name) => String(name).toLowerCase()));
-    return selectedPartImageRefs.filter((entry) => {
+    const categoryFiltered = selectedPartImageRefs.filter((entry) => {
       const category = entry.overlay ? 'overlay' : 'source';
       if (!renderCategories.includes(category)) return false;
       if (hidden.has(String(entry.viewName || '').toLowerCase())) return false;
       const modality = String(entry.modality || '').toLowerCase();
       return !modality || modality === 'analyze-overlay' || enabled.has(modality);
     });
+    if (!renderCategories.includes('overlay')) return categoryFiltered;
+    const overlayBaseIdentities = new Set();
+    categoryFiltered.forEach((entry) => {
+      if (!entry.overlay) return;
+      [entry.overlayBaseImageId, entry.overlayBaseFilename]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .forEach((value) => overlayBaseIdentities.add(value));
+    });
+    if (overlayBaseIdentities.size === 0) return categoryFiltered;
+    return categoryFiltered.filter((entry) => {
+      if (entry.overlay) return true;
+      return ![entry.imageId, entry.imageRef, entry.filename]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .some((value) => overlayBaseIdentities.has(value));
+    });
   }, [enabledModalities, hiddenViewNames, renderCategories, selectedPartImageRefs]);
-  const tileColumnMax = Math.max(1, selectedPartImageRefs.length || visibleSelectedPartImageRefs.length || 1);
+  const tileColumnMax = Math.max(1, visibleSelectedPartImageRefs.length || selectedPartImageRefs.length || 1);
   const normalizedTileColumnCount = Math.round(clampRange(
     tileColumnCount,
     1,
@@ -4228,7 +4245,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                             Defects: {defectCount} • Annotations: {annotationCount}
                           </div>
                           {imageEntries.length > 0 && (
-                            <div className="part-summary-images" aria-label={`${part.display_name || part.serial_number} view filters`}>
+                            <div className="part-summary-images" aria-label={`${part.display_name || part.serial_number} view toggles`}>
                               {imageEntries.map(([viewName, imageRef]) => {
                                 const normalizedViewName = String(viewName).toLowerCase();
                                 const isHidden = hiddenViewNames.includes(normalizedViewName);
@@ -4253,7 +4270,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                             </div>
                           )}
                           {partModalities.length > 0 && (
-                            <div className="part-summary-images part-summary-modalities" aria-label={`${part.display_name || part.serial_number} modality filters`}>
+                            <div className="part-summary-images part-summary-modalities" aria-label={`${part.display_name || part.serial_number} modality toggles`}>
                               {partModalities.map((modality) => {
                                 const normalizedModality = String(modality).toLowerCase();
                                 const isEnabled = enabledModalities.map((entry) => String(entry).toLowerCase()).includes(normalizedModality);

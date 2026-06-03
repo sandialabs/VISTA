@@ -1226,14 +1226,14 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => expect(screen.getAllByText('Analyze Output Part').length).toBeGreaterThan(0));
     const composite = screen.getByTestId('inspection-overlay-composite');
     const viewBoard = document.querySelector('.view-board');
-    expect(screen.getByLabelText('Inspection tile columns')).toHaveAttribute('max', '2');
-    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('2');
+    expect(screen.getByLabelText('Inspection tile columns')).toHaveAttribute('max', '1');
+    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('1');
     fireEvent.change(screen.getByLabelText('Inspection tile columns'), { target: { value: '1' } });
     expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('1');
     expect(screen.getByLabelText('Inspection tile columns value')).toHaveValue(1);
     fireEvent.change(screen.getByLabelText('Inspection tile columns value'), { target: { value: '2' } });
-    expect(screen.getByLabelText('Inspection tile columns')).toHaveValue('2');
-    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('2');
+    expect(screen.getByLabelText('Inspection tile columns')).toHaveValue('1');
+    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('1');
     expect(screen.getByText('Watershed From Seeds :: Segmentation Overlay')).toBeInTheDocument();
     expect(within(composite).getByAltText('front source')).toHaveAttribute('src', '/api/images/source-image-1/content');
     expect(within(composite).getByAltText('front overlay')).toHaveAttribute('src', '/api/images/overlay-image-1/content');
@@ -1247,6 +1247,90 @@ describe('InspectionWorkbenchPanel', () => {
       expect(screen.queryByText('Watershed From Seeds :: Segmentation Overlay')).not.toBeInTheDocument();
     });
     expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/analyze/overlays/overlay-image-1', { method: 'DELETE' });
+  });
+
+
+  test('keeps black-hat Analyze overlays attached to a single inspection tile when switching parts', async () => {
+    mockWorkbenchFetch({
+      user: 'black-hat-output',
+      batches: [{ id: 'batch-blackhat', name: 'Batch Black Hat' }],
+      parts: [
+        {
+          id: 'part-blackhat-1',
+          batch_id: 'batch-blackhat',
+          serial_number: 'SN-BLACKHAT-1',
+          display_name: 'Black Hat Overlay Part',
+          review_state: 'in_review',
+          metadata: {
+            configured_views: ['front'],
+            modalities: ['visual'],
+            view_images: { front: 'blackhat-source.png' },
+            source_images: [
+              { filename: 'blackhat-source.png', image_id: 'blackhat-source-image', side: 'front', modality: 'visual', overlay: false },
+            ],
+            analysis_outputs: [
+              {
+                filename: 'blackhat-source_blackhat_overlay.png',
+                image_id: 'blackhat-overlay-image',
+                label: 'Black-Hat Analysis :: Morphology Overlay',
+                overlay: true,
+                analysis_output: true,
+                side: 'front',
+                modality: 'analyze-overlay',
+                overlay_base_image_id: 'blackhat-source-image',
+                overlay_base_filename: 'blackhat-source.png',
+              },
+            ],
+          },
+        },
+        {
+          id: 'part-normal-2',
+          batch_id: 'batch-blackhat',
+          serial_number: 'SN-NORMAL-2',
+          display_name: 'Normal Part',
+          review_state: 'unreviewed',
+          metadata: {
+            configured_views: ['front'],
+            modalities: ['visual'],
+            view_images: { front: 'normal-source.png' },
+            source_images: [
+              { filename: 'normal-source.png', image_id: 'normal-source-image', side: 'front', modality: 'visual', overlay: false },
+            ],
+          },
+        },
+      ],
+      workspaceState: { selected_batch_id: 'batch-blackhat', selected_part_id: 'part-blackhat-1' },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getByText('Morphology Overlay :: Black-Hat Analysis')).toBeInTheDocument());
+    const viewBoard = document.querySelector('.view-board');
+    expect(within(viewBoard).getAllByTestId('inspection-overlay-composite')).toHaveLength(1);
+    expect(within(viewBoard).queryByAltText('front view')).not.toBeInTheDocument();
+    expect(within(viewBoard).getAllByAltText('front source')).toHaveLength(1);
+    expect(within(viewBoard).getAllByAltText('front overlay')).toHaveLength(1);
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
+
+    fireEvent.click(screen.getByText('Normal Part'));
+    await waitFor(() => expect(within(viewBoard).getByAltText('front view')).toHaveAttribute('src', '/api/images/normal-source-image/content'));
+    expect(within(viewBoard).queryByTestId('inspection-overlay-composite')).not.toBeInTheDocument();
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
+
+    fireEvent.click(screen.getByText('Black Hat Overlay Part'));
+    await waitFor(() => expect(within(viewBoard).getByText('Morphology Overlay :: Black-Hat Analysis')).toBeInTheDocument());
+    expect(within(viewBoard).getAllByTestId('inspection-overlay-composite')).toHaveLength(1);
+    expect(within(viewBoard).queryByAltText('front view')).not.toBeInTheDocument();
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
+
+    const blackHatFrontToggle = screen.getByLabelText('Black Hat Overlay Part view toggles').querySelector('button');
+    fireEvent.click(blackHatFrontToggle);
+    fireEvent.click(screen.getByText('Normal Part'));
+    fireEvent.click(screen.getByText('Black Hat Overlay Part'));
+    await waitFor(() => expect(within(viewBoard).getAllByTestId('inspection-overlay-composite')).toHaveLength(1));
+    expect(within(viewBoard).queryByAltText('front view')).not.toBeInTheDocument();
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
   });
 
   test('shows measurement instructions and persists geometry calibration payload when creating a line', async () => {
