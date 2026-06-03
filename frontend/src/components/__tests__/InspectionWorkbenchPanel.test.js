@@ -1481,6 +1481,79 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
   });
 
+
+  test('maps fullscreen zoomed-and-panned pointer tip pixels to bounding box geometry', async () => {
+    mockWorkbenchFetch(scenarioByUser[0]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
+    fireEvent.click(screen.getByAltText('front view'));
+
+    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
+    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 500 });
+    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 250 });
+    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 250, right: 500, bottom: 250 });
+
+    fireEvent.wheel(fullscreenImage, { deltaY: -80, clientX: 250, clientY: 125 });
+    fireEvent.mouseDown(fullscreenImage, { clientX: 250, clientY: 125, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, { clientX: 290, clientY: 155 });
+    fireEvent.mouseUp(fullscreenImage, { clientX: 290, clientY: 155, button: 0 });
+
+    const zoomLayer = document.querySelector('.inspection-fullscreen-image-zoom-layer');
+    expect(zoomLayer.style.transform).toBe('translate(40px, 30px) scale(1.15)');
+    expect(zoomLayer.style.transformOrigin).toBe('50% 50%');
+
+    // Simulate the browser's post-transform image bounds so the event client
+    // coordinate represents the exact pixel beneath the rendered pointer tip on
+    // the zoomed, panned image.
+    const transformedRect = {
+      left: 2.5,
+      top: 11.25,
+      width: 575,
+      height: 287.5,
+      right: 577.5,
+      bottom: 298.75,
+    };
+    fullscreenImage.getBoundingClientRect = () => transformedRect;
+    const clientForNaturalPixel = (x, y) => ({
+      clientX: transformedRect.left + ((x / 500) * transformedRect.width),
+      clientY: transformedRect.top + ((y / 250) * transformedRect.height),
+    });
+
+    const pointerTipStart = clientForNaturalPixel(130, 65);
+    const pointerTipEnd = clientForNaturalPixel(330, 185);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+    fireEvent.mouseDown(fullscreenImage, { ...pointerTipStart, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, pointerTipEnd);
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 10.00 mm'));
+    fireEvent.mouseUp(fullscreenImage, { ...pointerTipEnd, button: 0 });
+
+    await waitFor(() => {
+      const postCall = global.fetch.mock.calls.find((call) => {
+        if (!call[0].includes('/annotations') || call[1]?.method !== 'POST') return false;
+        const body = JSON.parse(call[1].body);
+        return body.geometry?.box;
+      });
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall[1].body);
+      expect(body.geometry.box).toEqual(expect.objectContaining({
+        x: 130,
+        y: 65,
+        width: 200,
+        height: 120,
+        imageWidth: 500,
+        imageHeight: 250,
+      }));
+      expect(body.bbox).toEqual(expect.objectContaining({ x: 130, y: 65, width: 200, height: 120 }));
+      expect(body.measurements).toEqual(expect.objectContaining({
+        width_px: 200,
+        height_px: 120,
+        width_mm: 10,
+        height_mm: 6,
+      }));
+    });
+  });
+
   test('shares source-image annotations across Analyze overlays and saves overlay measurements to the source image', async () => {
     mockWorkbenchFetch({
       user: 'overlay-measurements',
