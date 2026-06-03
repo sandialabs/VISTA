@@ -86,11 +86,17 @@ if [ -n "${JUNIT_XML_PATH:-}" ]; then
   JUNIT_FLAG="--junitxml=$JUNIT_XML_PATH"
 fi
 
+PYTEST_PARALLEL_ARGS=(-n auto)
+if [[ -z "${DATABASE_URL:-}" || "${DATABASE_URL:-}" == postgresql* ]]; then
+  echo "PostgreSQL test database detected; running backend tests serially to avoid shared-schema races."
+  PYTEST_PARALLEL_ARGS=()
+fi
+
 set +e
 if [ "$VERBOSE_MODE" = true ]; then
-  "${PY_BIN}" -m pytest -v -n auto --tb=short --no-header $JUNIT_FLAG tests/
+  "${PY_BIN}" -m pytest -v "${PYTEST_PARALLEL_ARGS[@]}" --tb=short --no-header $JUNIT_FLAG tests/
 else
-  "${PY_BIN}" -m pytest -v -n auto --tb=line --no-header $JUNIT_FLAG tests/
+  "${PY_BIN}" -m pytest -v "${PYTEST_PARALLEL_ARGS[@]}" --tb=line --no-header $JUNIT_FLAG tests/
 fi
 EXIT_CODE=$?
 set -e
