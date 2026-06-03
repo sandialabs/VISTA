@@ -797,4 +797,81 @@ describe('ImageUploader', () => {
       });
     });
   });
+  describe('Associated metadata file upload', () => {
+    test('stores parsed JSON once as project metadata and references it from each uploaded image', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ key: 'stored-metadata' }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: async () => ({ id: 'img-1', filename: 'photo.png' }),
+        });
+
+      renderUploader();
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['{"camera":"A1","exposure":10}'], 'capture.json', { type: 'application/json' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Associated capture\.json as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(fetchSpy.mock.calls[0][0]).toBe('/api/projects/proj-1/metadata');
+      expect(fetchSpy.mock.calls[0][1].method).toBe('POST');
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.key).toMatch(/^associated_upload_metadata:capture\.json:/);
+      expect(projectMetadataPayload.value).toEqual(expect.objectContaining({
+        kind: 'associated_image_upload_metadata',
+        filename: 'capture.json',
+        file_type: 'json',
+        parser: 'json',
+        metadata: { camera: 'A1', exposure: 10 },
+      }));
+
+      const uploadBody = fetchSpy.mock.calls[1][1].body;
+      const imageMetadata = JSON.parse(uploadBody.get('metadata'));
+      expect(imageMetadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(imageMetadata.associated_metadata).toEqual(expect.objectContaining({
+        reference_type: 'project_metadata',
+        project_metadata_key: projectMetadataPayload.key,
+        filename: 'capture.json',
+        file_type: 'json',
+        parser: 'json',
+      }));
+      expect(imageMetadata.associated_metadata.metadata).toBeUndefined();
+    });
+
+    test('parses .nsipro key-value metadata files', async () => {
+      const { parseAssociatedMetadataText } = await import('../ImageUploader');
+      expect(parseAssociatedMetadataText('[capture]\noperator=alice\nexposure: 12\nvalid=true', 'scan.nsipro')).toEqual({
+        parser: 'nsipro-key-value',
+        metadata: {
+          capture: {
+            operator: 'alice',
+            exposure: 12,
+            valid: true,
+          },
+        },
+      });
+    });
+
+    test('blocks upload when associated metadata has an unsupported type', async () => {
+      const { props } = renderUploader();
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['x'], 'notes.txt', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Unsupported metadata file type');
+      expect(screen.getByRole('button', { name: /upload images/i })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+      expect(props.setError).not.toHaveBeenCalledWith(null);
+    });
+  });
+
 });
