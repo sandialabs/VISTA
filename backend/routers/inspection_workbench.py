@@ -1115,6 +1115,16 @@ async def assign_image_to_part(
             "slice_axis": image_metadata.get("slice_axis"),
             "slice_index": image_metadata.get("slice_index"),
         }
+        for metadata_key in (
+            "crop_child_image",
+            "parent_image_id",
+            "parent_image_filename",
+            "crop_annotation_id",
+            "crop_title",
+            "crop_bbox",
+        ):
+            if metadata_key in image_metadata:
+                source_entry[metadata_key] = image_metadata.get(metadata_key)
 
     if target_part:
         target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}

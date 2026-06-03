@@ -5138,11 +5138,12 @@ ul li:hover {
 
 .annotation-entry-actions {
   display: grid;
-  grid-template-columns: auto 28px;
+  grid-template-columns: auto auto 28px;
   gap: 4px;
   align-items: stretch;
 }
 
+.annotation-entry-crop,
 .annotation-entry-edit,
 .annotation-entry-delete {
   align-self: stretch;
@@ -5153,11 +5154,17 @@ ul li:hover {
   line-height: 1;
 }
 
+.annotation-entry-crop,
 .annotation-entry-edit {
   background: #eff6ff;
   color: #1d4ed8;
   font-size: 0.72rem;
   padding: 0 8px;
+}
+
+.annotation-entry-crop {
+  background: #ecfdf5;
+  color: #047857;
 }
 
 .annotation-entry-delete {
@@ -5169,6 +5176,12 @@ ul li:hover {
 .annotation-entry-edit:hover,
 .annotation-entry-edit:focus-visible {
   background: #dbeafe;
+  outline: none;
+}
+
+.annotation-entry-crop:hover,
+.annotation-entry-crop:focus-visible {
+  background: #d1fae5;
   outline: none;
 }
 
@@ -5571,7 +5584,7 @@ ul li:hover {
 
 .inspection-fullscreen-annotation {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px;
+  grid-template-columns: minmax(0, 1fr) auto 30px;
   align-items: center;
   border: 2px solid #3b82f6;
   border-radius: 6px;
@@ -5584,6 +5597,7 @@ ul li:hover {
 }
 
 .inspection-fullscreen-annotation-body,
+.inspection-fullscreen-annotation-crop,
 .inspection-fullscreen-annotation-delete {
   border: 0;
   background: transparent;
@@ -5610,6 +5624,14 @@ ul li:hover {
 .inspection-fullscreen-annotation-length {
   color: #475569;
   font-size: 0.78rem;
+}
+
+.inspection-fullscreen-annotation-crop {
+  height: 100%;
+  color: #047857;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0 8px;
 }
 
 .inspection-fullscreen-annotation-delete {

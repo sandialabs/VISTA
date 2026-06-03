@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch
 import base64
 import io
+import json
 
 from PIL import Image, ImageDraw
 
@@ -1748,14 +1749,16 @@ def _create_project_for_part_image_tests(client, name="Part Image Project"):
     return response.json()["id"], headers
 
 
-def _upload_part_test_image(client, project_id, headers, filename="part-image.png"):
+def _upload_part_test_image(client, project_id, headers, filename="part-image.png", metadata=None):
     image = Image.new("RGB", (8, 8), (12, 34, 56))
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     buffer.seek(0)
+    data = {"metadata": json.dumps(metadata)} if metadata is not None else None
     response = client.post(
         f"/api/projects/{project_id}/images",
         files={"file": (filename, buffer, "image/png")},
+        data=data,
         headers=headers,
     )
     assert response.status_code == 201, response.text
@@ -1792,6 +1795,50 @@ def test_image_assignment_can_move_image_back_to_unassigned(client):
     parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
     assert parts_response.status_code == 200
     assert parts_response.json()[0]["metadata"]["source_images"] == []
+
+
+def test_image_assignment_preserves_crop_child_metadata(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Crop child image project")
+    crop_metadata = {
+        "crop_child_image": True,
+        "parent_image_id": "parent-image-1",
+        "parent_image_filename": "parent.png",
+        "crop_annotation_id": "annotation-box-1",
+        "crop_title": "12_34_crop of parent.png",
+        "crop_bbox": {"x": 12, "y": 34, "width": 56, "height": 78},
+        "side": "crop",
+        "modality": "visual",
+    }
+    uploaded = _upload_part_test_image(
+        client,
+        project_id,
+        headers,
+        "12_34_crop of parent.png.png",
+        metadata=crop_metadata,
+    )
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-CROP", "display_name": "Crop Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_response.status_code == 200, assign_response.text
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    source_image = parts_response.json()[0]["metadata"]["source_images"][0]
+    assert source_image["crop_child_image"] is True
+    assert source_image["parent_image_id"] == "parent-image-1"
+    assert source_image["parent_image_filename"] == "parent.png"
+    assert source_image["crop_annotation_id"] == "annotation-box-1"
+    assert source_image["crop_bbox"] == {"x": 12, "y": 34, "width": 56, "height": 78}
 
 
 def test_delete_part_removes_part_without_deleting_images(client):

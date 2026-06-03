@@ -262,6 +262,7 @@ const defaultCalibration = { pixels_per_mm: 20, pixels_per_inch: 508, unit: 'mm'
 
 function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys, metadataDict = { calibration_default: defaultCalibration } }) {
   let mutableParts = [...parts];
+  const uploadedImages = [];
   const savedWorkspaceStates = [];
   const savedConfigurations = [];
   const annotationsByPart = Object.fromEntries(
@@ -400,6 +401,48 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
     }
     if (url.includes('/batches')) {
       return Promise.resolve({ ok: true, json: async () => batches });
+    }
+    if (url.includes('/projects/proj-1/images') && options.method === 'POST') {
+      const file = options.body?.get?.('file');
+      const metadata = JSON.parse(options.body?.get?.('metadata') || '{}');
+      const created = {
+        id: `uploaded-image-${uploadedImages.length + 1}`,
+        filename: file?.name || `uploaded-image-${uploadedImages.length + 1}.png`,
+        content_type: file?.type || 'image/png',
+        metadata,
+      };
+      uploadedImages.push(created);
+      return Promise.resolve({ ok: true, status: 201, json: async () => created });
+    }
+    if (url.includes('/parts/image-assignments') && options.method === 'POST') {
+      const payload = JSON.parse(options.body || '{}');
+      const uploaded = uploadedImages.find((image) => image.filename === payload.filename) || {};
+      mutableParts = mutableParts.map((part) => {
+        if (part.id !== payload.to_part_id) return part;
+        const existing = Array.isArray(part.metadata?.source_images) ? part.metadata.source_images : [];
+        return {
+          ...part,
+          metadata: {
+            ...(part.metadata || {}),
+            source_images: [
+              ...existing.filter((record) => record.filename !== payload.filename),
+              {
+                filename: payload.filename,
+                image_id: uploaded.id,
+                side: uploaded.metadata?.side || 'crop',
+                modality: uploaded.metadata?.modality || 'visual',
+                overlay: false,
+                crop_child_image: Boolean(uploaded.metadata?.crop_child_image),
+                parent_image_id: uploaded.metadata?.parent_image_id,
+                parent_image_filename: uploaded.metadata?.parent_image_filename,
+                crop_annotation_id: uploaded.metadata?.crop_annotation_id,
+                crop_bbox: uploaded.metadata?.crop_bbox,
+              },
+            ],
+          },
+        };
+      });
+      return Promise.resolve({ ok: true, json: async () => ({ filename: payload.filename, from_part_id: null, to_part_id: payload.to_part_id }) });
     }
     if (url.includes('/parts/') && options.method === 'PATCH') {
       if (url.includes('/annotations/')) {
@@ -563,7 +606,7 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
           : [];
         return [...viewRecords, ...sourceRecords];
       });
-      return Promise.resolve({ ok: true, json: async () => imageRecords });
+      return Promise.resolve({ ok: true, json: async () => [...imageRecords, ...uploadedImages] });
     }
     return Promise.resolve({ ok: false, status: 404 });
   });
@@ -1409,6 +1452,92 @@ describe('InspectionWorkbenchPanel', () => {
     fireEvent.click(screen.getByAltText('front view'));
     await waitFor(() => expect(screen.getAllByText('4.20 mm').length).toBeGreaterThan(1));
     expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('4.20 mm');
+  });
+
+  test('crops bounding box annotations into child images assigned to the workbench', async () => {
+    const originalImage = global.Image;
+    const originalCreateElement = document.createElement.bind(document);
+    global.Image = class MockImage {
+      constructor() {
+        this.naturalWidth = 400;
+        this.naturalHeight = 200;
+        this.width = 400;
+        this.height = 200;
+      }
+
+      set src(value) {
+        this._src = value;
+        setTimeout(() => this.onload?.(), 0);
+      }
+
+      get src() {
+        return this._src;
+      }
+    };
+    const drawImage = jest.fn();
+    const toBlob = jest.fn((callback) => callback(new Blob(['crop-bytes'], { type: 'image/png' })));
+    jest.spyOn(document, 'createElement').mockImplementation((tagName, ...args) => {
+      if (tagName === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => ({ drawImage }),
+          toBlob,
+        };
+      }
+      return originalCreateElement(tagName, ...args);
+    });
+
+    mockWorkbenchFetch({
+      ...scenarioByUser[0],
+      parts: [{
+        ...scenarioByUser[0].parts[0],
+        metadata: {
+          ...scenarioByUser[0].parts[0].metadata,
+          annotations: [{
+            id: 'box-crop-a',
+            image_id: 'part-basic-1-image-1',
+            defect_class: 'Scratch',
+            modality: 'visual',
+            comment: 'Scratch box',
+            bbox: { x: 25, y: 40, width: 80, height: 50 },
+            geometry: { imageWidth: 400, imageHeight: 200, box: { x: 25, y: 40, width: 80, height: 50, imageWidth: 400, imageHeight: 200 } },
+            measurements: { width_px: 80, height_px: 50 },
+            created_by: 'inspector@example.com',
+            created_at: '2026-04-01T09:15:00Z',
+          }],
+        },
+      }],
+    });
+
+    try {
+      render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Crop annotation Scratch box' })).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'Crop annotation Scratch box' }));
+
+      await waitFor(() => expect(drawImage).toHaveBeenCalled());
+      expect(drawImage).toHaveBeenCalledWith(expect.any(Object), 25, 40, 80, 50, 0, 0, 80, 50);
+      await waitFor(() => expect(global.fetch.mock.calls.some((call) => call[0] === '/api/projects/proj-1/images' && call[1]?.method === 'POST')).toBe(true));
+      const uploadCall = global.fetch.mock.calls.find((call) => call[0] === '/api/projects/proj-1/images' && call[1]?.method === 'POST');
+      const uploadedFile = uploadCall[1].body.get('file');
+      const uploadedMetadata = JSON.parse(uploadCall[1].body.get('metadata'));
+      expect(uploadedFile.name).toBe('25_40_crop of front-basic.png.png');
+      expect(uploadedMetadata).toEqual(expect.objectContaining({
+        crop_child_image: true,
+        parent_image_id: 'part-basic-1-image-1',
+        parent_image_filename: 'front-basic.png',
+        crop_annotation_id: 'box-crop-a',
+      }));
+      expect(uploadedMetadata.crop_bbox).toEqual(expect.objectContaining({ x: 25, y: 40, width: 80, height: 50 }));
+      expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ filename: '25_40_crop of front-basic.png.png', to_part_id: 'part-basic-1' }),
+      }));
+      await waitFor(() => expect(screen.getByAltText('crop view')).toBeInTheDocument());
+    } finally {
+      document.createElement.mockRestore();
+      global.Image = originalImage;
+    }
   });
 
   test('preserves fullscreen zoom while drawing repeated bounding boxes', async () => {
