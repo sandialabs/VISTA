@@ -5,7 +5,6 @@ import os
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import NullPool
 from unittest.mock import Mock, patch
 import uuid
 
@@ -17,13 +16,8 @@ if os.name != "nt":
     except ImportError:
         pass
 
-# Set test environment variables before importing app components.
-# Default backend tests to PostgreSQL so CI exercises the production database
-# dialect. CI can override DATABASE_URL, but local runs use these defaults.
-TEST_DATABASE_URL = os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres",
-)
+# Set test environment variables before importing app components
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["FAST_TEST_MODE"] = "true"
 os.environ["S3_ENDPOINT"] = "localhost:9000"
 os.environ["S3_ACCESS_KEY"] = "test-key"
@@ -36,12 +30,11 @@ from core.database import Base, get_db
 from core.schemas import User
 
 # Test database setup
-SQLALCHEMY_DATABASE_URL = TEST_DATABASE_URL
+SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL,
-    echo=False,
-    poolclass=NullPool,
+    echo=True,
 )
 
 TestingSessionLocal = sessionmaker(
