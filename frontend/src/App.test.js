@@ -131,6 +131,100 @@ describe('project type UI exposure', () => {
     jest.resetAllMocks();
   });
 
+  test('previews and accepts a session Postgres URL from dashboard settings', async () => {
+    let projects = [];
+    global.fetch = jest.fn((input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/users/me')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'settings@example.com' }) });
+      }
+      if (url.endsWith('/api/users/me/groups')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ['settings-group'] });
+      }
+      if (url.endsWith('/api/projects/') && method === 'GET') {
+        return Promise.resolve({ ok: true, status: 200, json: async () => projects });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://old:secret@localhost:5432/vista' }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/preview') && method === 'POST') {
+        expect(JSON.parse(init.body)).toEqual({ database_url: 'postgresql+asyncpg://new:secret@localhost:5432/vista' });
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            database_url: 'postgresql+asyncpg://new:secret@localhost:5432/vista',
+            project_count: 1,
+            projects: [{
+              id: 'preview-project-1',
+              name: 'Preview Project',
+              description: 'from new database',
+              meta_group_id: 'settings-group',
+              project_type: 'PT1',
+              image_count: 3,
+              part_count: 2,
+            }],
+          }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/accept') && method === 'POST') {
+        projects = [{
+          id: 'accepted-project-1',
+          name: 'Accepted Project',
+          description: 'active database',
+          meta_group_id: 'settings-group',
+          project_type: 'PT2',
+          image_count: 4,
+          part_count: 1,
+        }];
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://new:secret@localhost:5432/vista' }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+
+    const user = userEvent.setup();
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
+
+    await screen.findByText('No projects yet');
+    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+
+    const settingsModal = screen.getByRole('dialog', { name: 'Dashboard Settings' });
+    expect(await within(settingsModal).findByText('Change Postgres')).toBeInTheDocument();
+    expect(within(settingsModal).getByText('postgresql+asyncpg://old:secret@localhost:5432/vista')).toBeInTheDocument();
+
+    const urlInput = within(settingsModal).getByLabelText('New Postgres URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'postgresql+asyncpg://new:secret@localhost:5432/vista');
+    await user.click(within(settingsModal).getByRole('button', { name: 'Preview' }));
+
+    const previewModal = await screen.findByRole('dialog', { name: 'Dashboard Preview' });
+    expect(within(previewModal).getByText('Preview Project')).toBeInTheDocument();
+    expect(within(previewModal).getByText(/Images: 3 • Parts: 2/)).toBeInTheDocument();
+
+    await user.click(within(previewModal).getByRole('button', { name: 'Accept This URL' }));
+
+    expect(await screen.findByText('Accepted Project')).toBeInTheDocument();
+    expect(screen.getByText(/Postgres database URL updated for this backend session/i)).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/dashboard/settings/database-url/accept',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ database_url: 'postgresql+asyncpg://new:secret@localhost:5432/vista' }) })
+    );
+  });
+
   test.each(projectTypes.flatMap((projectType) => simulatedUsers.map((userScenario) => ({ projectType, userScenario }))))(
     'shows selected project type for $projectType $userScenario.label simulated workflow',
     async ({ projectType, userScenario }) => {
@@ -362,7 +456,11 @@ describe('project type UI exposure', () => {
     await screen.findByText('No projects yet');
     expect(screen.queryByRole('button', { name: 'Choose Import File' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Import Dashboard' }));
+    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+
+    const settingsModal = screen.getByRole('dialog', { name: 'Dashboard Settings' });
+    expect(within(settingsModal).getByText('Dashboard Backup')).toBeInTheDocument();
+    await user.click(within(settingsModal).getByRole('button', { name: 'Import Dashboard' }));
 
     const modal = screen.getByRole('dialog', { name: 'Import Dashboard' });
     const modalImportButton = within(modal).getByRole('button', { name: 'Import Dashboard' });

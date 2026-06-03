@@ -443,7 +443,7 @@ function restoreDashboardState(dashboardState) {
   return restored;
 }
 
-const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComplete, showToast }) {
+const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComplete, showToast, compact = false }) {
   const fileInputRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -568,11 +568,11 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
   };
 
   return (
-    <div className="card dashboard-backup-card">
+    <div className={`card dashboard-backup-card${compact ? ' dashboard-backup-card-compact' : ''}`}>
       <div className="card-content">
         <div className="flex justify-between items-center gap-4">
           <div>
-            <h2 style={{ marginTop: 0 }}>Dashboard Backup</h2>
+            <h2 id="dashboard-backup-settings-title" style={{ marginTop: 0 }}>Dashboard Backup</h2>
             <p style={{ color: 'var(--gray-600)', marginBottom: 0 }}>
               Save or restore VISTA projects, artifacts, metadata, and dashboard preferences with a portable .vistabundle file.
             </p>
@@ -679,6 +679,232 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
                 disabled={importing || previewing || !selectedFile || !preview}
               >
                 {importing ? 'Importing…' : 'Import Dashboard'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+
+const DashboardSettingsModal = memo(function DashboardSettingsModal({ onClose, showToast, onImportComplete, onDatabaseAccepted }) {
+  const [currentDatabaseUrl, setCurrentDatabaseUrl] = useState('');
+  const [databaseUrl, setDatabaseUrl] = useState('');
+  const [loadingCurrentUrl, setLoadingCurrentUrl] = useState(true);
+  const [previewingDatabase, setPreviewingDatabase] = useState(false);
+  const [acceptingDatabase, setAcceptingDatabase] = useState(false);
+  const [databasePreview, setDatabasePreview] = useState(null);
+  const [databaseError, setDatabaseError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setLoadingCurrentUrl(true);
+    fetch('/api/dashboard/settings/database-url')
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || `HTTP error! status: ${response.status}`);
+        return payload;
+      })
+      .then((payload) => {
+        if (!active) return;
+        setCurrentDatabaseUrl(payload.database_url || '');
+        setDatabaseUrl(payload.database_url || '');
+      })
+      .catch((error) => {
+        if (!active) return;
+        setDatabaseError(error.message || 'Unable to load the current Postgres URL.');
+      })
+      .finally(() => {
+        if (active) setLoadingCurrentUrl(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const trimmedDatabaseUrl = databaseUrl.trim();
+  const hasDatabaseUrlChange = trimmedDatabaseUrl && trimmedDatabaseUrl !== currentDatabaseUrl;
+
+  const postDatabaseUrl = async (endpoint) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database_url: trimmedDatabaseUrl }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || `HTTP error! status: ${response.status}`);
+    return payload;
+  };
+
+  const handlePreviewDatabase = async () => {
+    if (!hasDatabaseUrlChange) {
+      setDatabaseError('Enter a new Postgres URL before previewing.');
+      return;
+    }
+    setDatabaseError('');
+    setDatabasePreview(null);
+    setPreviewingDatabase(true);
+    try {
+      const previewPayload = await postDatabaseUrl('/api/dashboard/settings/database-url/preview');
+      setDatabasePreview(previewPayload);
+    } catch (error) {
+      setDatabaseError(error.message || 'Unable to preview the dashboard from that URL.');
+    } finally {
+      setPreviewingDatabase(false);
+    }
+  };
+
+  const handleAcceptDatabase = async () => {
+    if (!hasDatabaseUrlChange) {
+      setDatabaseError('Enter a new Postgres URL before accepting.');
+      return;
+    }
+    setDatabaseError('');
+    setAcceptingDatabase(true);
+    try {
+      const acceptedPayload = await postDatabaseUrl('/api/dashboard/settings/database-url/accept');
+      setCurrentDatabaseUrl(acceptedPayload.database_url || trimmedDatabaseUrl);
+      setDatabaseUrl(acceptedPayload.database_url || trimmedDatabaseUrl);
+      setDatabasePreview(null);
+      showToast('Postgres database URL updated for this backend session.', 'success');
+      await onDatabaseAccepted?.();
+    } catch (error) {
+      setDatabaseError(error.message || 'Unable to switch to that Postgres URL.');
+    } finally {
+      setAcceptingDatabase(false);
+    }
+  };
+
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-settings-title">
+      <div className="modal-content dashboard-settings-modal">
+        <div className="modal-header">
+          <h3 id="dashboard-settings-title">Dashboard Settings</h3>
+          <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close dashboard settings">
+            &times;
+          </button>
+        </div>
+        <div className="modal-body dashboard-settings-body">
+          <section className="settings-section" aria-labelledby="dashboard-backup-settings-title">
+            <DashboardBackupPanel showToast={showToast} onImportComplete={onImportComplete} compact />
+          </section>
+
+          <section className="settings-section change-postgres-section" aria-labelledby="change-postgres-title">
+            <div className="settings-section-header">
+              <h2 id="change-postgres-title">Change Postgres</h2>
+              <p>
+                Preview another VISTA database before switching this running backend session to use it.
+              </p>
+            </div>
+            {loadingCurrentUrl ? (
+              <div role="status" className="alert alert-info">Loading current Postgres URL…</div>
+            ) : (
+              <>
+                <div className="current-database-url">
+                  <span>Current URL</span>
+                  <code>{currentDatabaseUrl || 'Not configured'}</code>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="dashboard-postgres-url">New Postgres URL</label>
+                  <input
+                    id="dashboard-postgres-url"
+                    type="text"
+                    className="form-control"
+                    value={databaseUrl}
+                    onChange={(event) => {
+                      setDatabaseUrl(event.target.value);
+                      setDatabasePreview(null);
+                      setDatabaseError('');
+                    }}
+                    placeholder="postgresql+asyncpg://user:password@host:5432/database"
+                    autoComplete="off"
+                  />
+                  <small className="form-text">
+                    This session-only change affects the running backend process and is not written to environment files.
+                  </small>
+                </div>
+                {databaseError && <div role="alert" className="alert alert-error">{databaseError}</div>}
+                <div className="database-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handlePreviewDatabase}
+                    disabled={previewingDatabase || acceptingDatabase || !hasDatabaseUrlChange}
+                  >
+                    {previewingDatabase ? 'Previewing…' : 'Preview'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    onClick={handleAcceptDatabase}
+                    disabled={previewingDatabase || acceptingDatabase || !hasDatabaseUrlChange}
+                  >
+                    {acceptingDatabase ? 'Accepting…' : 'Accept'}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+
+      {databasePreview && (
+        <div className="modal nested-modal" role="dialog" aria-modal="true" aria-labelledby="database-preview-title">
+          <div className="modal-content database-preview-modal">
+            <div className="modal-header">
+              <h3 id="database-preview-title">Dashboard Preview</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setDatabasePreview(null)}
+                aria-label="Close dashboard preview"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="database-preview-summary">
+                Preview from <code>{databasePreview.database_url}</code>: {databasePreview.project_count} project(s).
+              </p>
+              {databasePreview.projects.length === 0 ? (
+                <div className="card text-center">
+                  <div className="card-content">
+                    <h3>No projects yet</h3>
+                    <p>This database is reachable but does not currently show dashboard projects.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="preview-projects-grid">
+                  {databasePreview.projects.map((project) => (
+                    <div key={project.id} className="project-card preview-project-card">
+                      <div className="project-card-header">
+                        <h3 className="project-card-title">{project.name}</h3>
+                        <div className="project-card-meta">
+                          ID: {project.id} • Group: {project.meta_group_id} • Type: {project.project_type || 'PT1'}
+                        </div>
+                        <div className="project-card-meta">
+                          Images: {project.image_count ?? 0} • Parts: {project.part_count ?? 0}
+                        </div>
+                      </div>
+                      <div className="project-card-body">
+                        <p className="project-card-description">{project.description || 'No description provided'}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={() => setDatabasePreview(null)}>
+                Keep Editing
+              </button>
+              <button type="button" className="btn btn-success" onClick={handleAcceptDatabase} disabled={acceptingDatabase}>
+                {acceptingDatabase ? 'Accepting…' : 'Accept This URL'}
               </button>
             </div>
           </div>
@@ -831,6 +1057,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserGroups, setCurrentUserGroups] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [showDashboardSettings, setShowDashboardSettings] = useState(false);
   // const [newProject, setNewProject] = useState({  // Commented out - not currently used
   //   name: '',
   //   description: '',
@@ -1064,6 +1291,16 @@ function App() {
             )}
           </div>
           <div className="header-actions">
+            <button
+              type="button"
+              className="btn btn-secondary dashboard-settings-button"
+              onClick={() => setShowDashboardSettings(true)}
+              aria-label="Open dashboard settings"
+              title="Dashboard settings"
+            >
+              <span aria-hidden="true">⚙</span>
+              <span>Settings</span>
+            </button>
             <Link to="/api-keys" className="btn btn-secondary">
               API Keys
             </Link>
@@ -1100,11 +1337,6 @@ function App() {
             </div>
           </div>
         </div>
-
-        <DashboardBackupPanel
-          showToast={showToast}
-          onImportComplete={() => loadProjects()}
-        />
 
         {loading && (
           <div className="loading-container">
@@ -1189,6 +1421,14 @@ function App() {
           project={editingProject}
           onClose={() => setEditingProject(null)}
           onSubmit={handleUpdateProject}
+        />
+      )}
+      {showDashboardSettings && (
+        <DashboardSettingsModal
+          onClose={() => setShowDashboardSettings(false)}
+          showToast={showToast}
+          onImportComplete={() => loadProjects()}
+          onDatabaseAccepted={() => loadProjects()}
         />
       )}
       {deletingProject && (
