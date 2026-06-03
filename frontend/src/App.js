@@ -447,9 +447,29 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
   const fileInputRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [exportProgress, setExportProgress] = useState(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+
+  const resetImportSelection = () => {
+    setSelectedFile(null);
+    setPreview(null);
+    setPreviewing(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const closeImportModal = () => {
+    if (importing) return;
+    setShowImportModal(false);
+    resetImportSelection();
+  };
+
+  const openImportModal = () => {
+    resetImportSelection();
+    setShowImportModal(true);
+  };
 
   const downloadBlob = (blob, disposition) => {
     const url = window.URL.createObjectURL(blob);
@@ -500,6 +520,7 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
     if (!file) return;
     const formData = new FormData();
     formData.append('file', file);
+    setPreviewing(true);
     try {
       const response = await fetch('/api/dashboard/import/preview', { method: 'POST', body: formData });
       const payload = await response.json().catch(() => ({}));
@@ -508,19 +529,22 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
     } catch (error) {
       showToast(error.message || 'Failed to inspect dashboard backup.', 'error');
       setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } finally {
+      setPreviewing(false);
     }
   };
 
   const handleImportDashboard = async () => {
     if (!selectedFile) {
-      fileInputRef.current?.click();
+      fileInputRef.current?.focus();
+      showToast('Choose a dashboard backup file before importing.', 'error');
       return;
     }
     if (!preview) {
       showToast('Inspect the backup before importing.', 'error');
       return;
     }
-    if (!window.confirm(`Import ${preview.project_count || 0} project backup(s) as new projects?`)) return;
     setImporting(true);
     const formData = new FormData();
     formData.append('file', selectedFile);
@@ -533,9 +557,8 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
       // UI state is optional and restored from a best-effort sidecar if users re-select a compatible backup later.
       restoreDashboardState(payload.dashboard_state);
       showToast(`Imported ${payload.project_count || 0} project backup(s).`, 'success');
-      setSelectedFile(null);
-      setPreview(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setShowImportModal(false);
+      resetImportSelection();
       onImportComplete?.();
     } catch (error) {
       showToast(error.message || 'Failed to import dashboard backup.', 'error');
@@ -558,15 +581,11 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
             <button type="button" className="btn btn-secondary" onClick={handleExportDashboard} disabled={exporting}>
               {exporting ? 'Exporting…' : 'Export Dashboard'}
             </button>
-            <button type="button" className="btn btn-primary" onClick={() => fileInputRef.current?.click()} disabled={importing}>
-              Choose Import File
-            </button>
-            <button type="button" className="btn btn-success" onClick={handleImportDashboard} disabled={importing || !selectedFile || !preview}>
-              {importing ? 'Importing…' : 'Import Dashboard'}
+            <button type="button" className="btn btn-primary" onClick={openImportModal} disabled={importing}>
+              Import Dashboard
             </button>
           </div>
         </div>
-        <input ref={fileInputRef} type="file" accept=".vistabundle,.zip,application/zip" onChange={handleFileSelected} style={{ display: 'none' }} />
         {exporting && exportProgress && (
           <div
             role="status"
@@ -604,12 +623,67 @@ const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComple
             </div>
           </div>
         )}
-        {preview && (
-          <div className="alert alert-success" style={{ marginTop: 'var(--space-4)' }}>
-            Backup ready: {preview.project_count} project(s), {preview.missing_artifacts?.length || 0} missing artifact(s).
-          </div>
-        )}
       </div>
+
+      {showImportModal && (
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="import-dashboard-title">
+          <div className="modal-content dashboard-import-modal">
+            <div className="modal-header">
+              <h3 id="import-dashboard-title">Import Dashboard</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={closeImportModal}
+                disabled={importing}
+                aria-label="Close import dashboard modal"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="dashboard-import-description">
+                Choose a VISTA dashboard backup file to inspect before importing projects as new dashboard entries.
+              </p>
+              <div className="form-group">
+                <label htmlFor="dashboard-import-file">Dashboard backup file</label>
+                <input
+                  ref={fileInputRef}
+                  id="dashboard-import-file"
+                  type="file"
+                  accept=".vistabundle,.zip,application/zip"
+                  onChange={handleFileSelected}
+                  className="form-control"
+                  disabled={importing || previewing}
+                />
+                <small className="form-text">Supported formats: .vistabundle or .zip dashboard backups.</small>
+              </div>
+              {previewing && (
+                <div role="status" className="alert alert-info dashboard-import-status">
+                  Inspecting dashboard backup…
+                </div>
+              )}
+              {preview && (
+                <div className="alert alert-success dashboard-import-status">
+                  Backup ready: {preview.project_count} project(s), {preview.missing_artifacts?.length || 0} missing artifact(s).
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={closeImportModal} disabled={importing}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-success"
+                onClick={handleImportDashboard}
+                disabled={importing || previewing || !selectedFile || !preview}
+              >
+                {importing ? 'Importing…' : 'Import Dashboard'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

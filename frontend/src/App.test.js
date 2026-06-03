@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
@@ -304,6 +304,93 @@ describe('project type UI exposure', () => {
         })
       );
     });
+  });
+
+
+  test('opens a file chooser modal from the single Import Dashboard button', async () => {
+    let projectsRequestCount = 0;
+    global.fetch = jest.fn((input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/users/me')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ email: 'importer@example.com' }),
+        });
+      }
+      if (url.endsWith('/api/users/me/groups')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ['import-group'],
+        });
+      }
+      if (url.endsWith('/api/projects/') && method === 'GET') {
+        projectsRequestCount += 1;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ([]),
+        });
+      }
+      if (url.endsWith('/api/dashboard/import/preview') && method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ project_count: 2, missing_artifacts: [] }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/import') && method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ project_count: 2, dashboard_state: { gallery_state: {} } }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+
+    const user = userEvent.setup();
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
+
+    await screen.findByText('No projects yet');
+    expect(screen.queryByRole('button', { name: 'Choose Import File' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Import Dashboard' }));
+
+    const modal = screen.getByRole('dialog', { name: 'Import Dashboard' });
+    const modalImportButton = within(modal).getByRole('button', { name: 'Import Dashboard' });
+    expect(within(modal).getByLabelText('Dashboard backup file')).toBeInTheDocument();
+    expect(modalImportButton).toBeDisabled();
+
+    await user.upload(
+      within(modal).getByLabelText('Dashboard backup file'),
+      new File(['dashboard-backup'], 'dashboard.vistabundle', { type: 'application/zip' })
+    );
+
+    expect(await within(modal).findByText('Backup ready: 2 project(s), 0 missing artifact(s).')).toBeInTheDocument();
+    expect(modalImportButton).toBeEnabled();
+
+    await user.click(modalImportButton);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Import Dashboard' })).not.toBeInTheDocument();
+      expect(projectsRequestCount).toBeGreaterThanOrEqual(2);
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/dashboard/import/preview',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) })
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/dashboard/import',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) })
+    );
   });
 
   test.each(projectTypes.flatMap((projectType) => simulatedUsers.map((userScenario) => ({ projectType, userScenario }))))(
