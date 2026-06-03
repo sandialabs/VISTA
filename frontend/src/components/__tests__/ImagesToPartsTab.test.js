@@ -136,7 +136,6 @@ describe('ImagesToPartsTab', () => {
     const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
     const onAssignmentsChanged = jest.fn().mockResolvedValue();
     const promptSpy = jest.spyOn(window, 'prompt')
-      .mockReturnValueOnce('SN-NEW-001')
       .mockReturnValueOnce('New Part Name');
 
     render(
@@ -155,13 +154,26 @@ describe('ImagesToPartsTab', () => {
       expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serial_number: 'SN-NEW-001', display_name: 'New Part Name' }),
+        body: JSON.stringify({ serial_number: 'New Part Name', display_name: 'New Part Name' }),
       });
     });
-    expect(promptSpy).toHaveBeenCalledTimes(2);
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(promptSpy).toHaveBeenCalledWith('Enter a name for the new part:');
     await waitFor(() => {
       expect(onAssignmentsChanged).toHaveBeenCalled();
     });
+  });
+
+  test('does not create a new part when the name prompt is blank', () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+    const promptSpy = jest.spyOn(window, 'prompt').mockReturnValueOnce('   ');
+
+    render(<ImagesToPartsTab projectId="proj-1" parts={[]} images={[]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create new part' }));
+
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test('adds an empty new part above existing parts after creating a part', async () => {
@@ -170,7 +182,6 @@ describe('ImagesToPartsTab', () => {
       json: async () => ({ id: 'part-new', serial_number: 'SN-NEW-001', display_name: 'New Part Name' }),
     });
     jest.spyOn(window, 'prompt')
-      .mockReturnValueOnce('SN-NEW-001')
       .mockReturnValueOnce('New Part Name');
 
     const { container } = render(

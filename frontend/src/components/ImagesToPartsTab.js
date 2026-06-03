@@ -92,15 +92,13 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
   };
 
   const handleCreatePart = async () => {
-    const serialNumberInput = window.prompt('Enter a serial number for the new part:');
-    const serialNumber = typeof serialNumberInput === 'string' ? serialNumberInput.trim() : '';
-    if (!serialNumber) return;
-    const displayNameInput = window.prompt('Enter a display name for the new part (optional):', serialNumber);
-    const displayName = typeof displayNameInput === 'string' ? displayNameInput.trim() : '';
+    const partNameInput = window.prompt('Enter a name for the new part:');
+    const partName = typeof partNameInput === 'string' ? partNameInput.trim() : '';
+    if (!partName) return;
     try {
       const response = await fetch(`/api/projects/${projectId}/parts`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serial_number: serialNumber, display_name: displayName || undefined }),
+        body: JSON.stringify({ serial_number: partName, display_name: partName }),
       });
       if (!response.ok) throw new Error(`Failed to create part (${response.status})`);
       let createdPart = null;
@@ -110,8 +108,8 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
         createdPart = null;
       }
       const createdPartId = createdPart?.id ? String(createdPart.id) : `new-${Date.now()}`;
-      const createdSerialNumber = createdPart?.serial_number || serialNumber;
-      const createdDisplayName = createdPart?.display_name || displayName || createdSerialNumber;
+      const createdSerialNumber = createdPart?.serial_number || partName;
+      const createdDisplayName = createdPart?.display_name || partName;
       setLocalBuckets((previous) => ({
         ...previous,
         partBuckets: [
