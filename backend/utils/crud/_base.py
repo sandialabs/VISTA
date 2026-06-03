@@ -10,6 +10,7 @@ __all__ = [
     "bulk_insert_ml_annotations",
     "get_user_by_email", "get_user_by_id", "create_user", "update_user",
     "get_project", "get_projects_by_group_ids", "get_all_projects", "create_project",
+    "archive_project", "unarchive_project",
     "get_data_instance", "get_data_instance_for_update", "get_image",
     "get_data_instances_for_project", "get_deleted_images_for_project",
     "count_deleted_images_for_project",
