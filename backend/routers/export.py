@@ -5,22 +5,25 @@ import json
 import logging
 import re
 import zipfile
+import hashlib
 from collections import defaultdict
 from decimal import Decimal
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func as _func
+from sqlalchemy.exc import IntegrityError
 
 from core import models, schemas
 from core.config import settings
 from core.database import get_db
 from core.group_auth_helper import is_user_in_group
 from utils.boto3_client import boto3_client
-from utils.dependencies import get_current_user
+from utils.dependencies import get_accessible_projects_for_user, get_current_user
 import utils.crud as crud
+from utils.streaming_zip import StreamingZipEntry, iter_streaming_zip
 from routers.inspection_workbench import _default_project_configuration
 
 logger = logging.getLogger(__name__)
@@ -435,6 +438,816 @@ async def _read_storage_object_bytes(object_storage_key: str) -> bytes | None:
         )
         return None
     return buffer.getvalue()
+
+
+
+
+def _json_bytes(payload: dict | list) -> bytes:
+    return json.dumps(_json_safe(payload), indent=2, sort_keys=True).encode("utf-8")
+
+
+def _read_storage_object_bytes_sync(object_storage_key: str) -> bytes | None:
+    if not boto3_client or not object_storage_key:
+        return None
+    buffer = io.BytesIO()
+    try:
+        boto3_client.download_fileobj(settings.S3_BUCKET, object_storage_key, buffer)
+    except Exception as exc:
+        logger.warning(
+            "Project backup could not read storage object",
+            extra={"object_storage_key": object_storage_key, "error": str(exc)},
+        )
+        return None
+    return buffer.getvalue()
+
+
+def _write_storage_object_bytes_sync(object_storage_key: str, payload: bytes, content_type: str | None) -> bool:
+    if not boto3_client or not object_storage_key:
+        return False
+    try:
+        boto3_client.upload_fileobj(
+            io.BytesIO(payload),
+            settings.S3_BUCKET,
+            object_storage_key,
+            ExtraArgs={"ContentType": content_type or "application/octet-stream"},
+        )
+    except Exception as exc:
+        logger.warning(
+            "Project import could not write storage object",
+            extra={"object_storage_key": object_storage_key, "error": str(exc)},
+        )
+        return False
+    return True
+
+
+def _artifact_content_factory(image_ref: dict, manifest_payload: dict, artifact_counts: dict, missing_artifacts: list[dict]):
+    def _factory() -> bytes:
+        object_storage_key = image_ref.get("object_storage_key") or ""
+        file_bytes = _read_storage_object_bytes_sync(object_storage_key)
+        if file_bytes is None:
+            artifact_counts["files_missing"] += 1
+            missing_artifacts.append({
+                "image_id": image_ref.get("image_id", ""),
+                "filename": image_ref.get("filename", ""),
+                "archive_path": image_ref.get("archive_path", ""),
+                "object_storage_key": object_storage_key,
+            })
+            return b""
+        artifact_counts["files_written"] += 1
+        checksums = manifest_payload.setdefault("checksums", {})
+        checksums[image_ref.get("archive_path") or ""] = hashlib.sha256(file_bytes).hexdigest()
+        return file_bytes
+    return _factory
+
+
+async def _collect_project_backup_payload(
+    *,
+    project_id: uuid.UUID,
+    db: AsyncSession,
+    db_project: models.Project,
+    current_user: schemas.User,
+    include_images: bool = True,
+    include_overlays: bool = True,
+    include_metadata: bool = True,
+    include_created_overlays: bool = True,
+    include_project_configuration: bool = True,
+    include_deleted: bool = False,
+) -> dict:
+    """Collect a restorable project backup payload plus artifact references."""
+
+    bundle_json_response = await export_project_bundle_json(
+        project_id=project_id,
+        db=db,
+        current_user=current_user,
+    )
+    bundle_payload = json.loads(bundle_json_response.body.decode("utf-8"))
+
+    image_query = (
+        select(models.DataInstance)
+        .where(models.DataInstance.project_id == project_id)
+        .order_by(models.DataInstance.created_at.asc(), models.DataInstance.id.asc())
+    )
+    if not include_deleted:
+        image_query = image_query.where(models.DataInstance.deleted_at.is_(None))
+    image_rows = (await db.execute(image_query)).scalars().all()
+
+    group_rows = (await db.execute(
+        select(models.ImageGroup)
+        .where(models.ImageGroup.project_id == project_id)
+        .order_by(models.ImageGroup.identifier.asc(), models.ImageGroup.id.asc())
+    )).scalars().all()
+    batch_rows = (await db.execute(
+        select(models.InspectionBatch)
+        .where(models.InspectionBatch.project_id == project_id)
+        .order_by(models.InspectionBatch.name.asc(), models.InspectionBatch.id.asc())
+    )).scalars().all()
+    part_rows = (await db.execute(
+        select(models.InspectionPart)
+        .where(models.InspectionPart.project_id == project_id)
+        .order_by(models.InspectionPart.serial_number.asc(), models.InspectionPart.id.asc())
+    )).scalars().all()
+    project_metadata_rows = (await db.execute(
+        select(models.ProjectMetadata)
+        .where(models.ProjectMetadata.project_id == project_id)
+        .order_by(models.ProjectMetadata.key.asc(), models.ProjectMetadata.id.asc())
+    )).scalars().all()
+    image_class_rows = (await db.execute(
+        select(models.ImageClass)
+        .where(models.ImageClass.project_id == project_id)
+        .order_by(models.ImageClass.name.asc(), models.ImageClass.id.asc())
+    )).scalars().all()
+
+    image_ids = [image.id for image in image_rows]
+    image_class_ids = [image_class.id for image_class in image_class_rows]
+    classification_rows = []
+    comment_rows = []
+    review_rows = []
+    ml_analysis_rows = []
+    ml_annotation_rows = []
+    if image_ids:
+        classification_rows = (await db.execute(
+            select(models.ImageClassification)
+            .where(models.ImageClassification.image_id.in_(image_ids))
+            .order_by(models.ImageClassification.created_at.asc(), models.ImageClassification.id.asc())
+        )).scalars().all()
+        comment_rows = (await db.execute(
+            select(models.ImageComment)
+            .where(models.ImageComment.image_id.in_(image_ids))
+            .order_by(models.ImageComment.created_at.asc(), models.ImageComment.id.asc())
+        )).scalars().all()
+        review_rows = (await db.execute(
+            select(models.ImageReview)
+            .where(models.ImageReview.image_id.in_(image_ids))
+            .order_by(models.ImageReview.created_at.asc(), models.ImageReview.id.asc())
+        )).scalars().all()
+        ml_analysis_rows = (await db.execute(
+            select(models.MLAnalysis)
+            .where(models.MLAnalysis.image_id.in_(image_ids))
+            .order_by(models.MLAnalysis.created_at.asc(), models.MLAnalysis.id.asc())
+        )).scalars().all()
+    ml_analysis_ids = [analysis.id for analysis in ml_analysis_rows]
+    if ml_analysis_ids:
+        ml_annotation_rows = (await db.execute(
+            select(models.MLAnnotation)
+            .where(models.MLAnnotation.analysis_id.in_(ml_analysis_ids))
+            .order_by(models.MLAnnotation.created_at.asc(), models.MLAnnotation.id.asc())
+        )).scalars().all()
+
+    user_ids = set()
+    for image in image_rows:
+        if image.uploader_id:
+            user_ids.add(image.uploader_id)
+        if image.deleted_by_user_id:
+            user_ids.add(image.deleted_by_user_id)
+    for classification in classification_rows:
+        if classification.created_by_id:
+            user_ids.add(classification.created_by_id)
+    for comment in comment_rows:
+        if comment.author_id:
+            user_ids.add(comment.author_id)
+    for review in review_rows:
+        if review.reviewer_id:
+            user_ids.add(review.reviewer_id)
+    for analysis in ml_analysis_rows:
+        if analysis.requested_by_id:
+            user_ids.add(analysis.requested_by_id)
+    user_rows = []
+    if user_ids:
+        user_rows = (await db.execute(
+            select(models.User).where(models.User.id.in_(list(user_ids))).order_by(models.User.email.asc())
+        )).scalars().all()
+
+    project_configuration = _default_project_configuration(db_project.project_type)
+    for metadata in project_metadata_rows:
+        if metadata.key == PROJECT_CONFIGURATION_KEY and isinstance(metadata.value, dict):
+            project_configuration = {**project_configuration, **metadata.value}
+            break
+
+    part_overlay_filenames: set[str] = set()
+    for part in part_rows:
+        metadata_obj = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+        source_images = metadata_obj.get("source_images")
+        if isinstance(source_images, list):
+            for record in source_images:
+                if isinstance(record, dict) and record.get("overlay") and record.get("filename"):
+                    part_overlay_filenames.add(str(record["filename"]))
+
+    used_paths: set[str] = set()
+    image_refs = []
+    artifact_counts = {
+        "images_requested": 0,
+        "overlays_requested": 0,
+        "files_written": 0,
+        "files_missing": 0,
+    }
+    for image in image_rows:
+        is_overlay = _image_record_is_overlay(image.filename, image.metadata_json, part_overlay_filenames)
+        should_include_file = include_overlays if is_overlay else include_images
+        archive_path = ""
+        if should_include_file:
+            artifact_counts["overlays_requested" if is_overlay else "images_requested"] += 1
+            archive_path = _dedupe_archive_path(
+                f"projects/{project_id}/artifacts/overlays" if is_overlay else f"projects/{project_id}/artifacts/images",
+                image.filename or f"{image.id}.bin",
+                used_paths,
+            )
+        image_refs.append({
+            "image_id": str(image.id),
+            "filename": image.filename,
+            "archive_path": archive_path,
+            "artifact_kind": "overlay" if is_overlay else "image",
+            "object_storage_key": image.object_storage_key,
+            "size_bytes": image.size_bytes,
+            "content_type": image.content_type or "",
+            "uploaded_by": image.uploaded_by_user_id or "",
+            "uploader_id": str(image.uploader_id) if image.uploader_id else "",
+            "group_id": str(image.group_id) if image.group_id else "",
+            "created_at": image.created_at,
+            "updated_at": image.updated_at,
+            "deleted_at": image.deleted_at,
+            "deletion_reason": image.deletion_reason,
+            "storage_deleted": image.storage_deleted,
+            "metadata_json": image.metadata_json if isinstance(image.metadata_json, dict) else {},
+        })
+
+    backup_payload = {
+        "project": {
+            "id": str(db_project.id),
+            "name": db_project.name,
+            "description": db_project.description or "",
+            "meta_group_id": db_project.meta_group_id,
+            "project_type": db_project.project_type,
+            "created_by": db_project.created_by or "",
+            "is_archived": bool(db_project.is_archived),
+            "archived_at": db_project.archived_at,
+            "created_at": db_project.created_at,
+            "updated_at": db_project.updated_at,
+        },
+        "users": [
+            {
+                "id": str(user.id),
+                "email": user.email,
+                "username": user.username,
+                "is_active": user.is_active,
+            }
+            for user in user_rows
+        ],
+        "image_groups": [
+            {
+                "id": str(group.id),
+                "identifier": group.identifier,
+                "display_name": group.display_name or "",
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+            }
+            for group in group_rows
+        ],
+        "project_metadata": [
+            {
+                "id": str(metadata.id),
+                "key": metadata.key,
+                "value_json": metadata.value,
+                "created_at": metadata.created_at,
+                "updated_at": metadata.updated_at,
+            }
+            for metadata in project_metadata_rows
+        ],
+        "project_configuration": project_configuration,
+        "images": image_refs,
+        "batches": [
+            {
+                "id": str(batch.id),
+                "name": batch.name,
+                "description": batch.description or "",
+                "owner": batch.owner or "",
+                "status": batch.status,
+                "created_at": batch.created_at,
+                "updated_at": batch.updated_at,
+            }
+            for batch in batch_rows
+        ],
+        "parts": [
+            {
+                "id": str(part.id),
+                "batch_id": str(part.batch_id) if part.batch_id else "",
+                "serial_number": part.serial_number,
+                "display_name": part.display_name or "",
+                "review_state": part.review_state,
+                "metadata_json": part.metadata_json if isinstance(part.metadata_json, dict) else {},
+                "created_at": part.created_at,
+                "updated_at": part.updated_at,
+            }
+            for part in part_rows
+        ],
+        "image_classes": [
+            {
+                "id": str(image_class.id),
+                "name": image_class.name,
+                "description": image_class.description or "",
+                "created_at": image_class.created_at,
+                "updated_at": image_class.updated_at,
+            }
+            for image_class in image_class_rows
+        ],
+        "classifications": [
+            {
+                "id": str(classification.id),
+                "image_id": str(classification.image_id),
+                "class_id": str(classification.class_id),
+                "created_by_id": str(classification.created_by_id),
+                "created_at": classification.created_at,
+                "updated_at": classification.updated_at,
+            }
+            for classification in classification_rows
+            if not image_class_ids or classification.class_id in image_class_ids
+        ],
+        "comments": [
+            {
+                "id": str(comment.id),
+                "image_id": str(comment.image_id),
+                "author_id": str(comment.author_id),
+                "text": comment.text,
+                "created_at": comment.created_at,
+                "updated_at": comment.updated_at,
+            }
+            for comment in comment_rows
+        ],
+        "reviews": [
+            {
+                "id": str(review.id),
+                "image_id": str(review.image_id),
+                "project_id": str(review.project_id),
+                "reviewer_id": str(review.reviewer_id),
+                "status": review.status,
+                "notes": review.notes,
+                "created_at": review.created_at,
+                "updated_at": review.updated_at,
+            }
+            for review in review_rows
+        ],
+        "ml_analyses": [
+            {
+                "id": str(analysis.id),
+                "image_id": str(analysis.image_id),
+                "model_name": analysis.model_name,
+                "model_version": analysis.model_version,
+                "status": analysis.status,
+                "error_message": analysis.error_message,
+                "parameters": analysis.parameters,
+                "provenance": analysis.provenance,
+                "requested_by_id": str(analysis.requested_by_id),
+                "external_job_id": analysis.external_job_id,
+                "priority": analysis.priority,
+                "created_at": analysis.created_at,
+                "started_at": analysis.started_at,
+                "completed_at": analysis.completed_at,
+                "updated_at": analysis.updated_at,
+            }
+            for analysis in ml_analysis_rows
+        ],
+        "ml_annotations": [
+            {
+                "id": str(annotation.id),
+                "analysis_id": str(annotation.analysis_id),
+                "annotation_type": annotation.annotation_type,
+                "class_name": annotation.class_name,
+                "confidence": annotation.confidence,
+                "data": annotation.data,
+                "storage_path": annotation.storage_path,
+                "ordering": annotation.ordering,
+                "created_at": annotation.created_at,
+            }
+            for annotation in ml_annotation_rows
+        ],
+    }
+
+    manifest_payload = {
+        "format": "vista-project-backup",
+        "version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": current_user.email,
+        "scope": "project",
+        "project": backup_payload["project"],
+        "bundle_summary": bundle_payload.get("bundle_summary", {}),
+        "artifact_counts": artifact_counts,
+        "missing_artifacts": [],
+        "options": {
+            "include_images": include_images,
+            "include_overlays": include_overlays,
+            "include_metadata": include_metadata,
+            "include_created_overlays": include_created_overlays,
+            "include_project_configuration": include_project_configuration,
+            "include_deleted": include_deleted,
+        },
+    }
+
+    return {
+        "project_id": str(project_id),
+        "backup_payload": backup_payload,
+        "legacy_bundle_payload": bundle_payload,
+        "manifest_payload": manifest_payload,
+        "image_refs": image_refs,
+        "artifact_counts": artifact_counts,
+        "missing_artifacts": manifest_payload["missing_artifacts"],
+    }
+
+
+
+
+def _estimate_project_backup_size_bytes(context: dict) -> int:
+    """Return an approximate uncompressed backup size for progress UI."""
+
+    total = 0
+    for image_ref in context.get("image_refs", []):
+        if image_ref.get("archive_path"):
+            total += int(image_ref.get("size_bytes") or 0)
+    # Account for JSON/TOML sidecars.  This is intentionally approximate because
+    # the final ZIP stream is compressed and does not have a reliable content
+    # length before generation finishes.
+    total += len(_json_bytes(context.get("backup_payload", {})))
+    total += len(_json_bytes(context.get("manifest_payload", {})))
+    if context.get("legacy_bundle_payload"):
+        total += len(_json_bytes(context.get("legacy_bundle_payload", {})))
+    return max(total, 1)
+
+
+def _estimate_dashboard_backup_size_bytes(contexts: list[dict], dashboard_state: dict) -> int:
+    return max(
+        sum(_estimate_project_backup_size_bytes(context) for context in contexts)
+        + len(_json_bytes(dashboard_state))
+        + 2048,
+        1,
+    )
+
+
+def _project_backup_entries(context: dict, *, include_legacy_files: bool = True, include_root_manifest: bool = True) -> list[StreamingZipEntry]:
+    project_id = context["project_id"]
+    backup_payload = context["backup_payload"]
+    manifest_payload = context["manifest_payload"]
+    artifact_counts = context["artifact_counts"]
+    missing_artifacts = context["missing_artifacts"]
+
+    entries: list[StreamingZipEntry] = []
+    for image_ref in context["image_refs"]:
+        archive_path = image_ref.get("archive_path")
+        if archive_path:
+            entries.append(StreamingZipEntry(
+                archive_path,
+                _artifact_content_factory(image_ref, manifest_payload, artifact_counts, missing_artifacts),
+            ))
+
+    if include_root_manifest:
+        entries.append(StreamingZipEntry("manifest.json", lambda: _json_bytes(manifest_payload)))
+
+    entries.extend([
+        StreamingZipEntry(f"projects/{project_id}/project-backup.json", lambda: _json_bytes(backup_payload)),
+        StreamingZipEntry(f"projects/{project_id}/project.json", lambda: _json_bytes(backup_payload["project"])),
+        StreamingZipEntry(f"projects/{project_id}/images.json", lambda: _json_bytes(backup_payload["images"])),
+        StreamingZipEntry(f"projects/{project_id}/project-metadata.json", lambda: _json_bytes(backup_payload["project_metadata"])),
+        StreamingZipEntry(f"projects/{project_id}/dashboard-state.json", lambda: _json_bytes({})),
+    ])
+
+    if include_legacy_files:
+        bundle_payload = context["legacy_bundle_payload"]
+        entries.extend([
+            StreamingZipEntry("export-manifest.json", lambda: _json_bytes({
+                "project": manifest_payload["project"],
+                "bundle_summary": manifest_payload["bundle_summary"],
+                "export": {
+                    "format": "vista-project-export",
+                    "version": 1,
+                    "generated_at": manifest_payload["generated_at"],
+                    "generated_by": manifest_payload["generated_by"],
+                    "options": manifest_payload["options"],
+                    "artifact_counts": artifact_counts,
+                    "missing_artifacts": missing_artifacts,
+                },
+                "image_references": backup_payload["images"],
+            })),
+            StreamingZipEntry("export-manifest.toml", lambda: _build_toml_document(
+                tables={
+                    "project": _json_safe(manifest_payload["project"]),
+                    "export": _json_safe({
+                        "format": "vista-project-export",
+                        "version": 1,
+                        "generated_at": manifest_payload["generated_at"],
+                        "generated_by": manifest_payload["generated_by"],
+                    }),
+                    "bundle_summary": _json_safe(manifest_payload["bundle_summary"]),
+                },
+                arrays={"image_references": _json_safe(backup_payload["images"])},
+            )),
+        ])
+        options = manifest_payload.get("options", {})
+        if options.get("include_project_configuration", True):
+            entries.append(StreamingZipEntry("project-configuration.toml", lambda: _build_toml_document(
+                tables={
+                    "project": _json_safe(manifest_payload["project"]),
+                    "project_configuration": {
+                        "metadata_key": PROJECT_CONFIGURATION_KEY,
+                        "config_json": _json_safe(backup_payload["project_configuration"]),
+                    },
+                }
+            )))
+        if options.get("include_metadata", True):
+            entries.extend([
+                StreamingZipEntry("project-metadata.toml", lambda: _build_toml_document(
+                    arrays={"project_metadata": _json_safe(backup_payload["project_metadata"])}
+                )),
+                StreamingZipEntry("images.toml", lambda: _build_toml_document(
+                    arrays={"images": _json_safe(backup_payload["images"])}
+                )),
+                StreamingZipEntry("parts.toml", lambda: _build_toml_document(
+                    arrays={"batches": _json_safe(backup_payload["batches"]), "parts": _json_safe(backup_payload["parts"])}
+                )),
+            ])
+        if options.get("include_created_overlays", True):
+            entries.append(StreamingZipEntry("created-overlays.toml", lambda: _build_toml_document(
+                tables={"project": _json_safe(manifest_payload["project"])},
+                arrays={
+                    "annotations": bundle_payload.get("bundle_summary", {}).get("annotations", {}).get("records", []),
+                    "overlay_layers": bundle_payload.get("bundle_summary", {}).get("overlays", {}).get("records", []),
+                    "measurement_runs": bundle_payload.get("bundle_summary", {}).get("measurements", {}).get("records", []),
+                },
+            )))
+    return entries
+
+
+def _manifest_from_zip(archive: zipfile.ZipFile) -> dict:
+    if "manifest.json" not in archive.namelist():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Backup is missing manifest.json")
+    try:
+        manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Backup manifest is not valid JSON") from exc
+    if manifest.get("version") != 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported backup version")
+    if manifest.get("format") not in {"vista-project-backup", "vista-dashboard-backup"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported backup format")
+    return manifest
+
+
+def _project_backup_paths(manifest: dict, archive: zipfile.ZipFile) -> list[str]:
+    names = set(archive.namelist())
+    if manifest.get("format") == "vista-project-backup":
+        project_id = str(manifest.get("project", {}).get("id") or "")
+        path = f"projects/{project_id}/project-backup.json"
+        if path in names:
+            return [path]
+    paths = []
+    for project in manifest.get("projects", []):
+        project_id = str(project.get("id") or project.get("source_project_id") or "")
+        path = f"projects/{project_id}/project-backup.json"
+        if path in names:
+            paths.append(path)
+    if not paths:
+        paths = sorted(name for name in names if name.startswith("projects/") and name.endswith("/project-backup.json"))
+    if not paths:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Backup contains no project backup payloads")
+    return paths
+
+
+def _load_project_backup_payload(archive: zipfile.ZipFile, path: str) -> dict:
+    try:
+        payload = json.loads(archive.read(path).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid project backup payload: {path}") from exc
+    if not isinstance(payload.get("project"), dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Project backup payload missing project: {path}")
+    return payload
+
+
+async def _ensure_import_user(db: AsyncSession, source_user_id: str | None, source_user_by_id: dict[str, dict], current_user: schemas.User) -> models.User:
+    source_user = source_user_by_id.get(str(source_user_id or ""), {})
+    email = source_user.get("email") or current_user.email
+    db_user = await crud.get_user_by_email(db, email)
+    if db_user:
+        return db_user
+    db_user = models.User(email=email, username=source_user.get("username"), is_active=source_user.get("is_active", True))
+    db.add(db_user)
+    await db.flush()
+    return db_user
+
+
+async def _unique_import_project_name(db: AsyncSession, name: str, mode: str) -> str:
+    if mode != "restore_as_new":
+        return name
+    base = f"{name} (Imported)"
+    candidate = base
+    suffix = 2
+    while True:
+        exists_result = await db.execute(select(_func.count()).select_from(models.Project).where(models.Project.name == candidate))
+        if exists_result.scalar_one() == 0:
+            return candidate
+        candidate = f"{base} {suffix}"
+        suffix += 1
+
+
+async def _import_project_backup_payload(
+    *,
+    archive: zipfile.ZipFile,
+    payload: dict,
+    db: AsyncSession,
+    current_user: schemas.User,
+    mode: str,
+) -> dict:
+    source_project = payload["project"]
+    target_group = source_project.get("meta_group_id") or ""
+    if not is_user_in_group(current_user.email, target_group):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"User '{current_user.email}' cannot import project into group '{target_group}'.",
+        )
+
+    source_user_by_id = {str(user.get("id")): user for user in payload.get("users", []) if user.get("id")}
+    project_name = await _unique_import_project_name(db, source_project.get("name") or "Imported Project", mode)
+    db_project = models.Project(
+        name=project_name,
+        description=source_project.get("description") or "",
+        meta_group_id=target_group,
+        project_type=source_project.get("project_type") or "PT1",
+        created_by=current_user.email,
+        is_archived=bool(source_project.get("is_archived", False)),
+        archived_at=None,
+    )
+    db.add(db_project)
+    await db.flush()
+
+    group_map: dict[str, uuid.UUID] = {}
+    for source_group in payload.get("image_groups", []):
+        db_group = models.ImageGroup(
+            project_id=db_project.id,
+            identifier=source_group.get("identifier") or "imported",
+            display_name=source_group.get("display_name") or None,
+        )
+        db.add(db_group)
+        await db.flush()
+        group_map[str(source_group.get("id"))] = db_group.id
+
+    for source_metadata in payload.get("project_metadata", []):
+        db.add(models.ProjectMetadata(
+            project_id=db_project.id,
+            key=source_metadata.get("key") or "imported.metadata",
+            value=source_metadata.get("value_json"),
+        ))
+
+    batch_map: dict[str, uuid.UUID] = {}
+    for source_batch in payload.get("batches", []):
+        db_batch = models.InspectionBatch(
+            project_id=db_project.id,
+            name=source_batch.get("name") or "Imported Batch",
+            description=source_batch.get("description") or None,
+            owner=source_batch.get("owner") or None,
+            status=source_batch.get("status") or "not_started",
+        )
+        db.add(db_batch)
+        await db.flush()
+        batch_map[str(source_batch.get("id"))] = db_batch.id
+
+    part_map: dict[str, uuid.UUID] = {}
+    for source_part in payload.get("parts", []):
+        db_part = models.InspectionPart(
+            project_id=db_project.id,
+            batch_id=batch_map.get(str(source_part.get("batch_id"))),
+            serial_number=source_part.get("serial_number") or str(uuid.uuid4()),
+            display_name=source_part.get("display_name") or None,
+            review_state=source_part.get("review_state") or "unreviewed",
+            metadata_json=source_part.get("metadata_json") if isinstance(source_part.get("metadata_json"), dict) else {},
+        )
+        db.add(db_part)
+        await db.flush()
+        part_map[str(source_part.get("id"))] = db_part.id
+
+    image_map: dict[str, uuid.UUID] = {}
+    files_uploaded = 0
+    missing_files = 0
+    for source_image in payload.get("images", []):
+        new_image_id = uuid.uuid4()
+        filename = source_image.get("filename") or f"{new_image_id}.bin"
+        object_storage_key = f"{db_project.id}/{new_image_id}/{filename}"
+        archive_path = source_image.get("archive_path") or ""
+        artifact_present = bool(archive_path and archive_path in archive.namelist())
+        if artifact_present:
+            artifact_bytes = archive.read(archive_path)
+            if boto3_client:
+                if _write_storage_object_bytes_sync(object_storage_key, artifact_bytes, source_image.get("content_type")):
+                    files_uploaded += 1
+                else:
+                    missing_files += 1
+            else:
+                # Test/offline mode: preserve DB state while marking that storage was not written.
+                missing_files += 1
+        else:
+            missing_files += 1
+        metadata = source_image.get("metadata_json") if isinstance(source_image.get("metadata_json"), dict) else {}
+        metadata = {
+            **metadata,
+            "source_backup": {
+                "project_id": source_project.get("id"),
+                "image_id": source_image.get("image_id"),
+                "artifact_present": artifact_present,
+            },
+        }
+        uploader = await _ensure_import_user(db, source_image.get("uploader_id"), source_user_by_id, current_user)
+        db_image = models.DataInstance(
+            id=new_image_id,
+            project_id=db_project.id,
+            group_id=group_map.get(str(source_image.get("group_id"))),
+            filename=filename,
+            object_storage_key=object_storage_key,
+            content_type=source_image.get("content_type") or None,
+            size_bytes=source_image.get("size_bytes"),
+            metadata_json=metadata,
+            uploaded_by_user_id=source_image.get("uploaded_by") or uploader.email,
+            uploader_id=uploader.id,
+        )
+        db.add(db_image)
+        image_map[str(source_image.get("image_id"))] = new_image_id
+
+    class_map: dict[str, uuid.UUID] = {}
+    for source_class in payload.get("image_classes", []):
+        db_class = models.ImageClass(
+            project_id=db_project.id,
+            name=source_class.get("name") or "Imported Class",
+            description=source_class.get("description") or None,
+        )
+        db.add(db_class)
+        await db.flush()
+        class_map[str(source_class.get("id"))] = db_class.id
+
+    for source_classification in payload.get("classifications", []):
+        image_id = image_map.get(str(source_classification.get("image_id")))
+        class_id = class_map.get(str(source_classification.get("class_id")))
+        if not image_id or not class_id:
+            continue
+        actor = await _ensure_import_user(db, source_classification.get("created_by_id"), source_user_by_id, current_user)
+        db.add(models.ImageClassification(image_id=image_id, class_id=class_id, created_by_id=actor.id))
+
+    for source_comment in payload.get("comments", []):
+        image_id = image_map.get(str(source_comment.get("image_id")))
+        if not image_id:
+            continue
+        author = await _ensure_import_user(db, source_comment.get("author_id"), source_user_by_id, current_user)
+        db.add(models.ImageComment(image_id=image_id, author_id=author.id, text=source_comment.get("text") or ""))
+
+    for source_review in payload.get("reviews", []):
+        image_id = image_map.get(str(source_review.get("image_id")))
+        if not image_id:
+            continue
+        reviewer = await _ensure_import_user(db, source_review.get("reviewer_id"), source_user_by_id, current_user)
+        db.add(models.ImageReview(
+            image_id=image_id,
+            project_id=db_project.id,
+            reviewer_id=reviewer.id,
+            status=source_review.get("status") or "pass",
+            notes=source_review.get("notes"),
+        ))
+
+    analysis_map: dict[str, uuid.UUID] = {}
+    for source_analysis in payload.get("ml_analyses", []):
+        image_id = image_map.get(str(source_analysis.get("image_id")))
+        if not image_id:
+            continue
+        requester = await _ensure_import_user(db, source_analysis.get("requested_by_id"), source_user_by_id, current_user)
+        db_analysis = models.MLAnalysis(
+            image_id=image_id,
+            model_name=source_analysis.get("model_name") or "imported_model",
+            model_version=source_analysis.get("model_version") or "unknown",
+            status=source_analysis.get("status") or "completed",
+            error_message=source_analysis.get("error_message"),
+            parameters=source_analysis.get("parameters"),
+            provenance=source_analysis.get("provenance"),
+            requested_by_id=requester.id,
+            external_job_id=None,
+            priority=source_analysis.get("priority") or 0,
+        )
+        db.add(db_analysis)
+        await db.flush()
+        analysis_map[str(source_analysis.get("id"))] = db_analysis.id
+
+    for source_annotation in payload.get("ml_annotations", []):
+        analysis_id = analysis_map.get(str(source_annotation.get("analysis_id")))
+        if not analysis_id:
+            continue
+        db.add(models.MLAnnotation(
+            analysis_id=analysis_id,
+            annotation_type=source_annotation.get("annotation_type") or "classification",
+            class_name=source_annotation.get("class_name"),
+            confidence=source_annotation.get("confidence"),
+            data=source_annotation.get("data") if isinstance(source_annotation.get("data"), dict) else {},
+            storage_path=source_annotation.get("storage_path"),
+            ordering=source_annotation.get("ordering"),
+        ))
+
+    await db.commit()
+    return {
+        "source_project_id": source_project.get("id"),
+        "new_project_id": str(db_project.id),
+        "name": db_project.name,
+        "images_created": len(image_map),
+        "files_uploaded": files_uploaded,
+        "missing_files": missing_files,
+    }
 
 
 async def _build_project_report_payload(project_id: uuid.UUID, db: AsyncSession, db_project: models.Project) -> dict:
@@ -860,6 +1673,7 @@ async def export_project_bundle_archive(
     include_metadata: bool = True,
     include_created_overlays: bool = True,
     include_project_configuration: bool = True,
+    include_deleted: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
@@ -868,285 +1682,229 @@ async def export_project_bundle_archive(
         db=db,
         current_user=current_user,
     )
-
-    bundle_json_response = await export_project_bundle_json(
+    context = await _collect_project_backup_payload(
         project_id=project_id,
         db=db,
+        db_project=db_project,
         current_user=current_user,
+        include_images=include_images,
+        include_overlays=include_overlays,
+        include_metadata=include_metadata,
+        include_created_overlays=include_created_overlays,
+        include_project_configuration=include_project_configuration,
+        include_deleted=include_deleted,
     )
-    bundle_payload = json.loads(bundle_json_response.body.decode("utf-8"))
-
-    image_refs_result = await db.execute(
-        select(
-            models.DataInstance.id,
-            models.DataInstance.filename,
-            models.DataInstance.object_storage_key,
-            models.DataInstance.size_bytes,
-            models.DataInstance.content_type,
-            models.DataInstance.metadata_json,
-            models.DataInstance.created_at,
-            models.DataInstance.updated_at,
-            models.DataInstance.uploaded_by_user_id,
-        )
-        .where(models.DataInstance.project_id == project_id)
-        .where(models.DataInstance.deleted_at.is_(None))
-        .order_by(models.DataInstance.created_at.asc())
-    )
-    image_rows = image_refs_result.all()
-
-    part_rows_result = await db.execute(
-        select(
-            models.InspectionPart.id,
-            models.InspectionPart.batch_id,
-            models.InspectionPart.serial_number,
-            models.InspectionPart.display_name,
-            models.InspectionPart.review_state,
-            models.InspectionPart.metadata_json,
-            models.InspectionPart.created_at,
-            models.InspectionPart.updated_at,
-        )
-        .where(models.InspectionPart.project_id == project_id)
-        .order_by(models.InspectionPart.serial_number.asc())
-    )
-    part_rows = part_rows_result.all()
-
-    batch_rows_result = await db.execute(
-        select(
-            models.InspectionBatch.id,
-            models.InspectionBatch.name,
-            models.InspectionBatch.description,
-            models.InspectionBatch.owner,
-            models.InspectionBatch.status,
-            models.InspectionBatch.created_at,
-            models.InspectionBatch.updated_at,
-        )
-        .where(models.InspectionBatch.project_id == project_id)
-        .order_by(models.InspectionBatch.name.asc())
-    )
-    batch_rows = batch_rows_result.all()
-
-    project_metadata_result = await db.execute(
-        select(
-            models.ProjectMetadata.key,
-            models.ProjectMetadata.value,
-            models.ProjectMetadata.created_at,
-            models.ProjectMetadata.updated_at,
-        )
-        .where(models.ProjectMetadata.project_id == project_id)
-        .order_by(models.ProjectMetadata.key.asc())
-    )
-    project_metadata_rows = project_metadata_result.all()
-    project_configuration = _default_project_configuration(db_project.project_type)
-    for key, value, _created_at, _updated_at in project_metadata_rows:
-        if key == PROJECT_CONFIGURATION_KEY and isinstance(value, dict):
-            project_configuration = {
-                **project_configuration,
-                **value,
-            }
-            break
-
-    part_overlay_filenames: set[str] = set()
-    for _part_id, _batch_id, _serial, _display, _review_state, metadata, _created_at, _updated_at in part_rows:
-        metadata_obj = metadata if isinstance(metadata, dict) else {}
-        source_images = metadata_obj.get("source_images")
-        if not isinstance(source_images, list):
-            continue
-        for record in source_images:
-            if isinstance(record, dict) and record.get("overlay") and record.get("filename"):
-                part_overlay_filenames.add(str(record["filename"]))
-
-    used_paths: set[str] = set()
-    image_refs = []
-    missing_artifacts = []
-    artifact_counts = {
-        "images_requested": 0,
-        "overlays_requested": 0,
-        "files_written": 0,
-        "files_missing": 0,
-    }
-
-    for row in image_rows:
-        (
-            image_id,
-            filename,
-            object_storage_key,
-            size_bytes,
-            content_type,
-            metadata,
-            created_at,
-            updated_at,
-            uploaded_by_user_id,
-        ) = row
-        is_overlay = _image_record_is_overlay(filename, metadata, part_overlay_filenames)
-        should_include_file = include_overlays if is_overlay else include_images
-        archive_path = None
-        if should_include_file:
-            artifact_counts["overlays_requested" if is_overlay else "images_requested"] += 1
-            archive_path = _dedupe_archive_path(
-                "artifacts/overlays" if is_overlay else "artifacts/images",
-                filename or f"{image_id}.bin",
-                used_paths,
-            )
-        image_refs.append(
-            {
-                "image_id": str(image_id),
-                "filename": filename,
-                "archive_path": archive_path or "",
-                "artifact_kind": "overlay" if is_overlay else "image",
-                "object_storage_key": object_storage_key,
-                "size_bytes": size_bytes,
-                "content_type": content_type or "",
-                "uploaded_by": uploaded_by_user_id or "",
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "metadata_json": metadata if isinstance(metadata, dict) else {},
-            }
-        )
-
-    manifest_payload = {
-        "project": bundle_payload["project"],
-        "bundle_summary": bundle_payload["bundle_summary"],
-        "export": {
-            "format": "vista-project-export",
-            "version": 1,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "generated_by": current_user.email,
-            "options": {
-                "include_images": include_images,
-                "include_overlays": include_overlays,
-                "include_metadata": include_metadata,
-                "include_created_overlays": include_created_overlays,
-                "include_project_configuration": include_project_configuration,
-            },
-        },
-        "image_references": image_refs,
-    }
-
-    batch_records = [
-        {
-            "id": str(batch_id),
-            "name": name,
-            "description": description or "",
-            "owner": owner or "",
-            "status": status_value,
-            "created_at": created_at,
-            "updated_at": updated_at,
-        }
-        for batch_id, name, description, owner, status_value, created_at, updated_at in batch_rows
-    ]
-    part_records = [
-        {
-            "id": str(part_id),
-            "batch_id": str(batch_id) if batch_id else "",
-            "serial_number": serial_number,
-            "display_name": display_name or "",
-            "review_state": review_state,
-            "metadata_json": metadata if isinstance(metadata, dict) else {},
-            "created_at": created_at,
-            "updated_at": updated_at,
-        }
-        for part_id, batch_id, serial_number, display_name, review_state, metadata, created_at, updated_at in part_rows
-    ]
-    project_metadata_records = [
-        {
-            "key": key,
-            "value_json": value,
-            "created_at": created_at,
-            "updated_at": updated_at,
-        }
-        for key, value, created_at, updated_at in project_metadata_rows
-    ]
-
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for image_ref in image_refs:
-            archive_path = image_ref.get("archive_path")
-            if not archive_path:
-                continue
-            file_bytes = await _read_storage_object_bytes(image_ref.get("object_storage_key") or "")
-            if file_bytes is None:
-                artifact_counts["files_missing"] += 1
-                missing_artifacts.append({
-                    "image_id": image_ref["image_id"],
-                    "filename": image_ref["filename"],
-                    "archive_path": archive_path,
-                    "object_storage_key": image_ref.get("object_storage_key") or "",
-                })
-                continue
-            archive.writestr(archive_path, file_bytes)
-            artifact_counts["files_written"] += 1
-
-        manifest_payload["export"]["artifact_counts"] = artifact_counts
-        manifest_payload["export"]["missing_artifacts"] = missing_artifacts
-        manifest_payload = _json_safe(manifest_payload)
-        archive.writestr(
-            "export-manifest.json",
-            json.dumps(manifest_payload, indent=2, sort_keys=True),
-        )
-        archive.writestr(
-            "export-manifest.toml",
-            _build_toml_document(
-                tables={
-                    "project": manifest_payload["project"],
-                    "export": manifest_payload["export"],
-                    "bundle_summary": manifest_payload["bundle_summary"],
-                },
-                arrays={"image_references": image_refs},
-            ),
-        )
-        if include_project_configuration:
-            archive.writestr(
-                "project-configuration.toml",
-                _build_toml_document(
-                    tables={
-                        "project": manifest_payload["project"],
-                        "project_configuration": {
-                            "metadata_key": PROJECT_CONFIGURATION_KEY,
-                            "config_json": project_configuration,
-                        },
-                    }
-                ),
-            )
-        if include_metadata:
-            archive.writestr(
-                "project-metadata.toml",
-                _build_toml_document(arrays={"project_metadata": project_metadata_records}),
-            )
-            archive.writestr(
-                "images.toml",
-                _build_toml_document(arrays={"images": image_refs}),
-            )
-            archive.writestr(
-                "parts.toml",
-                _build_toml_document(arrays={"batches": batch_records, "parts": part_records}),
-            )
-        if include_created_overlays:
-            archive.writestr(
-                "created-overlays.toml",
-                _build_toml_document(
-                    tables={"project": manifest_payload["project"]},
-                    arrays={
-                        "annotations": bundle_payload["bundle_summary"]["annotations"]["records"],
-                        "overlay_layers": bundle_payload["bundle_summary"]["overlays"]["records"],
-                        "measurement_runs": bundle_payload["bundle_summary"]["measurements"]["records"],
-                    },
-                ),
-            )
-    buffer.seek(0)
-
-    safe_name = "".join(
-        c if c.isalnum() or c in (" ", "-", "_") else "_"
-        for c in db_project.name
-    ).strip()
+    safe_name = _safe_export_name(db_project.name, "project")
     filename = f"{safe_name}_export_bundle.zip"
-
     return StreamingResponse(
-        buffer,
+        iter_streaming_zip(_project_backup_entries(context, include_legacy_files=True)),
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-VISTA-Backup-Estimated-Bytes": str(_estimate_project_backup_size_bytes(context)),
         },
     )
+
+
+@router.post("/projects/import/preview")
+async def preview_project_backup_import(
+    file: UploadFile = File(...),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    del current_user
+    try:
+        with zipfile.ZipFile(file.file) as archive:
+            manifest = _manifest_from_zip(archive)
+            project_paths = _project_backup_paths(manifest, archive)
+            projects = []
+            missing_artifacts = []
+            for path in project_paths:
+                payload = _load_project_backup_payload(archive, path)
+                project = payload["project"]
+                images = payload.get("images", [])
+                project_missing = [
+                    {
+                        "image_id": image.get("image_id"),
+                        "filename": image.get("filename"),
+                        "archive_path": image.get("archive_path"),
+                    }
+                    for image in images
+                    if image.get("archive_path") and image.get("archive_path") not in archive.namelist()
+                ]
+                missing_artifacts.extend(project_missing)
+                projects.append({
+                    "source_project_id": project.get("id"),
+                    "name": project.get("name"),
+                    "project_type": project.get("project_type"),
+                    "meta_group_id": project.get("meta_group_id"),
+                    "images": len(images),
+                    "parts": len(payload.get("parts", [])),
+                    "comments": len(payload.get("comments", [])),
+                    "classifications": len(payload.get("classifications", [])),
+                    "reviews": len(payload.get("reviews", [])),
+                    "missing_artifacts": len(project_missing),
+                })
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Backup file is not a valid ZIP archive") from exc
+    finally:
+        await file.close()
+
+    return {
+        "valid": True,
+        "format": manifest.get("format"),
+        "version": manifest.get("version"),
+        "scope": manifest.get("scope"),
+        "projects": projects,
+        "project_count": len(projects),
+        "missing_artifacts": missing_artifacts,
+        "warnings": ["Some image artifacts are missing from the backup."] if missing_artifacts else [],
+    }
+
+
+@router.post("/projects/import")
+async def import_project_backup(
+    file: UploadFile = File(...),
+    mode: str = Form("restore_as_new"),
+    confirmation: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    if mode != "restore_as_new":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only restore_as_new import mode is currently supported")
+    if confirmation != "IMPORT":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type IMPORT to confirm import")
+    try:
+        with zipfile.ZipFile(file.file) as archive:
+            manifest = _manifest_from_zip(archive)
+            dashboard_state = {}
+            if "dashboard-state.json" in archive.namelist():
+                dashboard_state = json.loads(archive.read("dashboard-state.json").decode("utf-8"))
+            project_paths = _project_backup_paths(manifest, archive)
+            imported_projects = []
+            for path in project_paths:
+                payload = _load_project_backup_payload(archive, path)
+                imported_projects.append(await _import_project_backup_payload(
+                    archive=archive,
+                    payload=payload,
+                    db=db,
+                    current_user=current_user,
+                    mode=mode,
+                ))
+    except zipfile.BadZipFile as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Backup file is not a valid ZIP archive") from exc
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Import failed due to conflicting imported records") from exc
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await file.close()
+
+    return {
+        "ok": True,
+        "format": manifest.get("format"),
+        "projects_created": imported_projects,
+        "project_count": len(imported_projects),
+        "dashboard_state": dashboard_state,
+    }
+
+
+@router.post("/dashboard/export")
+async def export_dashboard_backup(
+    options: dict = Body(default_factory=dict),
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    include_archived = bool(options.get("include_archived", False))
+    projects = await get_accessible_projects_for_user(
+        db=db,
+        user=current_user,
+        skip=0,
+        limit=int(options.get("limit", 1000) or 1000),
+        include_archived=include_archived,
+    )
+    contexts = []
+    for project in projects:
+        contexts.append(await _collect_project_backup_payload(
+            project_id=project.id,
+            db=db,
+            db_project=project,
+            current_user=current_user,
+            include_images=bool(options.get("include_images", True)),
+            include_overlays=bool(options.get("include_overlays", True)),
+            include_metadata=bool(options.get("include_metadata", True)),
+            include_created_overlays=bool(options.get("include_created_overlays", True)),
+            include_project_configuration=bool(options.get("include_project_configuration", True)),
+            include_deleted=bool(options.get("include_deleted", False)),
+        ))
+
+    dashboard_state = options.get("dashboard_state") if isinstance(options.get("dashboard_state"), dict) else {}
+    manifest_payload = {
+        "format": "vista-dashboard-backup",
+        "version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": current_user.email,
+        "scope": "dashboard",
+        "project_count": len(contexts),
+        "projects": [context["manifest_payload"]["project"] for context in contexts],
+        "options": {
+            "include_archived": include_archived,
+            "include_images": bool(options.get("include_images", True)),
+            "include_overlays": bool(options.get("include_overlays", True)),
+            "include_metadata": bool(options.get("include_metadata", True)),
+            "include_created_overlays": bool(options.get("include_created_overlays", True)),
+            "include_project_configuration": bool(options.get("include_project_configuration", True)),
+            "include_deleted": bool(options.get("include_deleted", False)),
+            "include_ui_state": bool(options.get("include_ui_state", True)),
+        },
+    }
+
+    entries: list[StreamingZipEntry] = []
+    for context in contexts:
+        entries.extend(_project_backup_entries(context, include_legacy_files=False, include_root_manifest=False))
+    entries.append(StreamingZipEntry("manifest.json", lambda: _json_bytes(manifest_payload)))
+    entries.append(StreamingZipEntry("dashboard-state.json", lambda: _json_bytes(dashboard_state)))
+
+    filename = f"vista-dashboard-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.vistabundle"
+    return StreamingResponse(
+        iter_streaming_zip(entries),
+        media_type="application/vnd.vista.dashboard-backup+zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-VISTA-Backup-Estimated-Bytes": str(_estimate_dashboard_backup_size_bytes(contexts, dashboard_state)),
+        },
+    )
+
+
+@router.post("/dashboard/import/preview")
+async def preview_dashboard_backup_import(
+    file: UploadFile = File(...),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    return await preview_project_backup_import(file=file, current_user=current_user)
+
+
+@router.post("/dashboard/import")
+async def import_dashboard_backup(
+    file: UploadFile = File(...),
+    mode: str = Form("restore_as_new"),
+    confirmation: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    return await import_project_backup(
+        file=file,
+        mode=mode,
+        confirmation=confirmation,
+        db=db,
+        current_user=current_user,
+    )
+
 
 
 def _build_workbook(project_name: str, rows: list[dict], meta_keys: list[str]):

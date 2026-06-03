@@ -360,6 +360,260 @@ const DeleteProjectModal = memo(function DeleteProjectModal({ project, onClose, 
   );
 });
 
+
+function filenameFromDisposition(disposition, fallback) {
+  if (!disposition) return fallback;
+  const match = disposition.match(/filename="?([^";]+)"?/);
+  return match ? match[1] : fallback;
+}
+
+
+function formatProgressBytes(bytes) {
+  const safeBytes = Math.max(0, Number(bytes) || 0);
+  const gb = 1024 * 1024 * 1024;
+  const mb = 1024 * 1024;
+  if (safeBytes >= gb) return `${(safeBytes / gb).toFixed(2)} GB`;
+  return `${(safeBytes / mb).toFixed(2)} MB`;
+}
+
+function progressLabel(progress) {
+  if (!progress) return '';
+  const loaded = Math.max(0, progress.loaded || 0);
+  const total = Math.max(progress.total || 0, loaded);
+  return `${formatProgressBytes(loaded)} of ${formatProgressBytes(total)}`;
+}
+
+function progressPercent(progress) {
+  if (!progress) return 0;
+  const loaded = Math.max(0, progress.loaded || 0);
+  const total = Math.max(progress.total || 0, loaded, 1);
+  return Math.max(0, Math.min(100, (loaded / total) * 100));
+}
+
+async function readStreamingBlobWithProgress(response, onProgress) {
+  const total = Number(response.headers.get('X-VISTA-Backup-Estimated-Bytes')) || 0;
+  let loaded = 0;
+  onProgress?.({ loaded: 0, total });
+
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const blob = await response.blob();
+    loaded = blob.size;
+    onProgress?.({ loaded, total: Math.max(total, loaded) });
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      loaded += value.byteLength || value.length || 0;
+      onProgress?.({ loaded, total: Math.max(total, loaded) });
+    }
+  }
+  return new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
+}
+
+function collectDashboardState() {
+  const galleryState = {};
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith('gallery_state_')) {
+        galleryState[key] = JSON.parse(window.localStorage.getItem(key));
+      }
+    }
+  } catch (error) {
+    console.warn('Unable to collect dashboard local state', error);
+  }
+  return { gallery_state: galleryState, exported_at: new Date().toISOString() };
+}
+
+function restoreDashboardState(dashboardState) {
+  if (!dashboardState || typeof dashboardState !== 'object') return 0;
+  const galleryState = dashboardState.gallery_state || {};
+  let restored = 0;
+  Object.entries(galleryState).forEach(([key, value]) => {
+    if (!key.startsWith('gallery_state_')) return;
+    window.localStorage.setItem(key, JSON.stringify(value));
+    restored += 1;
+  });
+  return restored;
+}
+
+const DashboardBackupPanel = memo(function DashboardBackupPanel({ onImportComplete, showToast }) {
+  const fileInputRef = useRef(null);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [exportProgress, setExportProgress] = useState(null);
+
+  const downloadBlob = (blob, disposition) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filenameFromDisposition(disposition, 'vista-dashboard-backup.vistabundle');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleExportDashboard = async () => {
+    setExporting(true);
+    try {
+      const response = await fetch('/api/dashboard/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          include_images: true,
+          include_overlays: true,
+          include_metadata: true,
+          include_created_overlays: true,
+          include_project_configuration: true,
+          include_ui_state: true,
+          dashboard_state: collectDashboardState(),
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Export failed (${response.status})`);
+      }
+      const blob = await readStreamingBlobWithProgress(response, setExportProgress);
+      downloadBlob(blob, response.headers.get('Content-Disposition'));
+      showToast('Dashboard backup exported successfully.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Failed to export dashboard backup.', 'error');
+    } finally {
+      setExporting(false);
+      setExportProgress(null);
+    }
+  };
+
+  const handleFileSelected = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    setSelectedFile(file || null);
+    setPreview(null);
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const response = await fetch('/api/dashboard/import/preview', { method: 'POST', body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || `Preview failed (${response.status})`);
+      setPreview(payload);
+    } catch (error) {
+      showToast(error.message || 'Failed to inspect dashboard backup.', 'error');
+      setSelectedFile(null);
+    }
+  };
+
+  const handleImportDashboard = async () => {
+    if (!selectedFile) {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (!preview) {
+      showToast('Inspect the backup before importing.', 'error');
+      return;
+    }
+    if (!window.confirm(`Import ${preview.project_count || 0} project backup(s) as new projects?`)) return;
+    setImporting(true);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('mode', 'restore_as_new');
+    formData.append('confirmation', 'IMPORT');
+    try {
+      const response = await fetch('/api/dashboard/import', { method: 'POST', body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || `Import failed (${response.status})`);
+      // UI state is optional and restored from a best-effort sidecar if users re-select a compatible backup later.
+      restoreDashboardState(payload.dashboard_state);
+      showToast(`Imported ${payload.project_count || 0} project backup(s).`, 'success');
+      setSelectedFile(null);
+      setPreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      onImportComplete?.();
+    } catch (error) {
+      showToast(error.message || 'Failed to import dashboard backup.', 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="card dashboard-backup-card">
+      <div className="card-content">
+        <div className="flex justify-between items-center gap-4">
+          <div>
+            <h2 style={{ marginTop: 0 }}>Dashboard Backup</h2>
+            <p style={{ color: 'var(--gray-600)', marginBottom: 0 }}>
+              Save or restore VISTA projects, artifacts, metadata, and dashboard preferences with a portable .vistabundle file.
+            </p>
+          </div>
+          <div className="flex gap-4">
+            <button type="button" className="btn btn-secondary" onClick={handleExportDashboard} disabled={exporting}>
+              {exporting ? 'Exporting…' : 'Export Dashboard'}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+              Choose Import File
+            </button>
+            <button type="button" className="btn btn-success" onClick={handleImportDashboard} disabled={importing || !selectedFile || !preview}>
+              {importing ? 'Importing…' : 'Import Dashboard'}
+            </button>
+          </div>
+        </div>
+        <input ref={fileInputRef} type="file" accept=".vistabundle,.zip,application/zip" onChange={handleFileSelected} style={{ display: 'none' }} />
+        {exporting && exportProgress && (
+          <div
+            role="status"
+            aria-label="Dashboard backup export progress"
+            style={{
+              position: 'relative',
+              height: '28px',
+              borderRadius: '999px',
+              background: 'var(--gray-200)',
+              overflow: 'hidden',
+              marginTop: 'var(--space-4)',
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                width: `${progressPercent(exportProgress)}%`,
+                height: '100%',
+                background: 'var(--primary-color)',
+                transition: 'width 120ms ease-out',
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 700,
+                color: 'var(--gray-900)',
+              }}
+            >
+              {progressLabel(exportProgress)}
+            </div>
+          </div>
+        )}
+        {preview && (
+          <div className="alert alert-success" style={{ marginTop: 'var(--space-4)' }}>
+            Backup ready: {preview.project_count} project(s), {preview.missing_artifacts?.length || 0} missing artifact(s).
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 // Memoized ProjectItem component to prevent unnecessary re-renders
 const ProjectItem = memo(function ProjectItem({ project, onEdit, onDelete, canDelete, currentUser, onArchiveToggle }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -772,6 +1026,11 @@ function App() {
             </div>
           </div>
         </div>
+
+        <DashboardBackupPanel
+          showToast={showToast}
+          onImportComplete={() => loadProjects()}
+        />
 
         {loading && (
           <div className="loading-container">
