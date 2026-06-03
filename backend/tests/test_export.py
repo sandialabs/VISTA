@@ -1307,3 +1307,102 @@ class TestBuildWorkbook:
         assert ws.cell(row=1, column=5).quotePrefix is False
         # Fixed headers (Filename, etc.) should not have quotePrefix
         assert ws.cell(row=1, column=1).quotePrefix is False
+
+
+def test_project_backup_import_preview_and_restore_as_new(client):
+    project_resp = client.post("/api/projects/", json={
+        "name": "Restorable Project",
+        "description": "round trip backup",
+        "meta_group_id": "test-group",
+        "project_type": "PT2",
+    })
+    assert project_resp.status_code == 201, project_resp.text
+    project = project_resp.json()
+    image_resp = client.post(
+        f"/api/projects/{project['id']}/images",
+        files={"file": ("restore.png", b"restore-bytes", "image/png")},
+        data={"metadata": _json.dumps({"serial": "RESTORE-001"})},
+    )
+    assert image_resp.status_code == 201, image_resp.text
+
+    export_resp = client.get(f"/api/projects/{project['id']}/export-bundle?include_images=false")
+    assert export_resp.status_code == 200, export_resp.text
+    assert int(export_resp.headers["x-vista-backup-estimated-bytes"]) > 0
+    with zipfile.ZipFile(io.BytesIO(export_resp.content)) as archive:
+        names = archive.namelist()
+        assert "manifest.json" in names
+        assert f"projects/{project['id']}/project-backup.json" in names
+
+    preview_resp = client.post(
+        "/api/projects/import/preview",
+        files={"file": ("project.vistabundle", export_resp.content, "application/zip")},
+    )
+    assert preview_resp.status_code == 200, preview_resp.text
+    preview = preview_resp.json()
+    assert preview["valid"] is True
+    assert preview["project_count"] == 1
+    assert preview["projects"][0]["images"] == 1
+
+    import_resp = client.post(
+        "/api/projects/import",
+        files={"file": ("project.vistabundle", export_resp.content, "application/zip")},
+        data={"mode": "restore_as_new", "confirmation": "IMPORT"},
+    )
+    assert import_resp.status_code == 200, import_resp.text
+    payload = import_resp.json()
+    assert payload["ok"] is True
+    new_project_id = payload["projects_created"][0]["new_project_id"]
+
+    restored_project_resp = client.get(f"/api/projects/{new_project_id}")
+    assert restored_project_resp.status_code == 200, restored_project_resp.text
+    restored_project = restored_project_resp.json()
+    assert restored_project["name"].startswith("Restorable Project (Imported)")
+    assert restored_project["project_type"] == "PT2"
+
+    restored_images_resp = client.get(f"/api/projects/{new_project_id}/images")
+    assert restored_images_resp.status_code == 200, restored_images_resp.text
+    restored_images = restored_images_resp.json()
+    assert len(restored_images) == 1
+    assert restored_images[0]["filename"] == "restore.png"
+    assert restored_images[0]["metadata"]["serial"] == "RESTORE-001"
+    assert restored_images[0]["metadata"]["source_backup"]["image_id"] == image_resp.json()["id"]
+
+
+def test_dashboard_backup_export_and_import_preview(client):
+    project_resp = client.post("/api/projects/", json={
+        "name": "Dashboard Backup Project",
+        "description": "dashboard backup",
+        "meta_group_id": "test-group",
+        "project_type": "PT1",
+    })
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    export_resp = client.post(
+        "/api/dashboard/export",
+        json={
+            "include_images": False,
+            "include_overlays": False,
+            "include_ui_state": True,
+            "dashboard_state": {"gallery_state": {"gallery_state_demo": {"sortBy": "name"}}},
+        },
+    )
+    assert export_resp.status_code == 200, export_resp.text
+    assert export_resp.headers["content-type"].startswith("application/vnd.vista.dashboard-backup+zip")
+    assert int(export_resp.headers["x-vista-backup-estimated-bytes"]) > 0
+    with zipfile.ZipFile(io.BytesIO(export_resp.content)) as archive:
+        manifest = _json.loads(archive.read("manifest.json").decode("utf-8"))
+        dashboard_state = _json.loads(archive.read("dashboard-state.json").decode("utf-8"))
+        names = archive.namelist()
+    assert manifest["format"] == "vista-dashboard-backup"
+    assert manifest["project_count"] == 1
+    assert dashboard_state["gallery_state"]["gallery_state_demo"]["sortBy"] == "name"
+    assert f"projects/{project_id}/project-backup.json" in names
+
+    preview_resp = client.post(
+        "/api/dashboard/import/preview",
+        files={"file": ("dashboard.vistabundle", export_resp.content, "application/zip")},
+    )
+    assert preview_resp.status_code == 200, preview_resp.text
+    assert preview_resp.json()["format"] == "vista-dashboard-backup"
+    assert preview_resp.json()["project_count"] == 1

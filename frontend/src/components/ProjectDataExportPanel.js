@@ -28,6 +28,55 @@ const EXPORT_OPTIONS = [
   },
 ];
 
+
+function formatProgressBytes(bytes) {
+  const safeBytes = Math.max(0, Number(bytes) || 0);
+  const gb = 1024 * 1024 * 1024;
+  const mb = 1024 * 1024;
+  if (safeBytes >= gb) return `${(safeBytes / gb).toFixed(2)} GB`;
+  return `${(safeBytes / mb).toFixed(2)} MB`;
+}
+
+function progressLabel(progress) {
+  if (!progress) return '';
+  const loaded = Math.max(0, progress.loaded || 0);
+  const total = Math.max(progress.total || 0, loaded);
+  return `${formatProgressBytes(loaded)} of ${formatProgressBytes(total)}`;
+}
+
+function progressPercent(progress) {
+  if (!progress) return 0;
+  const loaded = Math.max(0, progress.loaded || 0);
+  const total = Math.max(progress.total || 0, loaded, 1);
+  return Math.max(0, Math.min(100, (loaded / total) * 100));
+}
+
+async function readStreamingBlobWithProgress(response, onProgress) {
+  const total = Number(response.headers.get('X-VISTA-Backup-Estimated-Bytes')) || 0;
+  let loaded = 0;
+  onProgress?.({ loaded: 0, total });
+
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const blob = await response.blob();
+    loaded = blob.size;
+    onProgress?.({ loaded, total: Math.max(total, loaded) });
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      loaded += value.byteLength || value.length || 0;
+      onProgress?.({ loaded, total: Math.max(total, loaded) });
+    }
+  }
+  return new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
+}
+
 function filenameFromDisposition(disposition, fallback) {
   if (!disposition) return fallback;
   const match = disposition.match(/filename="?([^"]+)"?/);
@@ -38,7 +87,7 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError 
   const [options, setOptions] = useState(() => (
     EXPORT_OPTIONS.reduce((acc, option) => ({ ...acc, [option.key]: true }), {})
   ));
-  const [exportState, setExportState] = useState({ loading: false, detail: null });
+  const [exportState, setExportState] = useState({ loading: false, detail: null, progress: null });
 
   const selectedCount = useMemo(
     () => Object.values(options).filter(Boolean).length,
@@ -56,13 +105,15 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError 
     });
 
     try {
-      setExportState({ loading: true, detail: null });
+      setExportState({ loading: true, detail: null, progress: { loaded: 0, total: 0 } });
       const response = await fetch(`/api/projects/${projectId}/export-bundle?${params.toString()}`);
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.detail || `Export failed (${response.status})`);
       }
-      const blob = await response.blob();
+      const blob = await readStreamingBlobWithProgress(response, (progress) => {
+        setExportState((prev) => ({ ...prev, progress }));
+      });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -77,10 +128,11 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError 
       setExportState({
         loading: false,
         detail: `${selectedCount} export sections packaged as TOML manifests and project artifacts.`,
+        progress: null,
       });
       if (setError) setError(null);
     } catch (err) {
-      setExportState({ loading: false, detail: null });
+      setExportState({ loading: false, detail: null, progress: null });
       if (setError) setError(err.message || 'Failed to export project data');
     }
   };
@@ -130,6 +182,44 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError 
         >
           {exportState.loading ? 'Exporting Project...' : 'Export Project Bundle'}
         </button>
+
+        {exportState.loading && exportState.progress && (
+          <div
+            role="status"
+            aria-label="Project bundle export progress"
+            style={{
+              position: 'relative',
+              height: '28px',
+              borderRadius: '999px',
+              background: 'var(--gray-200)',
+              overflow: 'hidden',
+              marginTop: 'var(--space-4)',
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                width: `${progressPercent(exportState.progress)}%`,
+                height: '100%',
+                background: 'var(--primary-color)',
+                transition: 'width 120ms ease-out',
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 700,
+                color: 'var(--gray-900)',
+              }}
+            >
+              {progressLabel(exportState.progress)}
+            </div>
+          </div>
+        )}
 
         {exportState.detail && (
           <div className="alert alert-success export-data-status" data-testid="project-data-export-result">
