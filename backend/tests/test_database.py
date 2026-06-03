@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch
 import asyncpg
-from core.database import create_db_and_tables, get_db, Base
+from core.database import create_db_and_tables, get_db, Base, normalize_async_database_url
 
 
 class TestDatabase:
@@ -52,3 +52,6 @@ class TestDatabase:
         """get_db should be an async generator."""
         gen = get_db()
         assert hasattr(gen, "__aiter__") or hasattr(gen, "__anext__")
+
+    def test_normalize_async_database_url_converts_plain_postgres(self):
+        assert normalize_async_database_url("postgresql://u:p@db:5432/vista") == "postgresql+asyncpg://u:p@db:5432/vista"
