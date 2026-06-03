@@ -3,6 +3,142 @@ import FilenameMetadataExtractor from './FilenameMetadataExtractor';
 
 const CONCURRENT_UPLOADS = 6;
 const S3_IMPORT_LIMIT = 100;
+
+const ASSOCIATED_METADATA_EXTENSIONS = ['.json', '.nsipro'];
+
+function getFileExtension(filename = '') {
+  const normalized = String(filename).toLowerCase();
+  const dotIndex = normalized.lastIndexOf('.');
+  return dotIndex >= 0 ? normalized.slice(dotIndex) : '';
+}
+
+function safeMetadataReferenceName(filename = '') {
+  return String(filename || 'metadata')
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'metadata';
+}
+
+function stableStringHash(value = '') {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash) + value.charCodeAt(index);
+    hash >>>= 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+function parseScalarMetadataValue(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) return '';
+  if (/^(true|false)$/i.test(value)) return value.toLowerCase() === 'true';
+  if (/^null$/i.test(value)) return null;
+  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value);
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    return value.replace(/^['"]|['"]$/g, '');
+  }
+}
+
+function parseNsiproKeyValueText(text) {
+  const root = {};
+  let currentSection = root;
+  String(text || '').split(/\r?\n/).forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';') || line.startsWith('//')) return;
+    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    if (sectionMatch) {
+      const sectionName = sectionMatch[1].trim();
+      if (!sectionName) return;
+      if (!root[sectionName] || typeof root[sectionName] !== 'object') root[sectionName] = {};
+      currentSection = root[sectionName];
+      return;
+    }
+    const delimiterIndex = ['=', ':']
+      .map((delimiter) => line.indexOf(delimiter))
+      .filter((index) => index > 0)
+      .sort((left, right) => left - right)[0];
+    if (!delimiterIndex) return;
+    const key = line.slice(0, delimiterIndex).trim();
+    if (!key) return;
+    currentSection[key] = parseScalarMetadataValue(line.slice(delimiterIndex + 1));
+  });
+  if (Object.keys(root).length === 0) {
+    throw new Error('No metadata entries were found in the .nsipro file.');
+  }
+  return root;
+}
+
+export function parseAssociatedMetadataText(text, filename = '') {
+  const extension = getFileExtension(filename);
+  if (!ASSOCIATED_METADATA_EXTENSIONS.includes(extension)) {
+    throw new Error('Unsupported metadata file type. Choose a .json or .nsipro file.');
+  }
+
+  const trimmed = String(text || '').trim();
+  if (!trimmed) {
+    throw new Error('Metadata file is empty.');
+  }
+
+  if (extension === '.json') {
+    try {
+      return { parser: 'json', metadata: JSON.parse(trimmed) };
+    } catch (err) {
+      throw new Error('Invalid JSON metadata file.');
+    }
+  }
+
+  try {
+    return { parser: 'nsipro-json', metadata: JSON.parse(trimmed) };
+  } catch (jsonError) {
+    return { parser: 'nsipro-key-value', metadata: parseNsiproKeyValueText(trimmed) };
+  }
+}
+
+
+function readAssociatedMetadataFileText(file) {
+  if (file && typeof file.text === 'function') {
+    return file.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Unable to read metadata file.'));
+    reader.readAsText(file);
+  });
+}
+
+function buildAssociatedMetadataBundle(file, text, parsedResult) {
+  const extension = getFileExtension(file?.name);
+  const contentHash = stableStringHash(`${file?.name || ''}\n${text}`);
+  const key = `associated_upload_metadata:${safeMetadataReferenceName(file?.name)}:${contentHash}`;
+  return {
+    key,
+    value: {
+      kind: 'associated_image_upload_metadata',
+      filename: file?.name || 'metadata',
+      file_type: extension.replace(/^\./, ''),
+      parser: parsedResult.parser,
+      content_hash: contentHash,
+      size_bytes: typeof file?.size === 'number' ? file.size : text.length,
+      metadata: parsedResult.metadata,
+    },
+  };
+}
+
+function buildAssociatedMetadataImageReference(bundle) {
+  if (!bundle?.key || !bundle?.value) return null;
+  return {
+    reference_type: 'project_metadata',
+    project_metadata_key: bundle.key,
+    filename: bundle.value.filename,
+    file_type: bundle.value.file_type,
+    parser: bundle.value.parser,
+    content_hash: bundle.value.content_hash,
+  };
+}
+
 const HIERARCHY_KEYS = [
   'design_number',
   'lot_number',
@@ -199,6 +335,10 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
 function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = null, onUploadComplete, setError }) {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadMetadata, setUploadMetadata] = useState('');
+  const [associatedMetadataFile, setAssociatedMetadataFile] = useState(null);
+  const [associatedMetadataBundle, setAssociatedMetadataBundle] = useState(null);
+  const [associatedMetadataParsing, setAssociatedMetadataParsing] = useState(false);
+  const [associatedMetadataError, setAssociatedMetadataError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [extractorConfig, setExtractorConfig] = useState({
     isValid: true,
@@ -230,6 +370,60 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       setGroupKey('');
     }
   }, [groupKey]);
+
+  const handleAssociatedMetadataFileChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    setAssociatedMetadataFile(file || null);
+    setAssociatedMetadataBundle(null);
+    setAssociatedMetadataError(null);
+    if (!file) return;
+
+    if (!ASSOCIATED_METADATA_EXTENSIONS.includes(getFileExtension(file.name))) {
+      setAssociatedMetadataError('Unsupported metadata file type. Choose a .json or .nsipro file.');
+      return;
+    }
+
+    setAssociatedMetadataParsing(true);
+    try {
+      const text = await readAssociatedMetadataFileText(file);
+      const parsedResult = parseAssociatedMetadataText(text, file.name);
+      setAssociatedMetadataBundle(buildAssociatedMetadataBundle(file, text, parsedResult));
+    } catch (err) {
+      setAssociatedMetadataError(err?.message || 'Unable to parse associated metadata file.');
+    } finally {
+      setAssociatedMetadataParsing(false);
+    }
+  };
+
+  const saveAssociatedMetadataBundle = useCallback(async () => {
+    if (!associatedMetadataFile) return null;
+    if (associatedMetadataParsing) {
+      throw new Error('Associated metadata file is still being parsed.');
+    }
+    if (associatedMetadataError || !associatedMetadataBundle) {
+      throw new Error(associatedMetadataError || 'Associated metadata file could not be parsed.');
+    }
+
+    const response = await fetch(`/api/projects/${projectId}/metadata`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: associatedMetadataBundle.key,
+        value: associatedMetadataBundle.value,
+      }),
+    });
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const payload = await response.json();
+        detail = payload?.detail || detail;
+      } catch (parseError) {
+        detail = response.statusText || detail;
+      }
+      throw new Error(detail);
+    }
+    return buildAssociatedMetadataImageReference(associatedMetadataBundle);
+  }, [associatedMetadataBundle, associatedMetadataError, associatedMetadataFile, associatedMetadataParsing, projectId]);
 
   // Handle file input change
   const handleFileChange = (e) => {
@@ -282,11 +476,25 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
         return;
       }
     }
-    
+
     setUploading(true);
     cancelledRef.current = false;
     const total = selectedFiles.length;
     setUploadProgress({ completed: 0, failed: 0, total });
+
+    let associatedMetadataReference = null;
+    if (associatedMetadataFile) {
+      try {
+        associatedMetadataReference = await saveAssociatedMetadataBundle();
+      } catch (err) {
+        const detail = err?.message ? ` ${err.message}` : '';
+        setError(`Unable to associate metadata file.${detail}`);
+        setUploadProgress(null);
+        setUploading(false);
+        return;
+      }
+    }
+    
 
     const results = [];
     const uploadedRecords = [];
@@ -308,10 +516,17 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
         const mergedMetadata = (extractedMetadata || manualMetadata)
           ? { ...(extractedMetadata || {}), ...(manualMetadata || {}) }
           : null;
-        const hierarchyMetadata = normalizeHierarchyMetadata(mergedMetadata);
-        const metadataForUpload = hierarchyMetadata
-          ? { ...mergedMetadata, ...hierarchyMetadata }
+        const metadataWithAssociatedReference = associatedMetadataReference
+          ? {
+            ...(mergedMetadata || {}),
+            associated_metadata_ref: associatedMetadataReference.project_metadata_key,
+            associated_metadata: associatedMetadataReference,
+          }
           : mergedMetadata;
+        const hierarchyMetadata = normalizeHierarchyMetadata(metadataWithAssociatedReference);
+        const metadataForUpload = hierarchyMetadata
+          ? { ...metadataWithAssociatedReference, ...hierarchyMetadata }
+          : metadataWithAssociatedReference;
 
         if (metadataForUpload) {
           formData.append('metadata', JSON.stringify(metadataForUpload));
@@ -387,15 +602,22 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setUploading(false);
   };
 
-  const getMergedMetadataForName = useCallback((filename, manualMetadata) => {
+  const getMergedMetadataForName = useCallback((filename, manualMetadata, associatedMetadataReference = null) => {
     const extractedMetadata = extractorConfig.extractMetadata(filename);
     const mergedMetadata = (extractedMetadata || manualMetadata)
       ? { ...(extractedMetadata || {}), ...(manualMetadata || {}) }
       : null;
-    const hierarchyMetadata = normalizeHierarchyMetadata(mergedMetadata);
-    return hierarchyMetadata
-      ? { ...mergedMetadata, ...hierarchyMetadata }
+    const metadataWithAssociatedReference = associatedMetadataReference
+      ? {
+        ...(mergedMetadata || {}),
+        associated_metadata_ref: associatedMetadataReference.project_metadata_key,
+        associated_metadata: associatedMetadataReference,
+      }
       : mergedMetadata;
+    const hierarchyMetadata = normalizeHierarchyMetadata(metadataWithAssociatedReference);
+    return hierarchyMetadata
+      ? { ...metadataWithAssociatedReference, ...hierarchyMetadata }
+      : metadataWithAssociatedReference;
   }, [extractorConfig]);
 
   const parseManualMetadata = () => {
@@ -475,6 +697,17 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     const manualMetadata = parseManualMetadata();
     if (manualMetadata === undefined) return;
 
+    let associatedMetadataReference = null;
+    if (associatedMetadataFile) {
+      try {
+        associatedMetadataReference = await saveAssociatedMetadataBundle();
+      } catch (err) {
+        const detail = err?.message ? ` ${err.message}` : '';
+        setError(`Unable to associate metadata file.${detail}`);
+        return;
+      }
+    }
+
     setImportingS3Files(true);
     setUploadProgress({ completed: 0, failed: 0, total: selectedS3Keys.length });
     try {
@@ -482,7 +715,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       const perFileMetadata = {};
       const groupIdentifiers = {};
       selectedObjects.forEach((object) => {
-        const metadataForUpload = getMergedMetadataForName(object.filename, manualMetadata);
+        const metadataForUpload = getMergedMetadataForName(object.filename, manualMetadata, associatedMetadataReference);
         if (metadataForUpload) {
           perFileMetadata[object.key] = metadataForUpload;
         }
@@ -748,6 +981,33 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
           )}
           
           <div className="form-group">
+            <fieldset className="metadata-association-section" style={{ border: '1px solid #e9ecef', borderRadius: '4px', padding: '12px' }}>
+              <legend style={{ fontSize: '1rem', fontWeight: 600, padding: '0 4px' }}>Associate Metadata</legend>
+              <label htmlFor="associated-metadata-input">Metadata File (Optional)</label>
+              <input
+                id="associated-metadata-input"
+                type="file"
+                accept=".json,.nsipro,application/json"
+                onChange={handleAssociatedMetadataFileChange}
+              />
+              <small className="form-text">
+                Choose one .json or .nsipro file after selecting images. VISTA stores the parsed file once as project metadata and adds a reference to every uploaded image.
+              </small>
+              {associatedMetadataParsing && (
+                <div className="form-text" role="status">Parsing associated metadata…</div>
+              )}
+              {associatedMetadataBundle && !associatedMetadataError && (
+                <div className="form-text" role="status">
+                  Associated {associatedMetadataBundle.value.filename} as {associatedMetadataBundle.key}.
+                </div>
+              )}
+              {associatedMetadataError && (
+                <div className="alert alert-danger" role="alert">{associatedMetadataError}</div>
+              )}
+            </fieldset>
+          </div>
+
+          <div className="form-group">
             <label htmlFor="metadata-input">Metadata (Optional JSON)</label>
             <textarea 
               id="metadata-input" 
@@ -762,7 +1022,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
             <button
               type="submit"
               className="btn btn-success"
-              disabled={uploading || loadingTestData || !extractorConfig.isValid}
+              disabled={uploading || loadingTestData || !extractorConfig.isValid || associatedMetadataParsing || Boolean(associatedMetadataError)}
             >
               {uploading ? 'Uploading...' : 'Upload Images'}
             </button>
