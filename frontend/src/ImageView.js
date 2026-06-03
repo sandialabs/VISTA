@@ -555,6 +555,7 @@ function ImageView() {
                 annotationMode={annotationHook.annotationMode}
                 selectMode={annotationHook.selectMode}
                 interactionMode={annotationHook.interactionMode}
+                onModeChange={annotationHook.setInteractionMode}
                 activeClassColor={annotationHook.bboxClasses.find(c => c.id === annotationHook.activeClassId)?.color || '#FF9800'}
                 selectedAnnotationId={annotationHook.selectedAnnotationId}
                 hoveredAnnotationId={annotationHook.hoveredAnnotationId}

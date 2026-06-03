@@ -25,7 +25,7 @@ function ImageDisplay({
   visibleMeasurementIds, userAnnotations, showUserAnnotations, annotationMode,
   selectMode, interactionMode, activeClassColor, selectedAnnotationId,
   hoveredAnnotationId, onSelectAnnotation, onSelectMeasurement, onAnnotationCreated,
-  onAnnotationUpdate, onToggleAnnotationMode
+  onAnnotationUpdate, onToggleAnnotationMode, onModeChange
 }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -239,7 +239,10 @@ function ImageDisplay({
       {image && (measureMode || measurementActive) && displaySize.width > 0 && naturalSize.width > 0 && (
         <MeasurementTool containerSize={displaySize} naturalSize={naturalSize} zoomLevel={zoomLevel}
           calibration={calibration} onSaveMeasurement={onSaveMeasurement}
-          onCancel={() => setMeasurementActive && setMeasurementActive(false)}
+          onCancel={() => {
+            if (setMeasurementActive) setMeasurementActive(false);
+            if (onModeChange) onModeChange('pan');
+          }}
           existingMeasurementCount={measurements ? measurements.length : 0}
           leftClickEnabled={measureMode || !!measurementActive} />
       )}
