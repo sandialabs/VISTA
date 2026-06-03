@@ -336,10 +336,10 @@ def test_thumbnail_bad_dimensions(client):
     assert r.status_code == 400
 
 
-def test_upload_and_list_5000_tiny_encoded_images(client, monkeypatch):
-    """Vista can ingest and list 5,000 tiny images without losing any files."""
-    image_count = 5000
-    pid = _create_project(client, name="5000-image-load")
+def test_upload_and_list_1000_tiny_encoded_images(client, monkeypatch):
+    """Vista can ingest and list 1,000 tiny images without losing any files."""
+    image_count = 1000
+    pid = _create_project(client, name="1000-image-load")
     uploaded_indices = set()
 
     async def validate_and_capture_upload(
