@@ -105,6 +105,35 @@ def _normalize_scalar_image_to_uint8(image: Image.Image) -> Optional[Image.Image
     return scaled.convert('L')
 
 
+def _prepare_thumbnail_image(image: Image.Image) -> tuple[Image.Image, str]:
+    """Return an 8-bit browser-safe image and output format for thumbnails.
+
+    Pillow cannot save high-bit-depth scalar modes such as I;16 directly as
+    JPEG, and browsers are inconsistent when displaying 16-bit thumbnails.
+    Normalize those scalar images into display-ready 8-bit luminance, then use
+    the thumbnail endpoint's compact JPEG default for non-transparent imagery.
+    """
+    original_format = image.format
+
+    normalized_scalar = _normalize_scalar_image_to_uint8(image)
+    if normalized_scalar is not None:
+        return normalized_scalar, 'JPEG'
+
+    if image.mode in ('LA', 'PA'):
+        return image.convert('RGBA'), 'PNG'
+    if image.mode == 'RGBA':
+        return image, 'PNG'
+    if image.mode == 'P':
+        if 'transparency' in image.info:
+            return image.convert('RGBA'), 'PNG'
+        return image.convert('RGB'), 'JPEG'
+    if image.mode not in ('RGB', 'L'):
+        return image.convert('RGB'), 'JPEG'
+    if original_format in ('JPEG', 'PNG', 'GIF', 'WEBP'):
+        return image, original_format
+    return image, 'JPEG'
+
+
 def _image_intensity_metadata(file: UploadFile) -> Dict[str, Any]:
     filename = (file.filename or '').lower()
     if not (filename.endswith('.tif') or filename.endswith('.tiff')):
@@ -906,10 +935,8 @@ async def get_image_thumbnail(
         try:
             img = Image.open(io.BytesIO(inline_data))
             img.thumbnail((width, height))
+            img, img_format = _prepare_thumbnail_image(img)
             output_buffer = io.BytesIO()
-            img_format = 'PNG' if img.mode in ('RGBA', 'LA') else 'JPEG'
-            if img_format == 'JPEG' and img.mode not in ('RGB', 'L'):
-                img = img.convert('RGB')
             img.save(output_buffer, format=img_format)
             output_buffer.seek(0)
             thumbnail_filename = f"thumbnail_{db_image.filename}" if db_image.filename else "thumbnail"
@@ -953,37 +980,10 @@ async def get_image_thumbnail(
                 # Resize the image while maintaining aspect ratio
                 img.thumbnail((width, height))
 
-                normalized_scalar = _normalize_scalar_image_to_uint8(img)
-                if normalized_scalar is not None:
-                    img = normalized_scalar
-                    img_format = 'PNG'
-                # Convert to web-friendly format for thumbnails
-                # Handle TIFF, CMYK, 16-bit, and other non-web formats
-                elif img.mode in ('LA', 'PA'):
-                    # Convert to RGBA to preserve transparency
-                    img = img.convert('RGBA')
-                    img_format = 'PNG'
-                elif img.mode == 'RGBA':
-                    # Already RGBA, just use PNG
-                    img_format = 'PNG'
-                elif img.mode == 'P':
-                    # Palette mode may have transparency info
-                    if 'transparency' in img.info:
-                        img = img.convert('RGBA')
-                        img_format = 'PNG'
-                    else:
-                        img = img.convert('RGB')
-                        img_format = 'JPEG'
-                elif img.mode not in ('RGB', 'L'):
-                    # Convert CMYK, 16-bit, 1-bit, etc. to RGB for JPEG
-                    img = img.convert('RGB')
-                    img_format = 'JPEG'
-                elif img.format in ('JPEG', 'PNG', 'GIF', 'WEBP'):
-                    # Keep original web-friendly format
-                    img_format = img.format
-                else:
-                    # Default non-web formats (TIFF, BMP, etc.) to JPEG
-                    img_format = 'JPEG'
+                # Convert to a web-friendly thumbnail format.
+                # Handle TIFF, CMYK, 16-bit scalar, palette transparency, and
+                # other non-web modes before saving.
+                img, img_format = _prepare_thumbnail_image(img)
 
                 # Save the resized image to a bytes buffer
                 output_buffer = io.BytesIO()
