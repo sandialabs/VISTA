@@ -817,6 +817,28 @@ function getModalities(part) {
   return DEFAULT_MODALITIES;
 }
 
+function getPartSummaryModalities(part, imageRefs = getPartImageRefs(part)) {
+  const loadedModalities = new Set();
+  imageRefs.forEach((entry) => {
+    const modality = String(entry?.modality || '').trim().toLowerCase();
+    if (!modality || modality === 'analyze-overlay') return;
+    loadedModalities.add(modality);
+  });
+  const configuredModalities = getModalities(part);
+  if (loadedModalities.size === 0) {
+    return imageRefs.length > 0 && configuredModalities.length === 1
+      ? [configuredModalities[0]]
+      : [];
+  }
+  const orderedConfiguredModalities = configuredModalities.filter((modality) =>
+    loadedModalities.has(String(modality || '').trim().toLowerCase()),
+  );
+  const orderedLoadedModalities = Array.from(loadedModalities).filter((modality) =>
+    !orderedConfiguredModalities.some((configured) => String(configured || '').trim().toLowerCase() === modality),
+  );
+  return [...orderedConfiguredModalities, ...orderedLoadedModalities];
+}
+
 function getMprDimensions(part) {
   const raw = part?.metadata?.volume_shape || part?.metadata?.mpr?.volume_shape || {};
   const dimensions = MPR_AXES.reduce((acc, axis) => {
@@ -4224,8 +4246,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     const isSelected = part.id === selectedPart?.id;
                     const viewImages = part?.metadata?.view_images || {};
                     const imageEntries = Object.entries(viewImages);
-                    const partModalities = getModalities(part);
                     const partImageRefs = getPartImageRefs(part);
+                    const partModalities = getPartSummaryModalities(part, partImageRefs);
                     return (
                       <article
                         key={part.id}
