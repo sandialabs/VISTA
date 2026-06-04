@@ -625,6 +625,40 @@ function scenarioNameIncludesAdvanced(payload) {
 
 describe('InspectionWorkbenchPanel', () => {
 
+  test('shows part summary modality buttons only for loaded image modalities', async () => {
+    mockWorkbenchFetch({
+      user: 'loaded-modalities',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-loaded-modalities' },
+      parts: [
+        {
+          id: 'part-loaded-modalities',
+          batch_id: 'batch-1',
+          serial_number: 'SN-LOADED-001',
+          display_name: 'Loaded Modalities Part',
+          review_state: 'unreviewed',
+          metadata: {
+            configured_views: ['front', 'thermal'],
+            modalities: ['visual', 'infrared', 'uv'],
+            view_images: { front: 'front-loaded.png', thermal: 'thermal-loaded.png' },
+            source_images: [
+              { filename: 'front-loaded.png', image_id: 'img-front-loaded', side: 'front', modality: 'visual', overlay: false },
+              { filename: 'thermal-loaded.png', image_id: 'img-thermal-loaded', side: 'thermal', modality: 'infrared', overlay: false },
+            ],
+            annotations: [],
+          },
+        },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    const modalityToggles = await screen.findByLabelText('Loaded Modalities Part modality toggles');
+    expect(within(modalityToggles).getByRole('button', { name: 'VISUAL' })).toBeInTheDocument();
+    expect(within(modalityToggles).getByRole('button', { name: 'INFRARED' })).toBeInTheDocument();
+    expect(within(modalityToggles).queryByRole('button', { name: 'UV' })).not.toBeInTheDocument();
+  });
+
   test('hides an image from the inspection workbench after moving it from a part to unassigned', async () => {
     let parts = [
       {
@@ -660,6 +694,7 @@ describe('InspectionWorkbenchPanel', () => {
       },
     });
 
+    global.fetch = jest.fn();
     jest.spyOn(global, 'fetch').mockImplementation((url, options = {}) => {
       if (url.includes('/parts/image-assignments') && options.method === 'POST') {
         const payload = JSON.parse(options.body || '{}');
