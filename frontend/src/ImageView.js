@@ -211,9 +211,16 @@ function ImageView() {
         navImages = sortImages(images, 'date');
       }
 
-      setProjectImages(navImages);
+      let index = navImages.findIndex(img => img.id === imageId);
+      if (index === -1) {
+        // The current image is excluded by the gallery's saved filters (e.g. a
+        // review-status or search filter). Fall back to the full project list so
+        // prev/next navigation still works instead of disabling both buttons.
+        navImages = sortImages(images, 'date');
+        index = navImages.findIndex(img => img.id === imageId);
+      }
 
-      const index = navImages.findIndex(img => img.id === imageId);
+      setProjectImages(navImages);
       setCurrentImageIndex(index);
     } catch (err) {
       console.error('Error loading project images:', err);
@@ -282,6 +289,26 @@ function ImageView() {
     if (galleryKey) params.set('galleryKey', galleryKey);
     return params.toString();
   }, [projectId, searchParams]);
+
+  // Derive the gallery the viewer was opened from so "Back" returns there
+  // (preserving the user's filters/scroll) instead of always jumping to the
+  // project root. Falls back to the image's group, then the project page.
+  const buildBackDestination = useCallback(() => {
+    const galleryKey = searchParams.get('galleryKey');
+    if (galleryKey) {
+      if (galleryKey === `${projectId}_ungrouped`) {
+        return `/project/${projectId}/ungrouped`;
+      }
+      const groupMatch = galleryKey.match(new RegExp(`^${projectId}_group_(.+)$`));
+      if (groupMatch) {
+        return `/project/${projectId}/group/${groupMatch[1]}`;
+      }
+    }
+    if (image && image.group_id) {
+      return `/project/${projectId}/group/${image.group_id}`;
+    }
+    return `/project/${projectId}`;
+  }, [projectId, searchParams, image]);
   useEffect(() => {
     annotationHook.loadUserAnnotations();
   }, [imageId, annotationHook.loadUserAnnotations]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -401,13 +428,7 @@ function ImageView() {
         <div className="view-header-content">
           <button
             className="btn btn-secondary btn-small"
-            onClick={() => {
-              if (image && image.group_id) {
-                navigate(`/project/${projectId}/group/${image.group_id}`);
-              } else {
-                navigate(`/project/${projectId}`);
-              }
-            }}
+            onClick={() => navigate(buildBackDestination())}
           >
             &larr; Back
           </button>

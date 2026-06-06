@@ -7,11 +7,18 @@ function CompactImageClassifications({ imageId, classes, loading, setLoading, se
   const generateHotkeys = useCallback((classList) => {
     const usedKeys = new Set();
     const hotkeyMap = new Map();
-    const priorityKeys = ['a', 's', 'd', 'f', 'q', 'w', 'e', 'r']; // Home row + top row
+    const priorityKeys = ['a', 'f', 'q', 'w', 'e', 'g', 'j', 'k']; // Home/top row, excluding reserved keys
     const allKeys = 'abcdefghijklmnopqrstuvwxyz1234567890'.split('');
 
-    // Reserve 'h' for help functionality
-    usedKeys.add('h');
+    // Reserve keys owned by other handlers so classification hotkeys never
+    // collide with them. Pressing one of these otherwise triggers two unrelated
+    // actions at once (e.g. 'b' both classifies and enters draw mode).
+    //   h           -> help dialog
+    //   b d v s m   -> interaction modes (useAnnotations: draw/select/measure)
+    //   1-9         -> select bbox class + draw mode (useAnnotations)
+    //   p r         -> review pass/reject (ReviewPanel)
+    ['h', 'b', 'd', 'v', 's', 'm', 'p', 'r', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+      .forEach(k => usedKeys.add(k));
 
     // First pass: try first letter of class name
     classList.forEach(cls => {
