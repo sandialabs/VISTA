@@ -11,6 +11,11 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_for_log(value: str) -> str:
+    """Strip newline/carriage-return characters from a value to prevent log injection."""
+    return value.replace('\n', '').replace('\r', '')
+
 # Simple in-memory cache for group membership checks
 # Format: {(user_email, group_id, debug_mode): (is_member, timestamp)}
 _group_membership_cache: Dict[Tuple[str, str, bool], Tuple[bool, float]] = {}
@@ -41,31 +46,25 @@ def is_user_in_group(user_email: str, group_id: str) -> bool:
     current_time = time.time()
 
     # Check cache first
+    # Log only domain portion of email to avoid PII exposure
+    domain = _sanitize_for_log(("@" + user_email.split("@")[1]) if "@" in user_email else "(unknown)")
+    safe_group_id = _sanitize_for_log(group_id)
+
     if cache_key in _group_membership_cache:
         is_member, cached_time = _group_membership_cache[cache_key]
         if current_time - cached_time < _CACHE_TTL:
-            # Sanitize for logging
-            safe_user_email = user_email.replace('\n', '').replace('\r', '')
-            safe_group_id = group_id.replace('\n', '').replace('\r', '')
-            logger.debug("Cache hit", extra={"user": safe_user_email, "group": safe_group_id, "result": is_member, "debug": debug_mode})
+            logger.debug("Cache hit: domain=%s group=%s result=%s debug=%s", domain, safe_group_id, is_member, debug_mode)
             return is_member
         else:
-            # Cache expired, remove entry
             del _group_membership_cache[cache_key]
-            # Sanitize for logging
-            safe_user_email = user_email.replace('\n', '').replace('\r', '')
-            safe_group_id = group_id.replace('\n', '').replace('\r', '')
-            logger.debug("Cache expired", extra={"user": safe_user_email, "group": safe_group_id, "debug": debug_mode})
+            logger.debug("Cache expired: domain=%s group=%s debug=%s", domain, safe_group_id, debug_mode)
 
     # Call core auth function
     is_member = _core_is_user_in_group(user_email, group_id)
 
     # Cache the result
     _group_membership_cache[cache_key] = (is_member, current_time)
-    # Sanitize for logging
-    safe_user_email = user_email.replace('\n', '').replace('\r', '')
-    safe_group_id = group_id.replace('\n', '').replace('\r', '')
-    logger.debug("Cached result", extra={"user": safe_user_email, "group": safe_group_id, "result": is_member})
+    logger.debug("Cached result: domain=%s group=%s result=%s", domain, safe_group_id, is_member)
     
     return is_member
 
@@ -160,7 +159,8 @@ def clear_user_cache(user_email: str) -> None:
     for key in keys_to_remove:
         del _group_membership_cache[key]
 
-    logger.info(f"Cleared cache for user: {user_email}")
+    domain = _sanitize_for_log(user_email.split("@")[1] if "@" in user_email else "(unknown)")
+    logger.info("Cleared cache for user domain: @%s", domain)
 
 
 def get_cache_stats() -> Dict[str, int]:

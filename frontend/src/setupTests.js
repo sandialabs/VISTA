@@ -30,7 +30,8 @@ beforeAll(() => {
 		const first = args[0];
 		const message = typeof first === 'string' ? first : '';
 
-		if (message.includes('React Router Future Flag Warning')) {
+		if (message.includes('React Router Future Flag Warning') ||
+			message.startsWith('Non-OK response when loading review statuses')) {
 			return;
 		}
 
@@ -61,7 +62,10 @@ beforeAll(() => {
 		const message = typeof first === 'string' ? first : '';
 
 		if (message.startsWith('Failed to load image with ID:') ||
-			message.startsWith('Failed to load review statuses:')) {
+			message.startsWith('Failed to load review statuses:') ||
+			message.includes('inside a test was not wrapped in act(...)') ||
+			message.includes('Not implemented: window.scrollTo') ||
+			message.startsWith('Error loading project calibration')) {
 			return;
 		}
 

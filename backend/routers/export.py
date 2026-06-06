@@ -13,6 +13,7 @@ from core import models, schemas
 from core.database import get_db
 from core.group_auth_helper import is_user_in_group
 from utils.dependencies import get_current_user
+from utils.crud.user_annotations import list_annotations_for_project
 import utils.crud as crud
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,15 @@ async def export_project_excel(
         )
         for c in cmt_result.scalars().all():
             comments_by_image[str(c.image_id)].append(c)
+
+    # Bulk-fetch all user annotations for the project
+    all_annotations = await list_annotations_for_project(db=db, project_id=project_id)
+    annotations_by_image: dict[str, list] = defaultdict(list)
+    bbox_class_lookup: dict[str, str] = {}
+    for ann in all_annotations:
+        annotations_by_image[str(ann.image_id)].append(ann)
+        if ann.bbox_class and str(ann.bbox_class_id) not in bbox_class_lookup:
+            bbox_class_lookup[str(ann.bbox_class_id)] = ann.bbox_class.name
 
     # Collect unique author IDs for batch user lookup
     author_ids = set()
@@ -199,6 +209,27 @@ async def export_project_excel(
 
         row["image_classes"] = ", ".join(class_names) if class_names else ""
         row["comment"] = " | ".join(comment_texts) if comment_texts else ""
+
+        # Annotations summary
+        img_annotations = annotations_by_image.get(str(image.id), [])
+        if img_annotations:
+            ann_parts = []
+            for ann in img_annotations:
+                cls_name = bbox_class_lookup.get(str(ann.bbox_class_id), "Unknown")
+                coords = (
+                    f"[{ann.bbox_x_min:.0f},{ann.bbox_y_min:.0f},"
+                    f"{ann.bbox_x_max:.0f},{ann.bbox_y_max:.0f}]"
+                )
+                part = f"{cls_name} {coords}"
+                if ann.notes:
+                    part += f" ({ann.notes})"
+                ann_parts.append(part)
+            row["annotations"] = " | ".join(ann_parts)
+            row["annotation_count"] = str(len(img_annotations))
+        else:
+            row["annotations"] = ""
+            row["annotation_count"] = "0"
+
         rows.append(row)
 
     # Generate Excel workbook
@@ -258,12 +289,15 @@ def _build_workbook(project_name: str, rows: list[dict], meta_keys: list[str]):
     columns.append(("Review Date", 22))
     columns.append(("Image Classes", 30))
     columns.append(("Comment", 50))
+    columns.append(("Annotation Count", 18))
+    columns.append(("Annotations", 60))
 
     # The dict keys used to retrieve values from each row
     row_keys = (
         ["filename"]
         + list(meta_keys)
-        + ["review_status", "reviewer", "review_date", "image_classes", "comment"]
+        + ["review_status", "reviewer", "review_date", "image_classes", "comment",
+           "annotation_count", "annotations"]
     )
 
     # Header styling

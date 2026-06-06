@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import './App.css';
 
@@ -12,10 +12,17 @@ import MLAnalysisPanel from './components/MLAnalysisPanel';
 import OverlayControls from './components/OverlayControls';
 import MLDebugOutputs from './components/MLDebugOutputs';
 import CalibrationManager from './components/CalibrationManager';
-import MeasurementList from './components/MeasurementList';
+import AnnotationMeasurementTabs from './components/AnnotationMeasurementTabs';
 import ReviewPanel from './components/ReviewPanel';
 import ImageGroupPanel from './components/ImageGroupPanel';
 import { loadGalleryState, applyGalleryFilters, sortImages } from './utils/galleryState';
+import AnnotationToolbar from './components/AnnotationToolbar';
+import AnnotationReviewControls from './components/AnnotationReviewControls';
+import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp';
+
+// Custom hooks
+import useAnnotations from './hooks/useAnnotations';
+import useMeasurements from './hooks/useMeasurements';
 
 function ImageView() {
   const { imageId } = useParams();
@@ -35,11 +42,12 @@ function ImageView() {
   const [sidebarWidth, setSidebarWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
   const [projectArchived, setProjectArchived] = useState(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // Navigation settings - restore from localStorage
   const [skipDeletedImages, setSkipDeletedImages] = useState(() => {
     const saved = localStorage.getItem('skipDeletedImages');
-    return saved !== null ? JSON.parse(saved) : true; // Default to true (skip deleted)
+    return saved !== null ? JSON.parse(saved) : true;
   });
 
   // ML Analysis state - restore from localStorage if available
@@ -64,22 +72,41 @@ function ImageView() {
   });
   const [autoSelectLatest, setAutoSelectLatest] = useState(() => {
     const saved = localStorage.getItem('mlAutoSelectLatest');
-    return saved === 'true' || saved === null; // Default to true
+    return saved === 'true' || saved === null;
   });
 
-  // Measurement state
-  const [calibration, setCalibration] = useState(null);
-  const [measurements, setMeasurements] = useState([]);
-  const [measurementActive, setMeasurementActive] = useState(false);
-  const [selectedMeasurementId, setSelectedMeasurementId] = useState(null);
-  const [visibleMeasurementIds, setVisibleMeasurementIds] = useState(null);
+  // Custom hooks for measurements and annotations
+  // Use refs to break circular dependency between the two hooks
+  const selectMeasurementRef = useRef(null);
+  const measurementHook = useMeasurements(imageId, setImage, setError);
+  const annotationHook = useAnnotations(imageId, projectId, setError, {
+    measurements: measurementHook.measurements,
+    selectedMeasurementId: measurementHook.selectedMeasurementId,
+    onSelectMeasurement: (...args) => selectMeasurementRef.current?.(...args),
+    onDeleteMeasurement: measurementHook.handleDeleteMeasurement,
+  });
+
+  // Cross-deselection: selecting one type clears the other
+  const { setSelectedAnnotationId } = annotationHook;
+  const { setSelectedMeasurementId } = measurementHook;
+
+  const handleSelectAnnotation = useCallback((id) => {
+    setSelectedAnnotationId(id);
+    if (id != null) setSelectedMeasurementId(null);
+  }, [setSelectedAnnotationId, setSelectedMeasurementId]);
+
+  const handleSelectMeasurement = useCallback((id) => {
+    setSelectedMeasurementId(id);
+    if (id != null) setSelectedAnnotationId(null);
+  }, [setSelectedMeasurementId, setSelectedAnnotationId]);
+
+  selectMeasurementRef.current = handleSelectMeasurement;
 
   // ML analysis selection handler
   const handleMLAnalysisSelect = useCallback((data) => {
     if (data && data.analysis) {
       setSelectedAnalysis(data.analysis);
       setSelectedAnnotations(data.annotations || []);
-      // Check if any bitmap artifacts are available (heatmap, segmentation, mask)
       const hasBitmap = (data.annotations || []).some(a =>
         a.storage_path && ['heatmap', 'segmentation', 'mask'].includes(a.annotation_type)
       );
@@ -95,39 +122,27 @@ function ImageView() {
   const loadImageData = useCallback(async () => {
     try {
       setLoading(true);
-      
-      // Try to fetch image metadata directly first
       let response = await fetch(`/api/images/${imageId}`);
-      
       if (!response.ok) {
-        // If direct fetch fails (likely because image is deleted), 
-        // try to find it through the project endpoint with deleted images included
         console.log('Direct image fetch failed, trying project endpoint with deleted images...');
         const projectResponse = await fetch(`/api/projects/${projectId}/images?include_deleted=true`);
-        
         if (!projectResponse.ok) {
           throw new Error(`Failed to fetch project images: ${projectResponse.status}`);
         }
-        
-        const projectImages = await projectResponse.json();
-        const imageData = projectImages.find(img => img.id === imageId);
-        
+        const projImages = await projectResponse.json();
+        const imageData = projImages.find(img => img.id === imageId);
         if (!imageData) {
           throw new Error('Image not found in project');
         }
-        
         setImage(imageData);
-        // Update document title
         document.title = `${imageData.filename || 'Image'} - Image Manager`;
       } else {
         const imageData = await response.json();
         setImage(imageData);
-        // Update document title
         document.title = `${imageData.filename || 'Image'} - Image Manager`;
       }
-      
-    } catch (error) {
-      console.error('Error loading image data:', error);
+    } catch (err) {
+      console.error('Error loading image data:', err);
       setError('Failed to load image. Please try again later.');
     } finally {
       setLoading(false);
@@ -159,9 +174,6 @@ function ImageView() {
         throw new Error('Invalid server response: expected an array of images');
       }
 
-      // Determine the gallery state key for this view.
-      // Prefer the explicit galleryKey from the URL (set by ImageGallery on click).
-      // Fall back to a group-derived key, then the project key.
       let galleryStateKey;
       if (urlGalleryKey) {
         galleryStateKey = urlGalleryKey;
@@ -171,12 +183,10 @@ function ImageView() {
         galleryStateKey = projectId;
       }
 
-      // Load saved gallery filter/sort state and apply it for consistent navigation
       let navImages;
       try {
         const galleryState = loadGalleryState(galleryStateKey);
 
-        // Fetch review statuses if a non-default review filter is active
         let reviewStatuses = null;
         if (galleryState.reviewFilter && galleryState.reviewFilter !== 'all') {
           try {
@@ -191,7 +201,6 @@ function ImageView() {
           }
         }
 
-        // If review statuses are unavailable, bypass the review filter to avoid empty navImages
         const effectiveGalleryState =
           reviewStatuses != null
             ? { ...galleryState, reviewStatuses }
@@ -199,41 +208,35 @@ function ImageView() {
 
         navImages = applyGalleryFilters(images, effectiveGalleryState);
       } catch (e) {
-        // If anything goes wrong reading saved state, fall back to default date sort
         navImages = sortImages(images, 'date');
       }
 
+      let index = navImages.findIndex(img => img.id === imageId);
+      if (index === -1) {
+        // The current image is excluded by the gallery's saved filters (e.g. a
+        // review-status or search filter). Fall back to the full project list so
+        // prev/next navigation still works instead of disabling both buttons.
+        navImages = sortImages(images, 'date');
+        index = navImages.findIndex(img => img.id === imageId);
+      }
+
       setProjectImages(navImages);
-
-      // Find the index of the current image in the filtered/sorted array
-      const index = navImages.findIndex(img => img.id === imageId);
       setCurrentImageIndex(index);
-
-    } catch (error) {
-      console.error('Error loading project images:', error);
+    } catch (err) {
+      console.error('Error loading project images:', err);
       setError('Failed to load project images for navigation. Please try again later.');
     }
   }, [projectId, imageId, searchParams]);
 
-  // Save skip deleted preference to localStorage
-  useEffect(() => {
-    localStorage.setItem('skipDeletedImages', JSON.stringify(skipDeletedImages));
-  }, [skipDeletedImages]);
-
-  // Load classes for the project
+  useEffect(() => { localStorage.setItem('skipDeletedImages', JSON.stringify(skipDeletedImages)); }, [skipDeletedImages]);
   const loadClasses = useCallback(async () => {
     try {
       const response = await fetch(`/api/projects/${projectId}/classes`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      
+      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
       const classesData = await response.json();
       setClasses(classesData);
-      
-    } catch (error) {
-      console.error('Error loading classes:', error);
+    } catch (err) {
+      console.error('Error loading classes:', err);
       setError('Failed to load classes. Please try again later.');
     }
   }, [projectId]);
@@ -244,32 +247,21 @@ function ImageView() {
       setError('Image ID or Project ID is missing.');
       return;
     }
-    
-    // Fetch the current user
     fetch('/api/users/me')
       .then(response => {
         if (!response.ok) {
-          // If we get a 401, it's expected when authentication is disabled
-          if (response.status === 401) {
-            console.log("Authentication is disabled or user is not logged in");
-            return null;
-          }
+          if (response.status === 401) return null;
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         return response.json();
       })
-      .then(userData => {
-        if (userData) {
-          setCurrentUser(userData);
-        }
-      })
-      .catch(err => {
-        console.error("Failed to fetch current user:", err);
-      });
-    
+      .then(userData => { if (userData) setCurrentUser(userData); })
+      .catch(err => console.error('Failed to fetch current user:', err));
+
     loadImageData();
     loadClasses();
-  }, [imageId, projectId, loadImageData, loadClasses]);
+    annotationHook.loadBBoxClasses();
+  }, [imageId, projectId, loadImageData, loadClasses, annotationHook.loadBBoxClasses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch project archive status (only when projectId changes, not on every image navigation)
   useEffect(() => {
@@ -298,17 +290,35 @@ function ImageView() {
     return params.toString();
   }, [projectId, searchParams]);
 
-  // Navigate to previous image with transition
-  const navigateToPreviousImage = useCallback(() => {
-    let targetIndex = currentImageIndex - 1;
-
-    // Skip deleted images if option is enabled
-    if (skipDeletedImages) {
-      while (targetIndex >= 0 && projectImages[targetIndex]?.deleted_at) {
-        targetIndex--;
+  // Derive the gallery the viewer was opened from so "Back" returns there
+  // (preserving the user's filters/scroll) instead of always jumping to the
+  // project root. Falls back to the image's group, then the project page.
+  const buildBackDestination = useCallback(() => {
+    const galleryKey = searchParams.get('galleryKey');
+    if (galleryKey) {
+      if (galleryKey === `${projectId}_ungrouped`) {
+        return `/project/${projectId}/ungrouped`;
+      }
+      const groupMatch = galleryKey.match(new RegExp(`^${projectId}_group_(.+)$`));
+      if (groupMatch) {
+        return `/project/${projectId}/group/${groupMatch[1]}`;
       }
     }
+    if (image && image.group_id) {
+      return `/project/${projectId}/group/${image.group_id}`;
+    }
+    return `/project/${projectId}`;
+  }, [projectId, searchParams, image]);
+  useEffect(() => {
+    annotationHook.loadUserAnnotations();
+  }, [imageId, annotationHook.loadUserAnnotations]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Navigate to previous image
+  const navigateToPreviousImage = useCallback(() => {
+    let targetIndex = currentImageIndex - 1;
+    if (skipDeletedImages) {
+      while (targetIndex >= 0 && projectImages[targetIndex]?.deleted_at) targetIndex--;
+    }
     if (targetIndex >= 0) {
       setIsTransitioning(true);
       setTimeout(() => {
@@ -318,17 +328,12 @@ function ImageView() {
     }
   }, [currentImageIndex, projectImages, navigate, buildNavQuery, skipDeletedImages]);
 
-  // Navigate to next image with transition
+  // Navigate to next image
   const navigateToNextImage = useCallback(() => {
     let targetIndex = currentImageIndex + 1;
-
-    // Skip deleted images if option is enabled
     if (skipDeletedImages) {
-      while (targetIndex < projectImages.length && projectImages[targetIndex]?.deleted_at) {
-        targetIndex++;
-      }
+      while (targetIndex < projectImages.length && projectImages[targetIndex]?.deleted_at) targetIndex++;
     }
-
     if (targetIndex < projectImages.length) {
       setIsTransitioning(true);
       setTimeout(() => {
@@ -338,76 +343,48 @@ function ImageView() {
     }
   }, [currentImageIndex, projectImages, navigate, buildNavQuery, skipDeletedImages]);
 
-  // Reset transition state when image changes (but keep ML settings)
+  // Reset transition state when image changes
   useEffect(() => {
     setIsTransitioning(false);
-    // Clear selected analysis so MLAnalysisPanel can auto-select latest if enabled
     setSelectedAnalysis(null);
     setSelectedAnnotations([]);
-    setOverlayOptions(prev => ({
-      ...prev,
-      bitmapAvailable: false
-    }));
-    // Clear measurement mode when image changes
-    setMeasurementActive(false);
-    setSelectedMeasurementId(null);
-  }, [imageId]);
-
-  // Load measurements when image changes (syncs state with image metadata)
+    setOverlayOptions(prev => ({ ...prev, bitmapAvailable: false }));
+    measurementHook.setMeasurementActive(false);
+    measurementHook.setSelectedMeasurementId(null);
+    annotationHook.setAnnotationMode(false);
+    annotationHook.setSelectedAnnotationId(null);
+  }, [imageId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Load measurements when image changes
   useEffect(() => {
-    // Check both metadata and metadata_ for compatibility
     const metadata = image?.metadata || image?.metadata_;
-
     if (metadata?.measurements) {
-      setMeasurements(metadata.measurements);
-      const ids = metadata.measurements.map(m => m.id);
-      setVisibleMeasurementIds(ids);
+      measurementHook.setMeasurements(metadata.measurements);
+      measurementHook.setVisibleMeasurementIds(metadata.measurements.map(m => m.id));
     } else {
-      setMeasurements([]);
-      setVisibleMeasurementIds(null);
+      measurementHook.setMeasurements([]);
+      measurementHook.setVisibleMeasurementIds(null);
     }
-  }, [imageId, image]);
-
-  // Save overlay options to localStorage when they change
+  }, [imageId, image]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const { bitmapAvailable, ...persistentOptions } = overlayOptions;
     localStorage.setItem('mlOverlayOptions', JSON.stringify(persistentOptions));
   }, [overlayOptions]);
-
-  // Save auto-select preference to localStorage
-  useEffect(() => {
-    localStorage.setItem('mlAutoSelectLatest', autoSelectLatest.toString());
-  }, [autoSelectLatest]);
-
-  // Handle resize functionality
-  const handleMouseDown = useCallback(() => {
-    setIsResizing(true);
-  }, []);
-
+  useEffect(() => { localStorage.setItem('mlAutoSelectLatest', autoSelectLatest.toString()); }, [autoSelectLatest]);
+  // Sidebar resize
+  const handleMouseDown = useCallback(() => setIsResizing(true), []);
   const handleMouseMove = useCallback((e) => {
     if (!isResizing) return;
-
     const newWidth = e.clientX;
-    const minWidth = 250;
-    const maxWidth = window.innerWidth * 0.6; // Max 60% of screen width
-
-    if (newWidth >= minWidth && newWidth <= maxWidth) {
-      setSidebarWidth(newWidth);
-    }
+    if (newWidth >= 250 && newWidth <= window.innerWidth * 0.6) setSidebarWidth(newWidth);
   }, [isResizing]);
+  const handleMouseUp = useCallback(() => setIsResizing(false), []);
 
-  const handleMouseUp = useCallback(() => {
-    setIsResizing(false);
-  }, []);
-
-  // Add global mouse event listeners for resizing
   useEffect(() => {
     if (isResizing) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'ew-resize';
       document.body.style.userSelect = 'none';
-
       return () => {
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
@@ -417,144 +394,33 @@ function ImageView() {
     }
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
+  // Sync: when entering measure mode via toolbar, clear standalone measurementActive
+  // When entering other modes, ensure no conflict with measurement tool
+  useEffect(() => {
+    if (annotationHook.measureMode) {
+      measurementHook.setMeasurementActive(false);
+    }
+  }, [annotationHook.measureMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keyboard navigation
+  // Keyboard navigation and help toggle
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'ArrowLeft') {
-        navigateToPreviousImage();
-      } else if (e.key === 'ArrowRight') {
-        navigateToNextImage();
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowLeft') navigateToPreviousImage();
+      else if (e.key === 'ArrowRight') navigateToNextImage();
+      else if (e.key === '?') setShowShortcutsHelp(prev => !prev);
+      else if (e.key === 'c') {
+        const el = document.getElementById('image-comments-section');
+        if (!el) return;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const ta = el.querySelector('textarea');
+        if (ta) setTimeout(() => ta.focus(), 300);
       }
     };
-
     document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [currentImageIndex, projectImages.length, navigateToNextImage, navigateToPreviousImage]);
-
-  // Measurement handlers
-  const handleSaveMeasurement = async (measurement) => {
-    // Save original state for potential rollback
-    const originalMeasurements = [...measurements];
-    const originalVisibleIds = visibleMeasurementIds ? [...visibleMeasurementIds] : null;
-
-    // Calculate updated measurements
-    const updatedMeasurements = [...measurements, measurement];
-
-    // Optimistic update
-    setMeasurements(updatedMeasurements);
-    setVisibleMeasurementIds(updatedMeasurements.map(m => m.id));
-
-    try {
-      const response = await fetch(`/api/images/${imageId}/metadata`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: 'measurements',
-          value: updatedMeasurements
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save measurement');
-      }
-
-      const updatedImage = await response.json();
-      setImage(updatedImage);
-    } catch (err) {
-      console.error('Error saving measurement:', err);
-      setError('Failed to save measurement. Please try again.');
-      // Revert to original state on error
-      setMeasurements(originalMeasurements);
-      setVisibleMeasurementIds(originalVisibleIds);
-    }
-  };
-
-  const handleDeleteMeasurement = async (measurementId) => {
-    // Save original state for potential rollback
-    const originalMeasurements = [...measurements];
-    const originalVisibleIds = visibleMeasurementIds ? [...visibleMeasurementIds] : null;
-
-    const updatedMeasurements = measurements.filter(m => m.id !== measurementId);
-
-    // Optimistic update
-    setMeasurements(updatedMeasurements);
-    setVisibleMeasurementIds(updatedMeasurements.map(m => m.id));
-
-    try {
-      const response = await fetch(`/api/images/${imageId}/metadata`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: 'measurements',
-          value: updatedMeasurements
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to delete measurement: ${response.status} - ${errorText}`);
-      }
-
-      const updatedImage = await response.json();
-      setImage(updatedImage);
-    } catch (err) {
-      console.error('Error deleting measurement:', err);
-      setError('Failed to delete measurement. Please try again.');
-      // Revert to original state
-      setMeasurements(originalMeasurements);
-      setVisibleMeasurementIds(originalVisibleIds);
-    }
-  };
-
-  const handleRenameMeasurement = async (measurementId, newName) => {
-    // Save original state for potential rollback
-    const originalMeasurements = [...measurements];
-
-    const updatedMeasurements = measurements.map(m =>
-      m.id === measurementId ? { ...m, name: newName } : m
-    );
-
-    // Optimistic update
-    setMeasurements(updatedMeasurements);
-
-    try {
-      const response = await fetch(`/api/images/${imageId}/metadata`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: 'measurements',
-          value: updatedMeasurements
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to rename measurement');
-      }
-
-      const updatedImage = await response.json();
-      setImage(updatedImage);
-    } catch (err) {
-      console.error('Error renaming measurement:', err);
-      setError('Failed to rename measurement. Please try again.');
-      // Revert to original state
-      setMeasurements(originalMeasurements);
-    }
-  };
-
-  const handleToggleVisibility = (measurementId) => {
-    setVisibleMeasurementIds(prev => {
-      if (!prev) return [measurementId];
-      if (prev.includes(measurementId)) {
-        return prev.filter(id => id !== measurementId);
-      } else {
-        return [...prev, measurementId];
-      }
-    });
-  };
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [navigateToNextImage, navigateToPreviousImage]);
 
   return (
     <div className="App" style={{ maxWidth: '100%', padding: '0' }}>
@@ -562,20 +428,21 @@ function ImageView() {
         <div className="view-header-content">
           <button
             className="btn btn-secondary btn-small"
-            onClick={() => {
-              if (image && image.group_id) {
-                navigate(`/project/${projectId}/group/${image.group_id}`);
-              } else {
-                navigate(`/project/${projectId}`);
-              }
-            }}
+            onClick={() => navigate(buildBackDestination())}
           >
-            ← Back
+            &larr; Back
           </button>
           <span className="view-filename">{image ? image.filename : 'Loading...'}</span>
-          {currentUser && (
-            <span className="view-user-info">{currentUser.email}</span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {currentUser && <span className="view-user-info">{currentUser.email}</span>}
+            <button
+              className="btn btn-secondary btn-small"
+              onClick={() => setShowShortcutsHelp(prev => !prev)}
+              title="Help (?)"
+            >
+              Help
+            </button>
+          </div>
         </div>
       </header>
 
@@ -588,31 +455,59 @@ function ImageView() {
         {error && (
           <div className="alert alert-error">
             {error}
-            <button
-              className="close-alert"
-              onClick={() => setError(null)}
-            >
-              &times;
-            </button>
+            <button className="close-alert" onClick={() => setError(null)}>&times;</button>
           </div>
         )}
-        
+
         <div className="image-view-container">
           <div className="image-view-main">
-            {/* Left sidebar with classification controls, metadata, and comments */}
-            <div
-              className="image-view-sidebar"
-              style={{ width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` }}
-            >
-              {/* Review verification panel */}
+            <div className="image-view-sidebar" style={{ width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` }}>
               {image && (
                 <ReviewPanel
                   imageId={imageId}
                   readOnly={projectArchived !== false}
                 />
               )}
-
-              {/* Group assignment panel */}
+              {image && (
+                <AnnotationToolbar
+                  interactionMode={annotationHook.interactionMode}
+                  onModeChange={annotationHook.setInteractionMode}
+                  bboxClasses={annotationHook.bboxClasses}
+                  activeClassId={annotationHook.activeClassId}
+                  onActiveClassChange={annotationHook.setActiveClassId}
+                  showUserAnnotations={annotationHook.showUserAnnotations}
+                  onToggleShowAnnotations={() => annotationHook.setShowUserAnnotations(prev => !prev)}
+                  selectedAnnotationId={annotationHook.selectedAnnotationId}
+                  onDeleteSelected={annotationHook.handleDeleteSelected}
+                />
+              )}
+              {image && (
+                <AnnotationMeasurementTabs
+                  interactionMode={annotationHook.interactionMode}
+                  imageId={imageId} projectId={projectId}
+                  bboxClasses={annotationHook.bboxClasses}
+                  annotations={annotationHook.userAnnotations}
+                  onAnnotationsChange={annotationHook.loadUserAnnotations}
+                  selectedAnnotationId={annotationHook.selectedAnnotationId}
+                  onSelectAnnotation={handleSelectAnnotation}
+                  hoveredAnnotationId={annotationHook.hoveredAnnotationId}
+                  onHoverAnnotation={annotationHook.setHoveredAnnotationId}
+                  measurements={measurementHook.measurements}
+                  calibration={measurementHook.calibration}
+                  selectedMeasurementId={measurementHook.selectedMeasurementId}
+                  onSelectMeasurement={handleSelectMeasurement}
+                  onDeleteMeasurement={measurementHook.handleDeleteMeasurement}
+                  onRenameMeasurement={measurementHook.handleRenameMeasurement}
+                  onToggleVisibility={measurementHook.handleToggleVisibility}
+                  visibleMeasurementIds={measurementHook.visibleMeasurementIds}
+                />
+              )}
+              {annotationHook.selectedAnnotationId && (
+                <AnnotationReviewControls
+                  annotationId={annotationHook.selectedAnnotationId}
+                  onReviewComplete={annotationHook.loadUserAnnotations}
+                />
+              )}
               {image && projectId && (
                 <ImageGroupPanel
                   imageId={imageId}
@@ -625,7 +520,6 @@ function ImageView() {
                 />
               )}
 
-              {/* Classification controls */}
               <CompactImageClassifications
                 imageId={imageId}
                 classes={classes}
@@ -634,7 +528,6 @@ function ImageView() {
                 setError={setError}
                 readOnly={projectArchived !== false}
               />
-
 
               <ImageComments
                 imageId={imageId}
@@ -653,87 +546,49 @@ function ImageView() {
                 setError={setError}
               />
 
-              {/* Calibration Manager */}
               {image && (
-                <CalibrationManager
-                  projectId={projectId}
-                  imageId={imageId}
-                  image={image}
-                  onCalibrationChange={setCalibration}
-                />
+                <CalibrationManager projectId={projectId} imageId={imageId} image={image} onCalibrationChange={measurementHook.setCalibration} />
               )}
-
-              {/* Measurement List */}
-              {image && measurements.length > 0 && (
-                <MeasurementList
-                  measurements={measurements}
-                  calibration={calibration}
-                  onDeleteMeasurement={handleDeleteMeasurement}
-                  onRenameMeasurement={handleRenameMeasurement}
-                  onToggleVisibility={handleToggleVisibility}
-                  visibleMeasurementIds={visibleMeasurementIds}
-                  selectedMeasurementId={selectedMeasurementId}
-                  onSelectMeasurement={setSelectedMeasurementId}
-                />
-              )}
-
-              {/* ML Analysis Panel (read-only, only visible when analyses exist) */}
               {image && (
-                <MLAnalysisPanel
-                  key={imageId}
-                  imageId={imageId}
-                  onSelect={handleMLAnalysisSelect}
-                  autoSelectLatest={autoSelectLatest}
-                  onAutoSelectChange={setAutoSelectLatest}
-                />
+                <MLAnalysisPanel key={imageId} imageId={imageId} onSelect={handleMLAnalysisSelect} autoSelectLatest={autoSelectLatest} onAutoSelectChange={setAutoSelectLatest} />
               )}
-
-              {/* Overlay controls (only visible when an analysis is selected) */}
-              {selectedAnalysis && (
-                <OverlayControls
-                  options={overlayOptions}
-                  onChange={setOverlayOptions}
-                />
-              )}
+              {selectedAnalysis && <OverlayControls options={overlayOptions} onChange={setOverlayOptions} />}
             </div>
 
-            {/* Resizable divider */}
-            <div
-              className="resize-divider"
-              onMouseDown={handleMouseDown}
-              style={{ cursor: isResizing ? 'ew-resize' : 'ew-resize' }}
-            >
+            <div className="resize-divider" onMouseDown={handleMouseDown} style={{ cursor: 'ew-resize' }}>
               <div className="resize-handle"></div>
             </div>
 
-            {/* Right side with image display */}
             <div className="image-view-content">
               <ImageDisplay
-                imageId={imageId}
-                image={image}
-                isTransitioning={isTransitioning}
-                projectId={projectId}
-                setImage={setImage}
-                refreshProjectImages={loadProjectImages}
-                navigateToPreviousImage={navigateToPreviousImage}
-                navigateToNextImage={navigateToNextImage}
-                currentImageIndex={currentImageIndex}
-                projectImages={projectImages}
-                selectedAnalysis={selectedAnalysis}
-                annotations={selectedAnnotations}
-                overlayOptions={overlayOptions}
-                calibration={calibration}
-                measurements={measurements}
-                measurementActive={measurementActive}
-                setMeasurementActive={setMeasurementActive}
-                onSaveMeasurement={handleSaveMeasurement}
-                selectedMeasurementId={selectedMeasurementId}
-                visibleMeasurementIds={visibleMeasurementIds}
+                imageId={imageId} image={image} isTransitioning={isTransitioning}
+                projectId={projectId} setImage={setImage} refreshProjectImages={loadProjectImages}
+                navigateToPreviousImage={navigateToPreviousImage} navigateToNextImage={navigateToNextImage}
+                currentImageIndex={currentImageIndex} projectImages={projectImages}
+                selectedAnalysis={selectedAnalysis} annotations={selectedAnnotations} overlayOptions={overlayOptions}
+                calibration={measurementHook.calibration} measurements={measurementHook.measurements}
+                measurementActive={measurementHook.measurementActive} setMeasurementActive={measurementHook.setMeasurementActive}
+                onSaveMeasurement={measurementHook.handleSaveMeasurement}
+                selectedMeasurementId={measurementHook.selectedMeasurementId}
+                visibleMeasurementIds={measurementHook.visibleMeasurementIds}
+                userAnnotations={annotationHook.userAnnotations}
+                showUserAnnotations={annotationHook.showUserAnnotations}
+                annotationMode={annotationHook.annotationMode}
+                selectMode={annotationHook.selectMode}
+                interactionMode={annotationHook.interactionMode}
+                onModeChange={annotationHook.setInteractionMode}
+                activeClassColor={annotationHook.bboxClasses.find(c => c.id === annotationHook.activeClassId)?.color || '#FF9800'}
+                selectedAnnotationId={annotationHook.selectedAnnotationId}
+                hoveredAnnotationId={annotationHook.hoveredAnnotationId}
+                onSelectAnnotation={handleSelectAnnotation}
+                onSelectMeasurement={handleSelectMeasurement}
+                onAnnotationCreated={annotationHook.handleAnnotationCreated}
+                onAnnotationUpdate={annotationHook.handleAnnotationUpdate}
+                onToggleAnnotationMode={() => annotationHook.setAnnotationMode(prev => !prev)}
               />
             </div>
           </div>
 
-          {/* Keep deletion controls at the bottom for all to see (hidden for archived projects) */}
           {projectArchived === false && (
             <ImageDeletionControls
               projectId={projectId}
@@ -743,48 +598,19 @@ function ImageView() {
             />
           )}
 
-          {/* Navigation settings */}
-          <div style={{
-            marginTop: '1rem',
-            padding: '0.75rem',
-            background: 'var(--bg-secondary, #f8f9fa)',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color, #dee2e6)'
-          }}>
-            <label style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              userSelect: 'none'
-            }}>
-              <input
-                type="checkbox"
-                checked={skipDeletedImages}
-                onChange={(e) => setSkipDeletedImages(e.target.checked)}
-                style={{ cursor: 'pointer' }}
-              />
+          <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--bg-secondary, #f8f9fa)', borderRadius: '6px', border: '1px solid var(--border-color, #dee2e6)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={skipDeletedImages} onChange={(e) => setSkipDeletedImages(e.target.checked)} style={{ cursor: 'pointer' }} />
               <span>Skip deleted images when navigating (arrow keys)</span>
             </label>
-            <div style={{
-              marginTop: '0.5rem',
-              fontSize: '0.85rem',
-              color: 'var(--text-muted, #6c757d)',
-              paddingLeft: '1.5rem'
-            }}>
+            <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted, #6c757d)', paddingLeft: '1.5rem' }}>
               When enabled, arrow key navigation will automatically skip over soft-deleted images.
             </div>
           </div>
-
-          {/* Debug ML outputs section */}
-          {imageId && (
-            <div style={{ marginTop: '1rem' }}>
-              <MLDebugOutputs imageId={imageId} />
-            </div>
-          )}
+          {imageId && <div style={{ marginTop: '1rem' }}><MLDebugOutputs imageId={imageId} /></div>}
         </div>
       </div>
+      <KeyboardShortcutsHelp show={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} classes={classes} />
     </div>
   );
 }

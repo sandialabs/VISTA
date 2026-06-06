@@ -25,8 +25,8 @@ function testImageDisplayFunctionality() {
 
   const hasDeletedDisplaySVG = content.includes('DELETED_IMAGE_DISPLAY_SVG');
   const hasDeleteButton = content.includes('Delete\n          </button>') || content.includes('>Delete<');
-  const hasDeleteModal = content.includes('showDeleteModal');
-  const hasDeleteFunction = content.includes('handleDelete');
+  const hasDeleteModal = content.includes('showDeleteModal') || content.includes('ImageDeleteModal');
+  const hasDeleteFunction = content.includes('handleDelete') || content.includes('setShowDeleteModal');
   const hasDeletedImageRendering = content.includes('image.deleted_at ?');
   const noDebugButton = !content.includes('Debug</button>');
 
@@ -40,7 +40,7 @@ function testImageViewFallback() {
 
   const hasFallbackLogic = content.includes('include_deleted=true');
   const hasErrorHandling = content.includes('Direct image fetch failed');
-  const hasProjectEndpointFallback = content.includes('projectImages.find');
+  const hasProjectEndpointFallback = content.includes('projectImages.find') || content.includes('projImages.find');
 
   return hasFallbackLogic && hasErrorHandling && hasProjectEndpointFallback;
 }

@@ -316,6 +316,19 @@ Images within a project can be organized into named groups (by part number, seri
 
 **Tests:** `backend/tests/test_groups.py`
 
+## Image Viewer: Interaction Modes, Keyboard Shortcuts, and Navigation
+
+The image viewer (`ImageView.js`) has four interaction modes managed by `hooks/useAnnotations.js`: `pan` (default), `select`, `draw`, `measure`.
+
+**Keyboard shortcut ownership (avoid clashes).** Several independent `keydown` listeners are active at once in the viewer; `preventDefault()` in one does NOT stop the others, so any key bound in more than one place fires multiple actions. To prevent this, certain keys are reserved by their owning handler and MUST NOT be reused:
+
+- `hooks/useAnnotations.js`: `b`/`d` (draw), `v`/`s` (select), `m` (measure), `1`-`9` (select bbox class + draw), `Tab`/`Shift+Tab` (cycle), `Delete`/`Backspace`, `Escape`.
+- `components/ReviewPanel.js`: `p` (pass), `r` (reject).
+- `ImageView.js`: arrow keys (prev/next image), `?` (help), `c` (comments).
+- `components/CompactImageClassifications.js` assigns a single-letter hotkey per project class dynamically. Its `generateHotkeys` reserves all of the above (`h b d v s m p r` and `1-9`) so classification hotkeys can never collide with a mode/review key. If you add a new global viewer shortcut, add its key to that reserved set.
+
+**Navigation.** `loadProjectImages` builds the prev/next list by applying the saved gallery filters (search + review status) for the current `galleryKey`. If the current image is excluded by those filters, it falls back to the full project list so prev/next stay enabled (otherwise both buttons disable). The header "Back" button uses `buildBackDestination()` to return to the originating gallery derived from `galleryKey` (`_ungrouped` -> ungrouped view, `_group_<id>` -> group view, else project page), not always the project root.
+
 ## Environment Configuration
 
 Copy `.env.example` to `.env` and configure:

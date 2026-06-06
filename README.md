@@ -35,6 +35,9 @@ A full-stack web application for managing, classifying, and collaborating on vis
 ### ML Analysis Overlay
 ![ML Analysis with Bounding Box Overlays](docs/images/image-view-ml-overlay.png)
 
+### User Annotations with Bounding Boxes
+![Image Viewer with Bounding Box Annotations](docs/screenshots/image-viewer-annotations.png)
+
 ## Requirements
 
 - **Node.js** 22+

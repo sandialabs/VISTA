@@ -2,17 +2,23 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 function CompactImageClassifications({ imageId, classes, loading, setLoading, setError, onClassificationsChange, readOnly = false }) {
   const [imageClassifications, setImageClassifications] = useState([]);
-  const [showHelp, setShowHelp] = useState(false);
 
   // Generate hotkey mapping for classes
   const generateHotkeys = useCallback((classList) => {
     const usedKeys = new Set();
     const hotkeyMap = new Map();
-    const priorityKeys = ['a', 's', 'd', 'f', 'q', 'w', 'e', 'r']; // Home row + top row
+    const priorityKeys = ['a', 'f', 'q', 'w', 'e', 'g', 'j', 'k']; // Home/top row, excluding reserved keys
     const allKeys = 'abcdefghijklmnopqrstuvwxyz1234567890'.split('');
 
-    // Reserve 'h' for help functionality
-    usedKeys.add('h');
+    // Reserve keys owned by other handlers so classification hotkeys never
+    // collide with them. Pressing one of these otherwise triggers two unrelated
+    // actions at once (e.g. 'b' both classifies and enters draw mode).
+    //   h           -> help dialog
+    //   b d v s m   -> interaction modes (useAnnotations: draw/select/measure)
+    //   1-9         -> select bbox class + draw mode (useAnnotations)
+    //   p r         -> review pass/reject (ReviewPanel)
+    ['h', 'b', 'd', 'v', 's', 'm', 'p', 'r', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+      .forEach(k => usedKeys.add(k));
 
     // First pass: try first letter of class name
     classList.forEach(cls => {
@@ -201,18 +207,13 @@ function CompactImageClassifications({ imageId, classes, loading, setLoading, se
         }
       }
       
-      // Toggle help with 'h' key
-      if (e.key.toLowerCase() === 'h') {
-        e.preventDefault();
-        setShowHelp(!showHelp);
-      }
     };
-    
+
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [hotkeyMap, handleClassifyImage, showHelp, readOnly]);
+  }, [hotkeyMap, handleClassifyImage, readOnly]);
 
   return (
     <div className="compact-classifications">
@@ -236,56 +237,7 @@ function CompactImageClassifications({ imageId, classes, loading, setLoading, se
             );
           })}
         </div>
-        <div className="compact-help-controls">
-          <button 
-            className="help-toggle-btn"
-            onClick={() => setShowHelp(!showHelp)}
-            title="Show/hide keyboard shortcuts (h)"
-          >
-            ?
-          </button>
-        </div>
       </div>
-      
-      {showHelp && (
-        <div className="compact-help-panel">
-          <div className="help-content">
-            <h4>Quick Labeling Guide</h4>
-            <div className="help-sections">
-              <div className="help-section">
-                <strong>Navigation:</strong>
-                <ul>
-                  <li>← → Arrow keys to navigate between images</li>
-                  <li>Click buttons or use keyboard shortcuts to classify</li>
-                </ul>
-              </div>
-              <div className="help-section">
-                <strong>Classification Shortcuts:</strong>
-                <ul>
-                  {classes.map(cls => {
-                    const hotkey = hotkeyMap.get(cls.id);
-                    if (hotkey) {
-                      return (
-                        <li key={cls.id}>
-                          <kbd>{hotkey}</kbd> - {cls.name}
-                        </li>
-                      );
-                    }
-                    return null;
-                  })}
-                </ul>
-              </div>
-              <div className="help-section">
-                <strong>Other:</strong>
-                <ul>
-                  <li><kbd>h</kbd> - Toggle this help panel</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
     </div>
   );
 }

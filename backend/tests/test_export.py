@@ -255,10 +255,10 @@ def test_export_excel_no_metadata_defaults(client):
     from openpyxl import load_workbook
     ws = load_workbook(io.BytesIO(resp.content)).active
 
-    # With no metadata, 6 columns: Filename, Review Status, Reviewer, Review Date,
-    # Image Classes, Comment
-    assert ws.max_column == 6
-    headers = [ws.cell(row=1, column=c).value for c in range(1, 7)]
+    # With no metadata, 8 columns: Filename, Review Status, Reviewer, Review Date,
+    # Image Classes, Comment, Annotation Count, Annotations
+    assert ws.max_column == 8
+    headers = [ws.cell(row=1, column=c).value for c in range(1, 9)]
     assert headers[0] == "Filename"
     assert "Review Status" in headers
     assert "Reviewer" in headers
@@ -523,14 +523,16 @@ class TestBuildWorkbook:
         assert ws.cell(row=1, column=4).value == "Review Date"
         assert ws.cell(row=1, column=5).value == "Image Classes"
         assert ws.cell(row=1, column=6).value == "Comment"
-        assert ws.max_column == 6
+        assert ws.cell(row=1, column=7).value == "Annotation Count"
+        assert ws.cell(row=1, column=8).value == "Annotations"
+        assert ws.max_column == 8
 
     def test_meta_keys_become_columns(self):
         meta_keys = ["lot_number", "serial"]
         wb = _build_workbook("Test", [], meta_keys)
         ws = self._load(wb).active
         # Columns: Filename, lot_number, serial, Review Status, Reviewer, Review Date,
-        #          Image Classes, Comment
+        #          Image Classes, Comment, Annotation Count, Annotations
         assert ws.cell(row=1, column=1).value == "Filename"
         assert ws.cell(row=1, column=2).value == "lot_number"
         assert ws.cell(row=1, column=3).value == "serial"
@@ -539,7 +541,9 @@ class TestBuildWorkbook:
         assert ws.cell(row=1, column=6).value == "Review Date"
         assert ws.cell(row=1, column=7).value == "Image Classes"
         assert ws.cell(row=1, column=8).value == "Comment"
-        assert ws.max_column == 8
+        assert ws.cell(row=1, column=9).value == "Annotation Count"
+        assert ws.cell(row=1, column=10).value == "Annotations"
+        assert ws.max_column == 10
 
     def test_freeze_panes_set(self):
         wb = _build_workbook("Test", [{"filename": "a.png"}], [])
@@ -552,9 +556,9 @@ class TestBuildWorkbook:
         ws = self._load(wb).active
         assert ws.auto_filter.ref is not None
         assert "A1" in ws.auto_filter.ref
-        # 6 columns (Filename, Review Status, Reviewer, Review Date, Image Classes, Comment),
-        # 3 data rows + 1 header
-        assert "F4" in ws.auto_filter.ref
+        # 8 columns (Filename, Review Status, Reviewer, Review Date, Image Classes,
+        # Comment, Annotation Count, Annotations), 3 data rows + 1 header
+        assert "H4" in ws.auto_filter.ref
 
     def test_autofilter_not_set_for_empty(self):
         wb = _build_workbook("Test", [], [])
@@ -571,13 +575,13 @@ class TestBuildWorkbook:
     def test_column_count_no_meta_keys(self):
         wb = _build_workbook("Test", [], [])
         ws = self._load(wb).active
-        assert ws.max_column == 6  # Filename + Review Status + Reviewer + Review Date + Image Classes + Comment
+        assert ws.max_column == 8  # Filename + Review Status + Reviewer + Review Date + Image Classes + Comment + Annotation Count + Annotations
 
     def test_column_count_with_meta_keys(self):
         meta_keys = ["a", "b", "c"]
         wb = _build_workbook("Test", [], meta_keys)
         ws = self._load(wb).active
-        assert ws.max_column == 9  # Filename + 3 keys + Review Status + Reviewer + Review Date + Image Classes + Comment
+        assert ws.max_column == 11  # Filename + 3 keys + Review Status + Reviewer + Review Date + Image Classes + Comment + Annotation Count + Annotations
 
     def test_sheet_title(self):
         wb = _build_workbook("My Project", [], [])

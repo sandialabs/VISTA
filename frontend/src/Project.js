@@ -6,6 +6,8 @@ import './App.css';
 import ImageUploader from './components/ImageUploader';
 import MetadataManager from './components/MetadataManager';
 import ClassManager from './components/ClassManager';
+import BBoxClassManager from './components/BBoxClassManager';
+import CollectionManager from './components/CollectionManager';
 import ImageGallery from './components/ImageGallery';
 import GroupedImagesPage from './components/GroupedImagesPage';
 import ReviewStatusSummary from './components/ReviewStatusSummary';
@@ -26,6 +28,7 @@ function Project() {
   const [exporting, setExporting] = useState(false);
   const [hasGroups, setHasGroups] = useState(false);
   const [groupSearch, setGroupSearch] = useState('');
+  const [bboxClasses, setBBoxClasses] = useState([]);
 
   const fetchImages = useCallback(async (projId, opts = {}) => {
     const inc = opts.includeDeleted ?? includeDeleted;
@@ -120,12 +123,17 @@ function Project() {
           setHasGroups(projectHasGroups);
         }
 
+        // Fetch bbox classes
+        const bboxClassesResponse = await fetch(`/api/projects/${id}/bbox-classes`);
+        if (bboxClassesResponse.ok) {
+          setBBoxClasses(await bboxClassesResponse.json());
+        }
+
         // Only fetch the flat image list when the grouped view is not active.
-        // When hasGroups is true, the GroupedImagesPage fetches its own data.
         if (!projectHasGroups) {
           await fetchImages(id);
         }
-        
+
         setLoading(false);
       } catch (err) {
         console.error("Failed to fetch project data:", err);
@@ -352,14 +360,29 @@ function Project() {
               </div>
               
               <div className="classes-section">
-                <ClassManager 
-                  projectId={id} 
-                  classes={classes} 
-                  setClasses={setClasses} 
-                  loading={loading} 
-                  setLoading={setLoading} 
-                  setError={setError} 
+                <ClassManager
+                  projectId={id}
+                  classes={classes}
+                  setClasses={setClasses}
+                  loading={loading}
+                  setLoading={setLoading}
+                  setError={setError}
                 />
+              </div>
+
+              <div className="classes-section">
+                <BBoxClassManager
+                  projectId={id}
+                  bboxClasses={bboxClasses}
+                  setBBoxClasses={setBBoxClasses}
+                  loading={loading}
+                  setLoading={setLoading}
+                  setError={setError}
+                />
+              </div>
+
+              <div className="collections-section">
+                <CollectionManager projectId={id} />
               </div>
             </div>
             )}

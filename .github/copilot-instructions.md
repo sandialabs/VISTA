@@ -93,6 +93,14 @@ Images can be organized into named groups (e.g., by part or serial number) using
 - `ImageUploader.js` shows a "Use as Group Identifier" dropdown when `FilenameMetadataExtractor` keys are configured.
 - Tests: `backend/tests/test_groups.py`.
 
+## Image Viewer Shortcuts & Navigation
+
+The viewer has four interaction modes (`pan`/`select`/`draw`/`measure`) in `hooks/useAnnotations.js`. Multiple `keydown` listeners run simultaneously and do not block each other, so a key bound in two places triggers both actions.
+
+- Reserved keys (do not reuse): `b d v s m` and `1-9` (modes/bbox-class in `useAnnotations.js`), `p r` (review in `ReviewPanel.js`), arrows/`?`/`c` (`ImageView.js`), `h` (help).
+- `CompactImageClassifications.js > generateHotkeys` reserves all of the above so per-class classification hotkeys never collide. Add any new global viewer shortcut to that reserved set.
+- Prev/Next: `loadProjectImages` falls back to the full project list when the current image is excluded by the saved gallery filter, so the buttons never silently disable. The header Back button (`buildBackDestination`) returns to the originating gallery via `galleryKey` (`_ungrouped`/`_group_<id>`/project), not always the project root.
+
 ## Conventions & Constraints
 
 - **No emojis** anywhere (code, tests, logs, docs, or tool output).

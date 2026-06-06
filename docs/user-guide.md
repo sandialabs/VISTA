@@ -8,13 +8,17 @@ Welcome to VISTA! This guide will help you get started with organizing, classify
 2. [Getting Started](#getting-started)
 3. [Projects](#projects)
 4. [Images](#images)
-5. [Classifications](#classifications)
-6. [Comments & Collaboration](#comments--collaboration)
-7. [ML Analysis](#ml-analysis)
-8. [Metadata](#metadata)
-9. [API Keys](#api-keys)
-10. [Best Practices](#best-practices)
-11. [Troubleshooting](#troubleshooting)
+5. [Bounding Box Annotations](#bounding-box-annotations)
+6. [Review Workflow](#review-workflow)
+7. [Collections](#collections)
+8. [Classifications](#classifications)
+9. [Comments & Collaboration](#comments--collaboration)
+10. [ML Analysis](#ml-analysis)
+11. [Metadata](#metadata)
+12. [Keyboard Shortcuts](#keyboard-shortcuts)
+13. [API Keys](#api-keys)
+14. [Best Practices](#best-practices)
+15. [Troubleshooting](#troubleshooting)
 
 ## Introduction
 
@@ -365,6 +369,113 @@ Images use a two-stage deletion process for safety:
 - After 60 days, soft-deleted images are permanently removed
 - Administrators can force immediate hard deletion if needed
 - Hard deletion cannot be undone
+
+## Bounding Box Annotations
+
+Bounding box annotations let you draw rectangular regions on images to mark areas of interest such as defects, objects, or features. Annotations are stored per-image and can be exported in COCO JSON or YOLO format.
+
+![Image viewer with bounding box annotation](screenshots/bbox-annotation-viewer.png)
+
+### Setting Up Bbox Classes
+
+Before drawing annotations, define the bounding box classes for your project:
+
+1. Navigate to the project page
+2. Scroll to the **Bounding Box Classes** section
+3. Click **Add Bbox Class**
+4. Enter a name, optional description, and pick a color
+5. Click **Add Bbox Class** to save
+
+Each class gets a distinct color for visual differentiation on the image.
+
+### Drawing Annotations
+
+There are three ways to enter draw mode:
+
+- **Quick Draw buttons** -- In the image viewer sidebar under Annotation Tools, click a class button (e.g., "1 Defect") to start drawing with that class
+- **Hotkey** -- Press `1`-`9` to select the corresponding class and immediately enter draw mode
+- **Annotate button** -- Click the "Annotate" button below the image, then select a class
+
+Once in draw mode:
+
+1. Left-click and drag on the image to draw a rectangle
+2. Release the mouse to create the annotation
+3. The new annotation is automatically selected for immediate adjustment
+
+### Editing Annotations (Resize)
+
+After drawing or selecting an annotation:
+
+1. Click an annotation on the image or use `Tab`/`Shift+Tab` to cycle through annotations
+2. Eight resize handles appear (four corners and four edge midpoints)
+3. Drag any handle to resize the bounding box
+4. Changes are saved automatically when you release the mouse
+
+### Deleting Annotations
+
+1. Select the annotation in the sidebar list
+2. Click the **Delete** button next to the annotation entry
+3. The annotation is immediately removed
+
+### Exporting Annotations
+
+From the project page, click **Export Data** to export annotations:
+
+- **Excel** -- Includes annotation counts per image
+- **COCO JSON** -- Standard COCO format with bounding box coordinates
+- **YOLO ZIP** -- YOLO-format text files with normalized coordinates
+
+## Review Workflow
+
+The review workflow lets inspectors mark images as passed or rejected. Rejections require a secondary review for confirmation.
+
+### Review Statuses
+
+| Status | Meaning |
+|--------|---------|
+| Unreviewed | No review recorded yet (default) |
+| Pass | Inspector approved the image |
+| Reject (Pending) | Inspector rejected, awaiting senior confirmation |
+| Reject (Confirmed) | Rejection confirmed by senior reviewer |
+
+### Reviewing Images
+
+In the image viewer, the **Review Status** panel appears at the top of the sidebar:
+
+- Click **Pass** or press `p` to approve
+- Click **Reject** or press `r` to reject (creates a pending rejection)
+- When status is Reject (Pending), a secondary reviewer can check the **Confirm Rejection** checkbox
+- Click **Revert** to reset to Unreviewed
+
+### Review Progress
+
+On the project page, a **Review Progress** bar shows aggregate counts across all images (unreviewed, pass, reject pending, reject confirmed).
+
+### Filtering by Review Status
+
+On the project page gallery, use the **Filter by review status** dropdown to show only images with a specific status (e.g., only "Unreviewed" images remaining to review).
+
+## Collections
+
+Collections let you group images within a project for focused workflows.
+
+### Creating a Collection
+
+1. On the project page, scroll to the **Collections** section
+2. Enter a name and optional description
+3. Click **Add Collection**
+
+### Managing Collections
+
+- **Edit** -- Rename or update the description
+- **Delete** -- Remove the collection (images are not deleted)
+- **Require Review** -- Mark all images in the collection as requiring review
+- **Lock** -- Lock the collection with an optional reason to prevent modifications
+
+### Adding Images to Collections
+
+1. In the image gallery, select images using checkboxes
+2. Use the bulk action menu to add them to a collection
 
 ## Classifications
 
@@ -950,19 +1061,57 @@ Alternative documentation:
 - Note when the problem started
 - Mention if it works in other browsers
 
+## Keyboard Shortcuts
+
+Press `?` in the image viewer to open the shortcuts reference panel.
+
+![Keyboard shortcuts help modal](screenshots/keyboard-shortcuts-help.png)
+
+### Annotation
+
+| Key | Action |
+|-----|--------|
+| `1`-`9` | Select bbox class and enter draw mode |
+| `Tab` | Select next annotation |
+| `Shift+Tab` | Select previous annotation |
+| `Esc` | Deselect annotation / exit draw mode |
+
+### Review
+
+| Key | Action |
+|-----|--------|
+| `p` | Pass review |
+| `r` | Reject review |
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| Left arrow | Previous image |
+| Right arrow | Next image |
+| `c` | Jump to comments (scrolls sidebar and focuses comment box) |
+
+### Zoom
+
+| Key | Action |
+|-----|--------|
+| `+` | Zoom in |
+| `-` | Zoom out |
+| `0` | Reset zoom and pan |
+| Scroll wheel | Zoom toward cursor |
+
+### General
+
+| Key | Action |
+|-----|--------|
+| `?` | Toggle keyboard shortcuts help |
+
+All keyboard shortcuts are disabled when an input field, textarea, or dropdown is focused.
+
 ## Tips & Tricks
-
-### Keyboard Shortcuts
-
-- **Arrow Keys** - Navigate between images in detail view
-- **Escape** - Close modals or return to previous view
-- **Ctrl/Cmd + Click** - Select multiple images
-- **Shift + Click** - Select range of images
 
 ### Quick Actions
 
-- **Double-click image** - View full screen
-- **Right-click image** - Download or copy URL
 - **Drag and drop** - Upload images
 - **Click outside modal** - Close modal
 
@@ -1010,6 +1159,10 @@ Alternative documentation:
 - **API Key** - Authentication token for programmatic access
 - **Group** - Set of users with access to specific projects
 - **Annotation** - ML-detected feature (bounding box, segmentation, etc.)
+- **Bounding Box Annotation** - User-drawn rectangular region marking an area of interest on an image
+- **Bbox Class** - Category assigned to a bounding box annotation (e.g., "Defect", "Crack")
+- **Collection** - A named grouping of images within a project for focused workflows
+- **Review** - An inspection decision on an image (pass, reject pending, or reject confirmed)
 
 ## Additional Resources
 
