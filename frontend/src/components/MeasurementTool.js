@@ -2,6 +2,18 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import MeasurementSaveDialog from './MeasurementSaveDialog';
 
+export function getOverlayCoordinatesFromClientPoint(clientX, clientY, rect, containerSize) {
+  if (!rect || !containerSize?.width || !containerSize?.height) return { x: 0, y: 0 };
+
+  const renderedWidth = rect.width || containerSize.width;
+  const renderedHeight = rect.height || containerSize.height;
+
+  return {
+    x: ((clientX - rect.left) / renderedWidth) * containerSize.width,
+    y: ((clientY - rect.top) / renderedHeight) * containerSize.height
+  };
+}
+
 export default function MeasurementTool({
   containerSize,
   naturalSize,
@@ -36,12 +48,13 @@ export default function MeasurementTool({
   const getAdjustedCoordinates = useCallback((e) => {
     if (!overlayRef.current) return { x: 0, y: 0 };
 
-    const rect = overlayRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / zoomLevel;
-    const y = (e.clientY - rect.top) / zoomLevel;
-
-    return { x, y };
-  }, [zoomLevel]);
+    return getOverlayCoordinatesFromClientPoint(
+      e.clientX,
+      e.clientY,
+      overlayRef.current.getBoundingClientRect(),
+      containerSize
+    );
+  }, [containerSize]);
 
   const finishDrawing = useCallback((event) => {
     if (!isDrawing || !drawingLine) return;

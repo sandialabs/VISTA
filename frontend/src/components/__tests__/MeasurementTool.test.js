@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import MeasurementTool from '../MeasurementTool';
+import MeasurementTool, { getOverlayCoordinatesFromClientPoint } from '../MeasurementTool';
 
 describe('MeasurementTool', () => {
   const defaultProps = {
@@ -266,6 +266,56 @@ describe('MeasurementTool', () => {
   });
 
   describe('coordinate scaling', () => {
+    it('maps zoomed visual clicks to the exact underlying overlay pixel from rendered bounds', () => {
+      const containerSize = { width: 800, height: 600 };
+      const renderedRect = {
+        left: 25,
+        top: 40,
+        width: 1600,
+        height: 1200
+      };
+
+      expect(getOverlayCoordinatesFromClientPoint(25, 40, renderedRect, containerSize)).toEqual({ x: 0, y: 0 });
+      expect(getOverlayCoordinatesFromClientPoint(825, 640, renderedRect, containerSize)).toEqual({ x: 400, y: 300 });
+      expect(getOverlayCoordinatesFromClientPoint(1625, 1240, renderedRect, containerSize)).toEqual({ x: 800, y: 600 });
+    });
+
+    it('saves the endpoint at the exact clicked image pixel when zoomed and the rendered scale is authoritative', () => {
+      const onSaveMeasurement = jest.fn();
+      const { container } = render(
+        <MeasurementTool
+          {...defaultProps}
+          zoomLevel={3}
+          leftClickEnabled={true}
+          onSaveMeasurement={onSaveMeasurement}
+        />
+      );
+
+      const overlay = container.querySelector('div[style*="cursor"]');
+      overlay.getBoundingClientRect = jest.fn(() => ({
+        left: 25,
+        top: 40,
+        width: 1600,
+        height: 1200
+      }));
+
+      // The rendered overlay is 1600x1200 for an 800x600 image area (2x visual zoom).
+      // The clicked visual endpoint at (825, 640) must therefore land on image pixel (400, 300),
+      // even if the zoom prop is stale or rounded differently during an interaction.
+      fireEvent.mouseDown(overlay, { clientX: 225, clientY: 240, button: 0 });
+      fireEvent.mouseUp(overlay, { clientX: 825, clientY: 640, button: 0 });
+
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: 'Zoom endpoint exactness' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      const savedMeasurement = onSaveMeasurement.mock.calls[0][0];
+      expect(savedMeasurement.x1).toBe(200);
+      expect(savedMeasurement.y1).toBe(200);
+      expect(savedMeasurement.x2).toBe(800);
+      expect(savedMeasurement.y2).toBe(600);
+    });
+
     it('scales coordinates from container to natural size', () => {
       const { container } = render(<MeasurementTool {...defaultProps} />);
 
