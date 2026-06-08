@@ -4626,9 +4626,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                   <span className="volume-box volume-face-right" />
                   <span className="volume-box volume-face-top" />
                   <span className="volume-box volume-face-bottom" />
-                  <span className={`volume-plane plane-axial ${activeMprPane === 'axial' ? 'active' : ''}`} />
-                  <span className={`volume-plane plane-coronal ${activeMprPane === 'coronal' ? 'active' : ''}`} />
-                  <span className={`volume-plane plane-sagittal ${activeMprPane === 'sagittal' ? 'active' : ''}`} />
+                  <span className={`volume-plane volume-keepout plane-axial ${activeMprPane === 'axial' ? 'active' : ''}`} />
+                  <span className={`volume-plane volume-keepout plane-coronal ${activeMprPane === 'coronal' ? 'active' : ''}`} />
+                  <span className={`volume-plane volume-keepout plane-sagittal ${activeMprPane === 'sagittal' ? 'active' : ''}`} />
                   <span className="volume-reticle reticle-x" />
                   <span className="volume-reticle reticle-y" />
                   <span className="volume-reticle reticle-z" />
