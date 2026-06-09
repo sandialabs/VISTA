@@ -40,7 +40,7 @@ class MethodSpec(BaseModel):
 
 
 class ToolboxManifest(BaseModel):
-    name: str = "test_toolbox"
+    name: str = "backend_analyze_toolbox"
     version: str = "0.1.0"
     contract_version: str = "vista-analyze.v1"
     methods: List[MethodSpec]

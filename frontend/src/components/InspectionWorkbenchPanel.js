@@ -76,47 +76,39 @@ const SEGMENTATION_HELPER_TOOLS = [
 const SEGMENTATION_POINT_MARKER_TOOLS = new Set(['polygon', 'circle', 'rectangle']);
 const SEGMENTATION_ML_METHOD_GROUPS = [
   {
-    id: 'opencv',
-    label: 'OpenCV',
-    methods: [
-      { id: 'segmentation.connected_components', label: 'Connected Components' },
-      { id: 'threshold.otsu', label: 'Otsu Threshold' },
-      { id: 'segmentation.watershed_seeds', label: 'Watershed Seeds' },
-    ],
-  },
-  {
     id: 'yolo',
     label: 'YOLO',
     methods: [
-      { id: 'ml.yolov8.segment', label: 'YOLOv8 Segment' },
-      { id: 'ml.yolo.ultralytics', label: 'Ultralytics Configurable' },
+      { id: 'segmentation.yolo.placeholder', label: 'YOLO (placeholder)' },
+    ],
+  },
+  {
+    id: 'anomalib',
+    label: 'Anomalib',
+    methods: [
+      { id: 'segmentation.anomalib.placeholder', label: 'Anomalib (placeholder)' },
     ],
   },
   {
     id: 'sam',
     label: 'SAM',
     methods: [
-      { id: 'ml.sam.segment_anything', label: 'Segment Anything' },
-      { id: 'ml.mask2former.universal_segment', label: 'Mask2Former' },
-      { id: 'ml.oneformer.universal_segment', label: 'OneFormer' },
+      { id: 'segmentation.sam.placeholder', label: 'SAM (placeholder)' },
+    ],
+  },
+  {
+    id: 'opencv',
+    label: 'OpenCV',
+    methods: [
+      { id: 'segmentation.opencv.placeholder', label: 'OpenCV (placeholder)' },
     ],
   },
 ];
 const DEFAULT_SEGMENTATION_ML_PARAMETERS = {
-  'segmentation.connected_components': { min_area_px: 12 },
-  'threshold.otsu': {},
-  'segmentation.watershed_seeds': { seed_spacing_px: 18, compactness: 0.01 },
-  'ml.yolov8.segment': { model: 'yolov8n-seg.pt', confidence: 0.25 },
-  'ml.yolo.ultralytics': { family: 'yolo11', task: 'segment', size: 'n', model: '', confidence: 0.25, iou: 0.45 },
-  'ml.sam.segment_anything': {
-    variant: 'sam2.1_hiera_large',
-    prompt_mode: 'automatic',
-    prompt_json: {},
-    min_mask_region_area: 8,
-    max_foreground_fraction: 0.85,
-  },
-  'ml.mask2former.universal_segment': { checkpoint: 'facebook/mask2former-swin-large-ade-semantic', task: 'semantic' },
-  'ml.oneformer.universal_segment': { checkpoint: 'shi-labs/oneformer_ade20k_swin_large', task: 'semantic' },
+  'segmentation.yolo.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
+  'segmentation.anomalib.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
+  'segmentation.sam.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
+  'segmentation.opencv.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
 };
 
 function SegmentationToolIcon({ icon }) {
@@ -216,38 +208,29 @@ function SegmentationToolIcon({ icon }) {
   );
 }
 const SEGMENTATION_ML_PARAMETER_FIELDS = {
-  'segmentation.connected_components': [
-    { name: 'min_area_px', label: 'Min area', type: 'number', min: 0, step: 1 },
+  'segmentation.yolo.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
-  'segmentation.watershed_seeds': [
-    { name: 'seed_spacing_px', label: 'Seed spacing', type: 'number', min: 1, step: 1 },
-    { name: 'compactness', label: 'Compactness', type: 'number', min: 0, step: 0.01 },
+  'segmentation.anomalib.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
-  'ml.yolov8.segment': [
-    { name: 'model', label: 'Model', type: 'text' },
-    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
+  'segmentation.sam.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
-  'ml.yolo.ultralytics': [
-    { name: 'family', label: 'Family', type: 'select', options: ['yolov8', 'yolo11', 'custom'] },
-    { name: 'task', label: 'Task', type: 'select', options: ['detect', 'segment'] },
-    { name: 'size', label: 'Size', type: 'select', options: ['n', 's', 'm', 'l', 'x'] },
-    { name: 'model', label: 'Custom model', type: 'text' },
-    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
-    { name: 'iou', label: 'IoU', type: 'number', min: 0, max: 1, step: 0.05 },
-  ],
-  'ml.sam.segment_anything': [
-    { name: 'variant', label: 'Variant', type: 'select', options: ['sam2.1_hiera_tiny', 'sam2.1_hiera_small', 'sam2.1_hiera_base_plus', 'sam2.1_hiera_large', 'sam_vit_b', 'sam_vit_l', 'sam_vit_h'] },
-    { name: 'prompt_mode', label: 'Prompt', type: 'select', options: ['automatic', 'box', 'points'] },
-    { name: 'min_mask_region_area', label: 'Min region', type: 'number', min: 1, step: 1 },
-    { name: 'max_foreground_fraction', label: 'Max foreground', type: 'number', min: 0.05, max: 0.98, step: 0.01 },
-  ],
-  'ml.mask2former.universal_segment': [
-    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['facebook/mask2former-swin-large-ade-semantic', 'facebook/mask2former-swin-large-ade-panoptic', 'facebook/mask2former-swin-tiny-ade-semantic'] },
-    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
-  ],
-  'ml.oneformer.universal_segment': [
-    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['shi-labs/oneformer_ade20k_swin_large', 'shi-labs/oneformer_coco_swin_large', 'shi-labs/oneformer_coco_dinat_large'] },
-    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
+  'segmentation.opencv.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
 };
 const FULLSCREEN_IMAGE_ZOOM_MIN = 1;
@@ -1597,7 +1580,7 @@ function getSegmentationMlMethods(groupId) {
 }
 
 function getDefaultSegmentationMlMethod(groupId) {
-  return getSegmentationMlMethods(groupId)[0]?.id || 'segmentation.connected_components';
+  return getSegmentationMlMethods(groupId)[0]?.id || 'segmentation.opencv.placeholder';
 }
 
 function getDefaultSegmentationMlParameters(methodId) {
@@ -2178,8 +2161,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [segmentationDraftShape, setSegmentationDraftShape] = useState(null);
   const [segmentationPointerPreview, setSegmentationPointerPreview] = useState(null);
   const [segmentationMlGroup, setSegmentationMlGroup] = useState('opencv');
-  const [segmentationMlMethod, setSegmentationMlMethod] = useState('segmentation.connected_components');
-  const [segmentationMlParameters, setSegmentationMlParameters] = useState(() => getDefaultSegmentationMlParameters('segmentation.connected_components'));
+  const [segmentationMlMethod, setSegmentationMlMethod] = useState('segmentation.opencv.placeholder');
+  const [segmentationMlParameters, setSegmentationMlParameters] = useState(() => getDefaultSegmentationMlParameters('segmentation.opencv.placeholder'));
   const [segmentationMlStatus, setSegmentationMlStatus] = useState('');
   const [segmentationMlLoading, setSegmentationMlLoading] = useState(false);
   const [displayWindow, setDisplayWindow] = useState({ min: 0, max: 255 });

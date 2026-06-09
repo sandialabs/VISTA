@@ -10,6 +10,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
 from .contracts import ToolboxExecutionResult, WorkflowGraph, WorkflowImageInput, WorkflowNodeResult
 from .registry import _method_map, validate_workflow
+from .segmentation import SEGMENTATION_METHOD_BACKENDS, SegmentationComponent, SegmentationInput, pil_image_to_base64
 
 _YOLO_MODEL_CACHE: Dict[str, Any] = {}
 
@@ -616,6 +617,8 @@ def _apply_node(state: ImageState, node, method) -> Tuple[ImageState, str, Dict[
         if not state.measurements:
             _, state.measurements = _connected_components(state.labels or state.mask or _otsu_threshold(state.image)[0], 0)
         return state, "Measured region properties.", {"measurement_count": len(state.measurements)}, artifacts
+    if node.method_id in SEGMENTATION_METHOD_BACKENDS:
+        return _apply_segmentation_component(state, method, params)
     if node.method_id == "ml.yolov8.segment":
         model_name = str(params.get("model") or "yolov8n-seg.pt")
         confidence = float(params.get("confidence", 0.25))
@@ -839,3 +842,73 @@ def execute_image_workflow(workflow: WorkflowGraph, images: Iterable[WorkflowIma
         node_results=node_results,
         warnings=warnings,
     )
+
+def _apply_segmentation_component(state: ImageState, method, params: Dict[str, Any]):
+    backend = SEGMENTATION_METHOD_BACKENDS[method.id]
+    options = dict(params.get("options") or {})
+    for key in ("integration_mode", "function_path", "fastapi_url"):
+        if params.get(key) not in (None, ""):
+            options[key] = params.get(key)
+    prompts = params.get("prompts") or {}
+    data = SegmentationInput(
+        image_data_base64=pil_image_to_base64(state.image),
+        backend=backend,
+        mode=str(params.get("mode") or "default"),
+        prompts=prompts if isinstance(prompts, dict) else {},
+        options=options,
+        metadata={"method_id": method.id, "method_name": method.name},
+    )
+    result = SegmentationComponent().run(data)
+    if result.metrics.get("status") == "placeholder":
+        state.labels = None
+        state.detections = []
+        state.measurements = []
+        state.artifact_block_reason = result.metrics.get("message")
+        return state, result.metrics.get("message", "Segmentation placeholder is not connected."), {
+            "_node_status": "skipped",
+            "runtime": "placeholder",
+            "backend": backend,
+            "mode": result.mode,
+            "mask_count": 0,
+            "placeholder": True,
+            "connection_required": True,
+        }, []
+
+    labels = Image.new("L", state.image.size, 0)
+    draw = ImageDraw.Draw(labels)
+    detections = []
+    measurements = []
+    for index, mask in enumerate(result.masks, start=1):
+        bbox = [float(value) for value in (mask.bbox or [])[:4]]
+        if len(bbox) == 4:
+            x, y, w, h = bbox
+            draw.rectangle([x, y, x + w, y + h], fill=min(index, 255))
+            detections.append({
+                "id": f"{backend}-{index}",
+                "class_name": mask.label or backend,
+                "confidence": mask.score,
+                "bbox": {"x": x, "y": y, "width": w, "height": h},
+            })
+        measurements.append({
+            "label": mask.label or f"{backend}-{index}",
+            "area_px": mask.area,
+            "bbox": bbox,
+            "score": mask.score,
+        })
+    state.labels = labels if result.masks else None
+    state.detections = detections
+    state.measurements = measurements
+    state.overlay_label = _overlay_label("Segmentation", method)
+    state.overlay_method_id = method.id
+    state.overlay_method_name = method.name
+    return state, "Completed segmentation component integration.", {
+        "runtime": str(options.get("integration_mode") or "placeholder"),
+        "backend": backend,
+        "mode": result.mode,
+        "mask_count": len(result.masks),
+        "measurement_count": len(measurements),
+        "detection_count": len(detections),
+        "metrics": result.metrics,
+        "measurements": measurements,
+        "detections": detections,
+    }, []

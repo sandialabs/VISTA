@@ -6,7 +6,7 @@ import base64
 
 from PIL import Image, ImageDraw
 
-from test_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow, get_manifest, validate_workflow
+from backend.analyze_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow, get_manifest, validate_workflow
 
 
 def _png_bytes() -> bytes:
@@ -226,14 +226,15 @@ def test_yolov8_object_detection_output_suppresses_artifacts_when_runtime_is_una
     assert output_node.artifacts == []
 
 
-def test_modern_model_blocks_are_available_and_execute_fallback_overlays():
+def test_hidden_legacy_model_blocks_execute_fallback_overlays():
     method_ids = {method.id for method in get_manifest().methods}
     assert {
-        "ml.yolo.ultralytics",
-        "ml.sam.segment_anything",
-        "ml.mask2former.universal_segment",
-        "ml.oneformer.universal_segment",
+        "segmentation.yolo.placeholder",
+        "segmentation.anomalib.placeholder",
+        "segmentation.sam.placeholder",
+        "segmentation.opencv.placeholder",
     }.issubset(method_ids)
+    assert "ml.sam.segment_anything" not in method_ids
 
     image_id = uuid.uuid4()
     workflow = WorkflowGraph(
@@ -370,7 +371,7 @@ def test_yolo_models_do_not_publish_artifacts_when_offered_runtime_is_unavailabl
     ]
 
     offered_method_ids = {method.id for method in get_manifest().methods}
-    assert {"ml.yolov8.detect", "ml.yolov8.segment", "ml.yolo.ultralytics"}.issubset(offered_method_ids)
+    assert {"ml.yolov8.detect", "ml.yolov8.segment", "ml.yolo.ultralytics"}.isdisjoint(offered_method_ids)
 
     for method_id, parameters in model_workflows:
         image_id = uuid.uuid4()
@@ -422,7 +423,7 @@ def test_yolov8_object_detection_uses_ultralytics_runtime_when_available(monkeyp
             assert verbose is False
             return [FakeResult()]
 
-    assert "ml.yolov8.detect" in {method.id for method in get_manifest().methods}
+    assert "ml.yolov8.detect" not in {method.id for method in get_manifest().methods}
     monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
     image_id = uuid.uuid4()
     workflow = WorkflowGraph(
@@ -532,7 +533,7 @@ def test_offered_yolo_segmentation_uses_ultralytics_runtime_when_available(monke
             assert verbose is False
             return [FakeResult()]
 
-    assert "ml.yolov8.segment" in {method.id for method in get_manifest().methods}
+    assert "ml.yolov8.segment" not in {method.id for method in get_manifest().methods}
     monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
     image_id = uuid.uuid4()
     workflow = WorkflowGraph(

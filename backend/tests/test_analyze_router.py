@@ -69,22 +69,27 @@ def _create_project_with_part_image(client):
     return headers, project_id, image
 
 
-def test_analyze_toolbox_manifest_contains_yolov8_and_core_image_methods(client):
+def test_analyze_toolbox_manifest_contains_segmentation_placeholders_and_core_image_methods(client):
     resp = client.get("/api/analyze/toolbox")
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     method_ids = {method["id"] for method in payload["methods"]}
     assert payload["contract_version"] == "vista-analyze.v1"
-    assert "ml.yolov8.detect" in method_ids
-    assert "ml.yolov8.segment" in method_ids
-    assert "ml.yolo.ultralytics" in method_ids
-    assert "ml.sam.segment_anything" in method_ids
-    assert "ml.mask2former.universal_segment" in method_ids
-    assert "ml.oneformer.universal_segment" in method_ids
+    assert "segmentation.yolo.placeholder" in method_ids
+    assert "segmentation.anomalib.placeholder" in method_ids
+    assert "segmentation.sam.placeholder" in method_ids
+    assert "segmentation.opencv.placeholder" in method_ids
+    assert "ml.yolov8.detect" not in method_ids
+    assert "ml.yolov8.segment" not in method_ids
+    assert "ml.yolo.ultralytics" not in method_ids
+    assert "ml.sam.segment_anything" not in method_ids
+    assert "ml.mask2former.universal_segment" not in method_ids
+    assert "ml.oneformer.universal_segment" not in method_ids
     assert "output.versioned_image_artifact" in method_ids
     assert "preprocess.window_level_normalization" in method_ids
-    assert "segmentation.watershed_seeds" in method_ids
-    assert "measure.region_properties" in method_ids
+    assert "segmentation.watershed_seeds" not in method_ids
+    region_method = next(method for method in payload["methods"] if method["id"] == "measure.region_properties")
+    assert region_method["name"] == "Region Properties (placeholder)"
     assert "filter.gaussian_blur" not in method_ids
     assert "filter.median" not in method_ids
     assert "morphology.open" not in method_ids
@@ -243,7 +248,7 @@ def test_analyze_workflow_yolov8_detection_suppresses_overlay_when_runtime_unava
 @pytest.mark.asyncio
 async def test_analyze_workflow_uses_configured_model_service_and_preserves_yolo_labels(monkeypatch):
     from routers import analyze as analyze_router
-    from test_toolbox import WorkflowGraph, WorkflowImageInput
+    from backend.analyze_toolbox import WorkflowGraph, WorkflowImageInput
 
     image_id = "11111111-1111-4111-8111-111111111111"
     detection = {

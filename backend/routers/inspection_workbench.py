@@ -25,14 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
-TOOLBOX_IMPORT_ERROR: Optional[Exception] = None
-try:
-    from test_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow
-except ModuleNotFoundError as exc:
-    TOOLBOX_IMPORT_ERROR = exc
-    WorkflowGraph = None
-    WorkflowImageInput = None
-    execute_image_workflow = None
+from backend.analyze_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow
 
 
 router = APIRouter(tags=["Inspection Workbench"])
@@ -73,28 +66,11 @@ WORKSPACE_INSPECTOR_DEFAULTS = {
 TEST_DATA_ROOT = Path(__file__).resolve().parents[2] / "test" / "data"
 PT3_TEST_STACK_ROOT = TEST_DATA_ROOT / "3D" / "geometric"
 SLICE_SEGMENTATION_METHOD_IDS = {
-    "threshold.otsu",
-    "threshold.manual",
-    "segmentation.connected_components",
-    "segmentation.watershed_seeds",
-    "ml.yolov8.segment",
-    "ml.yolo.ultralytics",
-    "ml.sam.segment_anything",
-    "ml.mask2former.universal_segment",
-    "ml.oneformer.universal_segment",
+    "segmentation.yolo.placeholder",
+    "segmentation.anomalib.placeholder",
+    "segmentation.sam.placeholder",
+    "segmentation.opencv.placeholder",
 }
-
-
-def _require_toolbox() -> None:
-    if TOOLBOX_IMPORT_ERROR is None:
-        return
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail=(
-            "Inspection slice segmentation is unavailable because dependency 'test_toolbox' "
-            f"could not be imported. Original error: {TOOLBOX_IMPORT_ERROR}"
-        ),
-    )
 
 
 async def _get_project_with_access_check(
@@ -361,23 +337,6 @@ def _decode_slice_image_payload(value: str) -> bytes:
 
 
 def _slice_segmentation_workflow(method_id: str, parameters: dict):
-    if WorkflowGraph is None:
-        _require_toolbox()
-    if method_id in {"threshold.otsu", "threshold.manual"}:
-        return WorkflowGraph(
-            name=f"Inspection slice segmentation {method_id}",
-            source={"kind": "manual_selection", "image_count": 1, "part_count": 1},
-            output={"mode": "metadata_only", "artifact_policy": "metadata_only"},
-            nodes=[
-                {"id": "input", "method_id": "source.project_part_images"},
-                {"id": "threshold", "method_id": method_id, "parameters": parameters or {}},
-                {"id": "segment", "method_id": "segmentation.connected_components", "parameters": {"min_area_px": 1}},
-            ],
-            edges=[
-                {"source_node": "input", "target_node": "threshold"},
-                {"source_node": "threshold", "target_node": "segment"},
-            ],
-        )
     return WorkflowGraph(
         name=f"Inspection slice segmentation {method_id}",
         source={"kind": "manual_selection", "image_count": 1, "part_count": 1},
@@ -1302,7 +1261,6 @@ async def segment_inspection_slice(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    _require_toolbox()
     await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
 
     part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)

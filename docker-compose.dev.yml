@@ -98,7 +98,6 @@ services:
     volumes:
       # Mount source code for hot reload (read-only)
       - ./backend:/app/backend:ro
-      - ./test_toolbox:/app/test_toolbox:ro
       - ./test:/app/test:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./uv.lock:/app/uv.lock:ro
@@ -154,7 +153,7 @@ services:
     networks:
       - vista-dev
 
-  # Optional heavyweight Analyze/test_toolbox model service.
+  # Optional heavyweight Analyze/backend analyze toolbox model service.
   # Start with: docker compose -f docker-compose.dev.yml --profile models up toolbox-models
   toolbox-models:
     profiles: ["models"]
@@ -172,7 +171,6 @@ services:
       - "8010:8010"
     gpus: all
     volumes:
-      - ./test_toolbox:/app/test_toolbox:ro
       - toolbox_model_cache:/models
     environment:
       - PYTHONUNBUFFERED=1
