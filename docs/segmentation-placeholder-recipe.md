@@ -13,6 +13,23 @@ Each block is routed through the same abstraction:
 
 Until a block is connected, execution is skipped and the UI label includes `(placeholder)` as a reminder that the deployed version still needs a real backend.
 
+## How Pipeline Studio turns graph blocks into a processing pipeline
+
+Pipeline Studio is a graph editor for building an analysis workflow. Each block on the canvas is a `MethodSpec` from the backend analyze toolbox manifest. When a user drags blocks onto the canvas, configures parameters, and connects them with edges, the UI saves a `WorkflowGraph` containing:
+
+- `nodes`: the ordered processing blocks, such as image source, preprocessing, a segmentation placeholder, measurement, and output.
+- `edges`: the connections that define how outputs flow into downstream blocks.
+- `parameters`: the runtime settings entered in the block inspector, including `integration_mode`, `function_path`, `fastapi_url`, `prompts`, and `options` for segmentation placeholders.
+
+When the user runs the workflow, VISTA sends that `WorkflowGraph` and selected image bytes to the backend executor. The executor walks each connected chain from the source image block through the output block. For a segmentation placeholder node, execution dispatches to `backend.analyze_toolbox.SegmentationComponent` with a normalized `SegmentationInput` containing the current image, backend name, mode, prompts, options, and metadata.
+
+That means replacing a placeholder does not require changing the graph UI. Developers only need to make the deployed environment resolve the configured integration:
+
+1. For `local_import`, install/import the Python package and point `Local Function Path` at the callable.
+2. For `fastapi`, run the service and point `FastAPI URL` at its segmentation endpoint.
+
+At runtime, the same graph block calls the newly connected function/service, receives a `SegmentationOutput`, and passes normalized masks, measurements, detections, and overlay metadata to later graph nodes such as `Region Properties (placeholder)` and `Recipe / Artifact Output`. In other words, the canvas defines *what* pipeline to run, while the placeholder configuration defines *which deployed implementation* is called for each segmentation step.
+
 ## Shared request and response contract
 
 Your implementation should accept a `SegmentationInput`-shaped object or JSON payload:
