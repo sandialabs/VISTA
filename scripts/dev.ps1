@@ -157,8 +157,8 @@ function Sense-ContainerEngine {
             "npipe:////./pipe/podman-machine-default",
             "npipe:////./pipe/podman-desktop-engine"
         )
-        foreach ($host in $candidateHosts) {
-            $env:DOCKER_HOST = $host
+        foreach ($candidateHost in $candidateHosts) {
+            $env:DOCKER_HOST = $candidateHost
             if (Test-RuntimeReachable -Command "docker" -Args @("info")) {
                 $script:RuntimeCmd = "docker"
                 return
