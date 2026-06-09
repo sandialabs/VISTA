@@ -293,9 +293,51 @@ const FILE_NAME_ELEMENT_OPTIONS = [
   { id: 'sub_batch', label: 'Sub Batch', abbreviation: 'SB' },
   { id: 'timestamp', label: 'Timestamp', abbreviation: 'T' },
   { id: 'operator', label: 'Operator', abbreviation: 'O' },
+  { id: 'view', label: 'View', abbreviation: 'V' },
+  { id: 'side', label: 'Side', abbreviation: 'SIDE' },
+  { id: 'modality', label: 'Modality', abbreviation: 'M' },
+  { id: 'overlay', label: 'Overlay', abbreviation: 'OV' },
 ];
 
 const DEFAULT_DEFECT_TYPE_COLORS = ['#ef4444', '#f59e0b', '#3b82f6'];
+
+
+function getFilenameEntryName(entry, fallback) {
+  const candidate = (entry?.label || entry?.id || fallback || '').trim();
+  return candidate || fallback;
+}
+
+function normalizeFilenameToken(value, fallback) {
+  const token = String(value || fallback || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return token || fallback;
+}
+
+function getExampleValueToken(index) {
+  const codePoint = 'a'.charCodeAt(0) + index;
+  if (codePoint <= 'z'.charCodeAt(0)) {
+    return String.fromCharCode(codePoint).repeat(3);
+  }
+  return `value${index + 1}`;
+}
+
+function buildExpectedFilenameExample(fileNamingScheme) {
+  const normalizedScheme = normalizeFileNamingScheme({ file_naming_scheme: fileNamingScheme });
+  const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) => {
+    const prefix = (level.abbreviation || getFilenameEntryName(level, `level ${index + 1}`)).trim();
+    return `${prefix}${getExampleValueToken(index)}`;
+  });
+  const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) => {
+    const descriptorName = descriptor.id === 'view'
+      ? 'side'
+      : getFilenameEntryName(descriptor, `descriptor ${index + 1}`);
+    return normalizeFilenameToken(descriptorName, `descriptor${index + 1}`);
+  });
+  return [...hierarchySegments, ...descriptorSegments].filter(Boolean).join('_') + '.type';
+}
 
 function normalizeProjectTypeSuffix(projectType) {
   const suffix = String(projectType || 'PT1').trim().toUpperCase();
@@ -905,7 +947,17 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
 
           <section className="part-detail-panel" aria-label="File naming configuration">
             <h3>Project Configuration: File Name Convention</h3>
-            <p>Customize hierarchy and image descriptor elements used to build file names.</p>
+            <div className="filename-convention-preview" aria-label="Expected filename preview">
+              <span className="filename-convention-preview-label">Expected filename</span>
+              <code data-testid="expected-filename-preview">
+                {buildExpectedFilenameExample(normalizeFileNamingScheme(config))}
+              </code>
+              <p>
+                Name uploaded files in this underscore-separated order so VISTA can parse configured
+                hierarchy values first, followed by image descriptors, and then the file type extension.
+              </p>
+            </div>
+            <p>Customize the hierarchy and descriptor elements that produce the expected filename above.</p>
             <h4>Hierarchy Levels</h4>
             <div className="workbench-controls-row">
               <button className="btn btn-secondary" type="button" onClick={() => addFileNameEntry('hierarchy_levels')}>

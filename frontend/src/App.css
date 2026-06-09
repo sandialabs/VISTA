@@ -7428,6 +7428,40 @@ ul li:hover {
   color: #475569;
 }
 
+
+.project-configuration-panel .filename-convention-preview {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  margin: 8px 0 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+}
+
+.project-configuration-panel .filename-convention-preview-label {
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.project-configuration-panel .filename-convention-preview code {
+  display: block;
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.project-configuration-panel .filename-convention-preview p {
+  margin: 0;
+  color: #334155;
+  font-size: 0.875rem;
+}
+
 .project-configuration-panel .config-entry-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
