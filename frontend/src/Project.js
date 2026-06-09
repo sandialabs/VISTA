@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import './App.css';
 
@@ -87,6 +87,8 @@ function Project({ currentUserGroups = [] }) {
     payload: null,
   });
   const [inspectionLaunchFilters, setInspectionLaunchFilters] = useState(null);
+  const projectConfigurationPanelRef = useRef(null);
+  const [autosaveTabDelayMessage, setAutosaveTabDelayMessage] = useState('');
 
   const fetchImages = useCallback(async (projId) => {
     const PAGE_SIZE = 200;
@@ -222,6 +224,21 @@ function Project({ currentUserGroups = [] }) {
   const handleUploadComplete = useCallback(async () => {
     await refreshProjectCounts();
   }, [refreshProjectCounts]);
+
+  const handleMainTabChange = useCallback(async (nextTabKey) => {
+    if (nextTabKey === activeMainTab) return;
+
+    if (activeMainTab === 'project_configuration' && projectConfigurationPanelRef.current?.hasPendingAutosave()) {
+      setAutosaveTabDelayMessage('Autosaving project configuration before changing tabs…');
+      const saved = await projectConfigurationPanelRef.current.flushPendingAutosave('Configuration autosaved.');
+      setAutosaveTabDelayMessage('');
+      if (!saved) {
+        return;
+      }
+    }
+
+    setActiveMainTab(nextTabKey);
+  }, [activeMainTab]);
 
   const refreshRecentlyDeletedOverlays = useCallback(async () => {
     setRecentlyDeletedLoading(true);
@@ -531,6 +548,7 @@ function Project({ currentUserGroups = [] }) {
             projectType={project?.project_type}
             currentInterfaceLayout={interfaceHierarchy}
             isAdminUser={currentUserGroups.includes('admin') || currentUserGroups.includes('admins')}
+            ref={projectConfigurationPanelRef}
             onConfigurationSaved={(nextConfig) => setProjectConfiguration(nextConfig)}
           />
           {!project?.is_archived && (
@@ -575,7 +593,7 @@ function Project({ currentUserGroups = [] }) {
           className={`project-tab ${activeMainTab === tabKey ? 'active' : ''}`}
           role="tab"
           aria-selected={activeMainTab === tabKey}
-          onClick={() => setActiveMainTab(tabKey)}
+          onClick={() => handleMainTabChange(tabKey)}
         >
           {MAIN_TAB_DEFINITIONS[tabKey]?.label || tabKey}
         </button>
@@ -612,6 +630,12 @@ function Project({ currentUserGroups = [] }) {
         {error && (
           <div className="alert alert-error">
             <strong>Error:</strong> {error}
+          </div>
+        )}
+
+        {autosaveTabDelayMessage && (
+          <div className="alert alert-info" role="status">
+            {autosaveTabDelayMessage}
           </div>
         )}
 
