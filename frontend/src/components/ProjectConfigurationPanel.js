@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { PROJECT_PHASE_LABELS, PROJECT_PHASE_SEQUENCE } from '../utils/projectPhases';
 import { buildErrorWithServiceDiagnostics } from '../utils/serviceDiagnostics';
 
@@ -364,13 +364,17 @@ function normalizeFileNamingScheme(config) {
   return { hierarchy_levels: hierarchyLevels, image_descriptors: imageDescriptors };
 }
 
-function ProjectConfigurationPanel({
+const AUTOSAVE_DELAY_MS = 500;
+
+const getConfigurationSignature = (configuration) => JSON.stringify(configuration || {});
+
+const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel({
   projectId,
   projectType,
   currentInterfaceLayout = null,
   isAdminUser = false,
   onConfigurationSaved = null,
-}) {
+}, ref) {
   const [config, setConfig] = useState(EMPTY_CONFIG);
   const [availableProjects, setAvailableProjects] = useState([]);
   const [currentProjectType, setCurrentProjectType] = useState('');
@@ -380,6 +384,22 @@ function ProjectConfigurationPanel({
   const [error, setError] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [copyingConfiguration, setCopyingConfiguration] = useState(false);
+  const configRef = useRef(config);
+  const autosaveTimerRef = useRef(null);
+  const loadCompleteRef = useRef(false);
+  const lastSavedSignatureRef = useRef(getConfigurationSignature(EMPTY_CONFIG));
+  const saveLoopPromiseRef = useRef(null);
+  const autosaveRequestedDuringSaveRef = useRef(false);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  useEffect(() => () => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const loadCurrentUser = async () => {
@@ -412,6 +432,7 @@ function ProjectConfigurationPanel({
     const loadConfiguration = async () => {
       try {
         setLoading(true);
+        loadCompleteRef.current = false;
         setError(null);
         setStatusMessage('');
 
@@ -446,7 +467,10 @@ function ProjectConfigurationPanel({
           setAvailableProjects(filtered);
         }
 
-        setConfig(normalizeProjectConfiguration(incomingConfig, targetProjectType));
+        const normalizedConfig = normalizeProjectConfiguration(incomingConfig, targetProjectType);
+        lastSavedSignatureRef.current = getConfigurationSignature(normalizedConfig);
+        loadCompleteRef.current = true;
+        setConfig(normalizedConfig);
       } catch (err) {
         const message = err.message || 'Failed to load project configuration';
         setError(await buildErrorWithServiceDiagnostics(message, projectId));
@@ -476,12 +500,12 @@ function ProjectConfigurationPanel({
     [config.defect_types.length, config.image_modalities.length, config.part_views.length],
   );
 
-  const saveConfiguration = async () => {
-    const validationErrors = validateConfiguration(config);
+  const persistConfiguration = useCallback(async (configurationToSave, statusLabel = 'Configuration saved.') => {
+    const validationErrors = validateConfiguration(configurationToSave);
     if (validationErrors.length > 0) {
       setError(validationErrors.join(' '));
       setStatusMessage('');
-      return;
+      return false;
     }
 
     try {
@@ -490,22 +514,107 @@ function ProjectConfigurationPanel({
       const response = await fetch(`/api/projects/${projectId}/configuration`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({ config: configurationToSave }),
       });
       if (!response.ok) {
         throw new Error(`Failed to save project configuration (${response.status})`);
       }
       const payload = await response.json();
-      setStatusMessage('Configuration saved.');
+      lastSavedSignatureRef.current = getConfigurationSignature(configurationToSave);
+      setStatusMessage(statusLabel);
       if (payload?.config && typeof onConfigurationSaved === 'function') {
         onConfigurationSaved(payload.config);
       }
+      return true;
     } catch (err) {
       const message = err.message || 'Failed to save project configuration';
       setError(await buildErrorWithServiceDiagnostics(message, projectId));
+      return false;
     } finally {
       setSaving(false);
     }
+  }, [onConfigurationSaved, projectId]);
+
+  const runAutosave = useCallback((statusLabel = 'Configuration autosaved.') => {
+    if (saveLoopPromiseRef.current) {
+      autosaveRequestedDuringSaveRef.current = true;
+      return saveLoopPromiseRef.current;
+    }
+
+    saveLoopPromiseRef.current = (async () => {
+      let shouldContinue = true;
+      while (shouldContinue) {
+        autosaveRequestedDuringSaveRef.current = false;
+        const latestConfig = configRef.current;
+        const latestSignature = getConfigurationSignature(latestConfig);
+        if (latestSignature === lastSavedSignatureRef.current) {
+          return true;
+        }
+        const saved = await persistConfiguration(latestConfig, statusLabel);
+        if (!saved) {
+          return false;
+        }
+        shouldContinue =
+          autosaveRequestedDuringSaveRef.current ||
+          getConfigurationSignature(configRef.current) !== lastSavedSignatureRef.current;
+      }
+      return true;
+    })().finally(() => {
+      saveLoopPromiseRef.current = null;
+    });
+
+    return saveLoopPromiseRef.current;
+  }, [persistConfiguration]);
+
+  const hasPendingAutosave = useCallback(() => {
+    if (!loadCompleteRef.current) return false;
+    return Boolean(
+      autosaveTimerRef.current ||
+      saveLoopPromiseRef.current ||
+      getConfigurationSignature(configRef.current) !== lastSavedSignatureRef.current,
+    );
+  }, []);
+
+  const flushPendingAutosave = useCallback(async (statusLabel = 'Configuration autosaved.') => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (!hasPendingAutosave()) {
+      return true;
+    }
+    return runAutosave(statusLabel);
+  }, [hasPendingAutosave, runAutosave]);
+
+  useImperativeHandle(ref, () => ({
+    hasPendingAutosave,
+    flushPendingAutosave,
+  }), [flushPendingAutosave, hasPendingAutosave]);
+
+  useEffect(() => {
+    if (!loadCompleteRef.current || loading) {
+      return;
+    }
+    const latestSignature = getConfigurationSignature(config);
+    if (latestSignature === lastSavedSignatureRef.current) {
+      return;
+    }
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+    setStatusMessage('Unsaved changes will autosave shortly.');
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      runAutosave();
+    }, AUTOSAVE_DELAY_MS);
+  }, [config, loading, runAutosave]);
+
+  const saveConfiguration = async () => {
+    if (hasPendingAutosave()) {
+      await flushPendingAutosave('Configuration saved.');
+      return;
+    }
+    await persistConfiguration(configRef.current, 'Configuration saved.');
   };
 
   const saveInterfaceLayoutAsProjectDefault = async () => {
@@ -714,13 +823,15 @@ function ProjectConfigurationPanel({
       }
 
       const clonedConfig = getCloneConfigOrThrow(cloneData);
-      setConfig({
+      const nextClonedConfig = {
         ...EMPTY_CONFIG,
         ...clonedConfig,
         serial_number_scheme: normalizeSerialNumberScheme(clonedConfig),
         phase_settings: normalizePhaseSettings(clonedConfig),
         file_naming_scheme: normalizeFileNamingScheme(clonedConfig),
-      });
+      };
+      lastSavedSignatureRef.current = getConfigurationSignature(nextClonedConfig);
+      setConfig(nextClonedConfig);
       const copiedFromProject = selectedCopySourceProject?.name || 'existing project';
       setCopySourceProjectId('');
       setStatusMessage(`Configuration copied from ${copiedFromProject}.`);
@@ -1420,6 +1531,6 @@ function ProjectConfigurationPanel({
       )}
     </section>
   );
-}
+});
 
 export default ProjectConfigurationPanel;

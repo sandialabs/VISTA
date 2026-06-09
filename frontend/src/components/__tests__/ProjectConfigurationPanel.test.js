@@ -1,7 +1,7 @@
 import React from 'react';
 import fs from 'fs';
 import path from 'path';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ProjectConfigurationPanel from '../ProjectConfigurationPanel';
 
 const projectTypes = ['PT1', 'PT2', 'PT3'];
@@ -249,6 +249,7 @@ function mockFetch(config, projectType, mockOptions = {}) {
 describe('ProjectConfigurationPanel', () => {
   afterEach(() => {
     jest.clearAllMocks();
+    jest.useRealTimers();
   });
 
   test('loads copy source projects from the canonical trailing-slash endpoint', async () => {
@@ -296,6 +297,63 @@ describe('ProjectConfigurationPanel', () => {
     expect(screen.queryByLabelText('Descriptor 3')).not.toBeInTheDocument();
   });
 
+
+  test('autosaves configuration changes after users edit fields', async () => {
+    jest.useFakeTimers();
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByLabelText('Image modality label 1')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Image modality label 1'), { target: { value: 'Autosaved thermal' } });
+    expect(screen.getByText('Unsaved changes will autosave shortly.')).toBeInTheDocument();
+
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/projects/proj-1/configuration',
+        expect.objectContaining({
+          method: 'PUT',
+          body: expect.stringContaining('Autosaved thermal'),
+        }),
+      );
+    });
+    expect(await screen.findByText('Configuration autosaved.')).toBeInTheDocument();
+  });
+
+  test('flushes pending autosave immediately for callers that must wait before leaving the tab', async () => {
+    jest.useFakeTimers();
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    const autosaveRef = React.createRef();
+    render(<ProjectConfigurationPanel projectId="proj-1" ref={autosaveRef} />);
+
+    await waitFor(() => expect(screen.getByLabelText('Defect type definition 1')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Defect type definition 1'), {
+      target: { value: 'Flush before tab navigation' },
+    });
+    expect(autosaveRef.current.hasPendingAutosave()).toBe(true);
+
+    let saved = false;
+    await act(async () => {
+      saved = await autosaveRef.current.flushPendingAutosave('Configuration autosaved.');
+    });
+
+    expect(saved).toBe(true);
+    expect(autosaveRef.current.hasPendingAutosave()).toBe(false);
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/projects/proj-1/configuration',
+      expect.objectContaining({
+        method: 'PUT',
+        body: expect.stringContaining('Flush before tab navigation'),
+      }),
+    );
+  });
 
   test('persists edits for every configuration field exposed by the configuration tab', async () => {
     const config = makeConfig('PT1', 'basic');
