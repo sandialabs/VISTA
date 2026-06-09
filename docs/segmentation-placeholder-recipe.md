@@ -1,74 +1,73 @@
-# Connecting Pipeline Studio Segmentation Placeholders
+# How to Add a Deployed Segmentation Function
 
-VISTA exposes four Pipeline Studio segmentation blocks as deployment placeholders:
+**The short version:** pick one of the four segmentation placeholders in Pipeline Studio, set `Integration Mode` to either `local_import` or `fastapi`, point VISTA at your deployed function, and return a JSON-serializable `SegmentationOutput` with masks, boxes, labels, scores, and metrics.
 
-- `YOLO (placeholder)` / `segmentation.yolo.placeholder`
-- `Anomalib (placeholder)` / `segmentation.anomalib.placeholder`
-- `SAM (placeholder)` / `segmentation.sam.placeholder`
-- `OpenCV (placeholder)` / `segmentation.opencv.placeholder`
+VISTA already ships the graph block, parameter fields, request model, response model, dispatch code, and output-artifact handoff. Your job is only to supply the model runtime and keep its response inside the shared contract.
 
-Each block is routed through the same abstraction:
+## The five-minute recipe
 
-`backend.analyze_toolbox.SegmentationComponent` → `SegmentationInput` → your implementation → `SegmentationOutput`
+1. **Choose the placeholder block.** Use one of these method IDs:
+   - `segmentation.yolo.placeholder`
+   - `segmentation.anomalib.placeholder`
+   - `segmentation.sam.placeholder`
+   - `segmentation.opencv.placeholder`
 
-Until a block is connected, execution is skipped and the UI label includes `(placeholder)` as a reminder that the deployed version still needs a real backend.
+2. **Choose the deployment style.**
+   - Use `local_import` when the segmentation package is installed in the same Python environment as VISTA.
+   - Use `fastapi` when the model runs in a separate service or container.
 
-## How Pipeline Studio turns graph blocks into a processing pipeline
+3. **Return the required shape.** Every implementation should return a dictionary, Pydantic model, or JSON body with this shape:
 
-Pipeline Studio is a graph editor for building an analysis workflow. Each block on the canvas is a `MethodSpec` from the backend analyze toolbox manifest. When a user drags blocks onto the canvas, configures parameters, and connects them with edges, the UI saves a `WorkflowGraph` containing:
+   ```json
+   {
+     "backend": "yolo",
+     "mode": "default",
+     "masks": [
+       {
+         "segmentation": null,
+         "bbox": [10, 20, 120, 80],
+         "area": 9600,
+         "score": 0.91,
+         "label": "part"
+       }
+     ],
+     "metrics": {"model": "your-model-name"},
+     "raw_output": null
+   }
+   ```
 
-- `nodes`: the ordered processing blocks, such as image source, preprocessing, a segmentation placeholder, measurement, and output.
-- `edges`: the connections that define how outputs flow into downstream blocks.
-- `parameters`: the runtime settings entered in the block inspector, including `integration_mode`, `function_path`, `fastapi_url`, `prompts`, and `options` for segmentation placeholders.
+4. **Configure the block in Pipeline Studio.** Set these fields on the selected placeholder block:
+   - `Integration Mode`: `local_import` or `fastapi`
+   - `Local Function Path`: dotted callable path for `local_import`, such as `my_company.segmentation.yolo_backend.run`
+   - `FastAPI URL`: endpoint URL for `fastapi`, such as `http://segmenter:9000/segment`
+   - `Mode`: a backend-specific mode string, or `default`
+   - `Prompts JSON`: SAM prompts or other prompt data
+   - `Options JSON`: backend-specific values such as confidence, model name, or `timeout_seconds`
 
-When the user runs the workflow, VISTA sends that `WorkflowGraph` and selected image bytes to the backend executor. The executor walks each connected chain from the source image block through the output block. For a segmentation placeholder node, execution dispatches to `backend.analyze_toolbox.SegmentationComponent` with a normalized `SegmentationInput` containing the current image, backend name, mode, prompts, options, and metadata.
+5. **Run one representative image and inspect the output block.** A connected implementation should produce a nonzero `mask_count` when it finds objects, plus measurements, detections when boxes are present, and overlay metadata for the `Recipe / Artifact Output` block.
 
-That means replacing a placeholder does not require changing the graph UI. Developers only need to make the deployed environment resolve the configured integration:
+## Code map: where the recipe comes from
 
-1. For `local_import`, install/import the Python package and point `Local Function Path` at the callable.
-2. For `fastapi`, run the service and point `FastAPI URL` at its segmentation endpoint.
+Use these source files as the authoritative references when changing or extending this integration:
 
-At runtime, the same graph block calls the newly connected function/service, receives a `SegmentationOutput`, and passes normalized masks, measurements, detections, and overlay metadata to later graph nodes such as `Region Properties (placeholder)` and `Recipe / Artifact Output`. In other words, the canvas defines *what* pipeline to run, while the placeholder configuration defines *which deployed implementation* is called for each segmentation step.
+| What you are checking | Code location |
+| --- | --- |
+| Placeholder parameters: `integration_mode`, `function_path`, `fastapi_url`, `mode`, `prompts`, and `options` | `backend/analyze_toolbox/methods.py:4-30`, `SEGMENTATION_PLACEHOLDER_PARAMETERS` |
+| The four placeholder method IDs and their manifest entries | `backend/analyze_toolbox/methods.py:119-158`, `TOOLBOX_METHODS` segmentation `MethodSpec` entries |
+| UI labels, default values, and editable parameter fields | `frontend/src/components/InspectionWorkbenchPanel.js:78-112` and `frontend/src/components/InspectionWorkbenchPanel.js:211-235`, `SEGMENTATION_ML_METHOD_GROUPS`, `DEFAULT_SEGMENTATION_ML_PARAMETERS`, and `SEGMENTATION_ML_PARAMETER_FIELDS` |
+| Request and response models: `SegmentationInput`, `SegmentationMask`, and `SegmentationOutput` | `backend/analyze_toolbox/segmentation.py:65-84` |
+| Runtime dispatch for `placeholder`, `local_import`, and `fastapi` | `backend/analyze_toolbox/segmentation.py:104-151`, `SegmentationComponent.run`, `_run_local_import`, and `_run_fastapi` |
+| Mapping from placeholder method ID to backend name | `backend/analyze_toolbox/segmentation.py:180-185`, `SEGMENTATION_METHOD_BACKENDS` |
+| Graph node and edge shape used by Pipeline Studio workflows | `backend/analyze_toolbox/contracts.py:87-118`, `WorkflowNodeSpec`, `EdgeSpec`, and `WorkflowGraph` |
+| Executor handoff from workflow parameters to `SegmentationInput` | `backend/analyze_toolbox/executor.py:847-861`, `_apply_segmentation_component` |
+| Conversion of returned masks into labels, detections, measurements, and overlay metadata | `backend/analyze_toolbox/executor.py:877-914`, `_apply_segmentation_component` |
+| Output artifact behavior after segmentation | `backend/analyze_toolbox/executor.py:760-781`, `output.versioned_image_artifact` branch |
 
-## Shared request and response contract
+## Option A: connect a local Python callable
 
-Your implementation should accept a `SegmentationInput`-shaped object or JSON payload:
+Use this path when the model package is installed in the same container or virtual environment as the VISTA backend.
 
-```json
-{
-  "image_data_base64": "<PNG bytes as base64>",
-  "backend": "yolo | anomalib | sam | opencv",
-  "mode": "default",
-  "prompts": {},
-  "options": {}
-}
-```
-
-Return a `SegmentationOutput`-shaped object or JSON payload:
-
-```json
-{
-  "backend": "yolo",
-  "mode": "default",
-  "masks": [
-    {
-      "segmentation": null,
-      "bbox": [10, 20, 120, 80],
-      "area": 9600,
-      "score": 0.91,
-      "label": "part"
-    }
-  ],
-  "metrics": {"model": "your-model-name"},
-  "raw_output": null
-}
-```
-
-`bbox` is normalized by VISTA as `[x, y, width, height]` in source-image pixels. `segmentation` may be a polygon, run-length encoding, dense mask reference, or `null`; VISTA can still create a basic overlay from bounding boxes while your team standardizes mask transport.
-
-## Option A: connect a locally installed Python implementation
-
-1. Install your dependency in the deployed environment. Examples:
+1. **Install the model dependency in the VISTA runtime environment.** Examples:
 
    ```bash
    pip install ultralytics
@@ -77,7 +76,7 @@ Return a `SegmentationOutput`-shaped object or JSON payload:
    pip install opencv-python-headless
    ```
 
-2. Create a callable importable by the VISTA process. The callable can accept either a `SegmentationInput` model or a plain dictionary.
+2. **Create an importable callable.** It may accept a `SegmentationInput` model or a plain dictionary. VISTA first calls your function with the Pydantic object; if that raises `TypeError`, VISTA retries with a dictionary.
 
    ```python
    # my_company/segmentation/yolo_backend.py
@@ -89,7 +88,7 @@ Return a `SegmentationOutput`-shaped object or JSON payload:
        payload = request.model_dump(mode="python") if hasattr(request, "model_dump") else request
        image = Image.open(io.BytesIO(base64.b64decode(payload["image_data_base64"]))).convert("RGB")
 
-       # Replace this with your actual model inference.
+       # Replace this with real inference.
        width, height = image.size
        return {
            "backend": payload.get("backend", "yolo"),
@@ -107,18 +106,19 @@ Return a `SegmentationOutput`-shaped object or JSON payload:
        }
    ```
 
-3. In Pipeline Studio, select the appropriate placeholder block and set:
-
+3. **Configure Pipeline Studio.**
    - `Integration Mode`: `local_import`
    - `Local Function Path`: `my_company.segmentation.yolo_backend.run`
-   - `Options JSON`: any backend-specific options, such as `{"confidence": 0.4}`
-   - `Prompts JSON`: prompt data for SAM or other promptable models, when needed
+   - `Options JSON`: for example, `{"confidence": 0.4}`
+   - `Prompts JSON`: prompt data when the backend needs it
 
-4. Run the workflow. VISTA imports the callable, passes the normalized `SegmentationInput`, normalizes the returned masks, and forwards the measurements/detections/overlay metadata to the output block.
+4. **Verify the run.** If the import path is wrong, VISTA raises the Python import or attribute error. If the function returns masks, VISTA normalizes them into measurements and detections.
 
-## Option B: connect a remote FastAPI implementation
+## Option B: connect a FastAPI service
 
-1. Run your segmentation code as a service. A minimal FastAPI implementation looks like this:
+Use this path when segmentation should run outside the VISTA backend process, especially for GPU-heavy models or model stacks with conflicting dependencies.
+
+1. **Expose a segmentation endpoint.** The endpoint should accept the same request fields VISTA sends and return the same output shape.
 
    ```python
    # segmentation_service.py
@@ -137,7 +137,7 @@ Return a `SegmentationOutput`-shaped object or JSON payload:
 
    @app.post("/segment")
    def segment(request: SegmentRequest):
-       # Decode request.image_data_base64 and run your model here.
+       # Decode request.image_data_base64 and run the model here.
        return {
            "backend": request.backend,
            "mode": request.mode,
@@ -146,26 +146,72 @@ Return a `SegmentationOutput`-shaped object or JSON payload:
        }
    ```
 
-2. Start the service from the environment where your model dependencies are available:
+2. **Start the service where its model dependencies are available.**
 
    ```bash
    uvicorn segmentation_service:app --host 0.0.0.0 --port 9000
    ```
 
-3. In Pipeline Studio, select the placeholder block and set:
-
+3. **Configure Pipeline Studio.**
    - `Integration Mode`: `fastapi`
    - `FastAPI URL`: `http://<host>:9000/segment`
-   - `Options JSON`: backend-specific settings. Include `{"timeout_seconds": 120}` for long-running models.
-   - `Prompts JSON`: prompt data for SAM or other promptable models, when needed
+   - `Options JSON`: include backend options and, for long runs, `{"timeout_seconds": 120}`
+   - `Prompts JSON`: prompt data when the backend needs it
 
-4. Run the workflow. VISTA posts the same `SegmentationInput` JSON contract to your endpoint and normalizes the returned `SegmentationOutput` JSON.
+4. **Verify connectivity and payloads.** VISTA posts JSON to your URL, enforces the configured timeout, calls `raise_for_status()`, and then normalizes the response JSON.
+
+## Contract details that matter in production
+
+### Request fields
+
+VISTA sends a `SegmentationInput`-shaped payload:
+
+```json
+{
+  "image_data_base64": "<PNG bytes as base64>",
+  "backend": "yolo | anomalib | sam | opencv",
+  "mode": "default",
+  "prompts": {},
+  "options": {},
+  "metadata": {
+    "method_id": "segmentation.yolo.placeholder",
+    "method_name": "YOLO (placeholder)"
+  }
+}
+```
+
+The image arrives as base64 PNG data. The `backend` value is inferred from the placeholder method ID. Top-level block parameters such as `integration_mode`, `function_path`, and `fastapi_url` are copied into `options` before dispatch.
+
+### Response fields
+
+Each mask may include:
+
+- `bbox`: `[x, y, width, height]` in source-image pixels.
+- `area`: pixel area or model-reported area.
+- `score`: confidence score.
+- `label`: stable class or region label.
+- `segmentation`: optional polygon, run-length encoding, dense mask reference, or `null`.
+
+Bounding boxes are enough for a basic overlay. If `bbox` is present, VISTA creates a detection record. Every returned mask also creates a measurement record.
+
+## How the pipeline works after the recipe is done
+
+Pipeline Studio stores an analysis workflow as a `WorkflowGraph`: nodes are blocks, edges are connections, and node `parameters` hold the values entered in the inspector. When a user runs a graph, VISTA walks each source-to-output chain and applies each block to the current image state.
+
+For segmentation placeholders, the executor converts the current image into base64 PNG, builds `SegmentationInput`, and calls `SegmentationComponent`. `SegmentationComponent` then does one of three things:
+
+- returns an empty skipped result for `placeholder`,
+- imports and calls your Python function for `local_import`, or
+- posts the request to your service for `fastapi`.
+
+After the model returns, the executor converts masks into labels, detections, measurements, and overlay metadata. Later blocks, including `Region Properties (placeholder)` and `Recipe / Artifact Output`, receive those normalized values instead of model-specific objects.
 
 ## Deployment checklist
 
-- Confirm the placeholder label remains visible until the real implementation is wired and tested.
-- Keep return payloads JSON-serializable; avoid returning raw tensors directly.
-- Use stable labels and scores where downstream review/export depends on them.
-- For local imports, ensure the package is installed in the same container/process that runs VISTA.
-- For FastAPI, secure the endpoint according to your deployment environment and keep it reachable from the VISTA container.
-- Validate with at least one representative image per backend and confirm output artifacts contain the expected mask count, measurements, and overlay metadata.
+- Keep the placeholder label until the real implementation is wired and tested.
+- Keep return payloads JSON-serializable; do not return raw tensors.
+- Use stable labels and scores if review, export, or downstream reporting depends on them.
+- For `local_import`, install dependencies in the same process environment that runs VISTA.
+- For `fastapi`, secure the endpoint for the deployment environment and make sure the VISTA container can reach it.
+- Test at least one representative image per backend.
+- Confirm output artifacts show the expected mask count, measurements, detections, and overlay metadata.
