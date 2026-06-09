@@ -247,6 +247,50 @@ function mockFetch(config, projectType, mockOptions = {}) {
 }
 
 describe('ProjectConfigurationPanel', () => {
+
+  test('shows expected filename preview as the primary file naming guide and updates from hierarchy abbreviations', async () => {
+    const config = {
+      ...makeConfig('PT1', 'basic'),
+      file_naming_scheme: {
+        hierarchy_levels: [
+          { id: 'drawing_number', label: 'Drawing Number', abbreviation: 'D' },
+          { id: 'lot_number', label: 'Lot Number', abbreviation: 'L' },
+          { id: 'part_number', label: 'Part Number', abbreviation: 'PN' },
+        ],
+        image_descriptors: [
+          { id: 'side', label: 'Side', abbreviation: 'S' },
+          { id: 'modality', label: 'Modality', abbreviation: 'M' },
+        ],
+      },
+    };
+    mockFetch(config, 'PT1');
+
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    const preview = await screen.findByTestId('expected-filename-preview');
+    expect(preview).toHaveTextContent('Daaa_Lbbb_PNccc_side_modality.type');
+    expect(screen.getByLabelText('Expected filename preview')).toHaveTextContent(
+      'Name uploaded files in this underscore-separated order',
+    );
+
+    fireEvent.change(screen.getByLabelText('Abbreviation', { selector: '#hierarchy-level-abbreviation-2' }), {
+      target: { value: 'PART' },
+    });
+
+    expect(screen.getByTestId('expected-filename-preview')).toHaveTextContent('Daaa_Lbbb_PARTccc_side_modality.type');
+  });
+
+  test('keeps view descriptors user-facing as side in the expected filename preview', async () => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    expect(await screen.findByTestId('expected-filename-preview')).toHaveTextContent(
+      'Daaa_Pbbb_Lccc_Sddd_Reee_side_modality.type',
+    );
+  });
+
   afterEach(() => {
     jest.clearAllMocks();
     jest.useRealTimers();
