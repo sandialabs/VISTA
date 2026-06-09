@@ -62,7 +62,6 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy backend code
 COPY ./backend /app/backend
-COPY ./test_toolbox /app/test_toolbox
 # COPY .env /app/.env
 
 # Copy frontend files selectively (excluding node_modules)
@@ -102,7 +101,6 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 
 # Copy backend code
 COPY --from=builder /app/backend /app/backend
-COPY --from=builder /app/test_toolbox /app/test_toolbox
 # Copy frontend build files
 COPY --from=builder /app/frontend/build /app/ui2
 # Copy test folder

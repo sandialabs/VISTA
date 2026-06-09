@@ -3,7 +3,7 @@ import { createEvent, fireEvent, render, screen, waitFor, within } from '@testin
 import AnalyzeWorkbenchTab from '../AnalyzeWorkbenchTab';
 
 const toolboxPayload = {
-  name: 'test_toolbox',
+  name: 'backend_analyze_toolbox',
   version: '0.1.0',
   contract_version: 'vista-analyze.v1',
   methods: [

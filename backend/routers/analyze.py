@@ -22,61 +22,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
-TOOLBOX_IMPORT_ERROR: Optional[Exception] = None
-try:
-    from test_toolbox import (
-        ToolboxExecutionResult,
-        ToolboxManifest,
-        WorkflowGraph,
-        WorkflowImageInput,
-        WorkflowInputSource,
-        execute_image_workflow,
-        get_manifest,
-        validate_workflow,
-    )
-except ModuleNotFoundError as exc:
-    TOOLBOX_IMPORT_ERROR = exc
-
-    class WorkflowInputSource(BaseModel):
-        kind: str = "all_loaded_part_images"
-        selected_image_ids: List[uuid.UUID] = Field(default_factory=list)
-        selected_part_ids: List[uuid.UUID] = Field(default_factory=list)
-        example_image_id: Optional[uuid.UUID] = None
-
-    class WorkflowImageInput(BaseModel):
-        image_id: uuid.UUID
-        filename: str
-        content_type: Optional[str] = None
-        data: bytes = b""
-        metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    class WorkflowGraph(BaseModel):
-        name: str = "Analyze workflow"
-        source: WorkflowInputSource = Field(default_factory=WorkflowInputSource)
-        nodes: List[Dict[str, Any]] = Field(default_factory=list)
-
-    class ToolboxManifest(BaseModel):
-        name: str = "test_toolbox"
-        description: str = "Unavailable"
-        methods: List[Dict[str, Any]] = Field(default_factory=list)
-
-    class ToolboxExecutionResult(BaseModel):
-        status: str = "failed"
-        execution_mode: str = "execution"
-        image_count: int = 0
-        warnings: List[str] = Field(default_factory=list)
-        node_results: List[Dict[str, Any]] = Field(default_factory=list)
-
-    def get_manifest() -> ToolboxManifest:
-        return ToolboxManifest()
-
-    def validate_workflow(workflow: WorkflowGraph) -> ToolboxExecutionResult:
-        _ = workflow
-        return ToolboxExecutionResult()
-
-    def execute_image_workflow(workflow: WorkflowGraph, images: List[WorkflowImageInput]) -> ToolboxExecutionResult:
-        _ = workflow, images
-        return ToolboxExecutionResult()
+from backend.analyze_toolbox import (
+    ToolboxExecutionResult,
+    ToolboxManifest,
+    WorkflowGraph,
+    WorkflowImageInput,
+    WorkflowInputSource,
+    execute_image_workflow,
+    get_manifest,
+    validate_workflow,
+)
 from utils.dependencies import get_current_user, get_project_or_403, get_project_or_403_writable
 import utils.crud as crud
 
@@ -89,19 +44,6 @@ MODEL_SERVICE_METHOD_IDS = {
     "ml.yolov8.segment",
     "ml.yolo.ultralytics",
 }
-
-
-def _require_toolbox() -> None:
-    if TOOLBOX_IMPORT_ERROR is None:
-        return
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail=(
-            "Analyze toolbox is unavailable because dependency 'test_toolbox' could not be imported. "
-            "Install/include test_toolbox in the runtime image, or disable Analyze endpoints. "
-            f"Original error: {TOOLBOX_IMPORT_ERROR}"
-        ),
-    )
 
 
 class AnalyzeImageSourceRecord(BaseModel):
@@ -920,7 +862,6 @@ async def get_analyze_toolbox(
     current_user: schemas.User = Depends(get_current_user),
 ):
     _ = current_user
-    _require_toolbox()
     return get_manifest()
 
 
@@ -1020,7 +961,6 @@ async def validate_analyze_workflow(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    _require_toolbox()
     await get_project_or_403(project_id, db, current_user)
     workflow = await _workflow_with_server_source(project_id=project_id, workflow=workflow, db=db)
     try:
@@ -1036,7 +976,6 @@ async def execute_analyze_workflow(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    _require_toolbox()
     await get_project_or_403(project_id, db, current_user)
     workflow = await _workflow_with_server_source(project_id=project_id, workflow=workflow, db=db)
     try:

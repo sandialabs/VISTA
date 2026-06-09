@@ -1,7 +1,0 @@
-[project]
-name = "test-toolbox"
-version = "0.1.0"
-description = "Typed image-analysis toolbox contract for VISTA Analyze workflows"
-requires-python = ">=3.11"
-dependencies = ["pydantic>=2"]
-

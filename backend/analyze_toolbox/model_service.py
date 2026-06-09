@@ -1,4 +1,6 @@
 import base64
+import importlib
+import importlib.util
 import os
 from typing import List
 
@@ -23,7 +25,7 @@ class WorkflowExecutionPayload(BaseModel):
     images: List[WorkflowImagePayload] = Field(default_factory=list)
 
 
-app = FastAPI(title="VISTA test_toolbox model service", version="0.1.0")
+app = FastAPI(title="VISTA backend analyze toolbox model service", version="0.1.0")
 
 
 def _accelerator_status() -> dict:
@@ -36,11 +38,11 @@ def _accelerator_status() -> dict:
         "cuda_devices": [],
         "mps_available": False,
     }
-    try:
-        import torch
-    except Exception as exc:
-        status["torch_error"] = str(exc)
+    torch_spec = importlib.util.find_spec("torch")
+    if torch_spec is None:
+        status["torch_error"] = "torch is not installed"
         return status
+    torch = importlib.import_module("torch")
 
     try:
         cuda_available = bool(torch.cuda.is_available())
@@ -84,7 +86,7 @@ def health():
     accelerator = _accelerator_status()
     return {
         "status": "ok",
-        "service": "test_toolbox-models",
+        "service": "backend-analyze-toolbox-models",
         "accelerator": accelerator,
     }
 
