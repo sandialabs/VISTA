@@ -1941,3 +1941,44 @@ def test_overlay_assignment_can_unassign_overlay(client):
     parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
     assert parts_response.status_code == 200, parts_response.text
     assert [record for record in parts_response.json()[0]["metadata"]["source_images"] if record.get("overlay")] == []
+
+
+def test_duplicate_filename_assignment_and_overlay_use_image_ids(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Duplicate filename PT3 overlay project")
+    base = _upload_part_test_image(client, project_id, headers, "scan.png", {"side": "axial", "modality": "volume"})
+    overlay = _upload_part_test_image(client, project_id, headers, "scan.png", {"modality": "mask", "overlay": True})
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "PT3-DUP", "display_name": "PT3 duplicate stack"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_base = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": "scan.png", "image_id": base["id"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_base.status_code == 200, assign_base.text
+
+    assign_overlay = client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={
+            "overlay_filename": "scan.png",
+            "overlay_image_id": overlay["id"],
+            "base_filename": "scan.png",
+            "base_image_id": base["id"],
+        },
+        headers=headers,
+    )
+    assert assign_overlay.status_code == 200, assign_overlay.text
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    source_images = parts_response.json()[0]["metadata"]["source_images"]
+    base_records = [record for record in source_images if not record.get("overlay")]
+    overlay_records = [record for record in source_images if record.get("overlay")]
+    assert [record["image_id"] for record in base_records] == [base["id"]]
+    assert [record["image_id"] for record in overlay_records] == [overlay["id"]]
+    assert overlay_records[0]["overlay_base_image_id"] == base["id"]
