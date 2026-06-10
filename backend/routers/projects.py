@@ -72,7 +72,13 @@ async def read_projects(
         limit=limit,
         include_archived=include_archived,
     )
-    return projects
+    dashboard_counts = await crud.get_project_dashboard_counts(db, [project.id for project in projects])
+    return [
+        schemas.Project.model_validate(project).model_copy(
+            update=dashboard_counts.get(project.id, {"image_count": 0, "part_count": 0})
+        )
+        for project in projects
+    ]
 
 @router.get("/{project_id}", response_model=schemas.Project)
 #@cached(ttl=3600, key_builder=lambda *args, **kwargs: f"project:{kwargs['project_id']}:user:{kwargs['current_user'].email}")

@@ -249,6 +249,37 @@ async def create_project(db: AsyncSession, project: schemas.ProjectCreate, creat
     return db_project
 
 
+async def get_project_dashboard_counts(
+    db: AsyncSession,
+    project_ids: List[uuid.UUID],
+) -> Dict[uuid.UUID, Dict[str, int]]:
+    """Return active image and inspection part counts for dashboard project cards."""
+    counts = {project_id: {"image_count": 0, "part_count": 0} for project_id in project_ids}
+    if not project_ids:
+        return counts
+
+    image_rows = await db.execute(
+        select(models.DataInstance.project_id, func.count(models.DataInstance.id))
+        .where(
+            models.DataInstance.project_id.in_(project_ids),
+            models.DataInstance.deleted_at.is_(None),
+        )
+        .group_by(models.DataInstance.project_id)
+    )
+    for project_id, count in image_rows:
+        counts[project_id]["image_count"] = count
+
+    part_rows = await db.execute(
+        select(models.InspectionPart.project_id, func.count(models.InspectionPart.id))
+        .where(models.InspectionPart.project_id.in_(project_ids))
+        .group_by(models.InspectionPart.project_id)
+    )
+    for project_id, count in part_rows:
+        counts[project_id]["part_count"] = count
+
+    return counts
+
+
 async def archive_project(db: AsyncSession, project_id: uuid.UUID, archived_by: Optional[str] = None) -> Optional[models.Project]:
     """Archive a project, making it read-only and hidden by default."""
     from datetime import datetime, timezone
