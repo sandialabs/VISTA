@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 
 export const VISTA_HIERARCHY_KEYS = [
   'design_number',
@@ -35,7 +35,7 @@ function normalizeConfigEntry(entry) {
   };
 }
 
-function buildConfiguredFilenameFields(fileNamingScheme) {
+export function buildConfiguredFilenameFields(fileNamingScheme) {
   const hierarchyLevels = Array.isArray(fileNamingScheme?.hierarchy_levels)
     ? fileNamingScheme.hierarchy_levels
     : [];
@@ -51,7 +51,7 @@ function buildConfiguredFilenameFields(fileNamingScheme) {
   return fields;
 }
 
-function stripConfiguredAbbreviation(value, field) {
+export function stripConfiguredAbbreviation(value, field) {
   const raw = String(value ?? '').trim();
   const abbreviation = String(field?.abbreviation || '').trim();
   if (!abbreviation) return raw;
@@ -75,12 +75,12 @@ function stripConfiguredAbbreviation(value, field) {
  */
 
 // Module-level helpers (no component state dependency).
-function stripExtension(name) {
+export function stripExtension(name) {
   const idx = name.lastIndexOf('.');
   return idx > 0 ? name.slice(0, idx) : name;
 }
 
-function extractValues(stem, mode, pattern) {
+export function extractValues(stem, mode, pattern) {
   if (!pattern) return { values: [], error: null };
 
   if (mode === 'simple') {
@@ -102,16 +102,30 @@ function extractValues(stem, mode, pattern) {
   }
 }
 
-function FilenameMetadataExtractor({ files, onConfigChange, fileNamingScheme = null }) {
-  const [mode, setMode] = useState('simple');
-  const [pattern, setPattern] = useState('');
-  const [keysInput, setKeysInput] = useState('');
+function FilenameMetadataExtractor({
+  files = [],
+  onConfigChange,
+  fileNamingScheme = null,
+  initialConfig = null,
+  previewFilename = '',
+  title = 'Extract Metadata from Filenames (Optional)',
+}) {
+  const initialMode = initialConfig?.mode === 'advanced' ? 'advanced' : 'simple';
+  const initialPattern = String(initialConfig?.pattern || initialConfig?.delimiter || fileNamingScheme?.delimiter || '');
+  const initialKeys = Array.isArray(initialConfig?.keys)
+    ? initialConfig.keys.join(', ')
+    : String(initialConfig?.keysInput || '');
+  const [mode, setMode] = useState(initialMode);
+  const [pattern, setPattern] = useState(initialPattern);
+  const [keysInput, setKeysInput] = useState(initialKeys);
   const [userEditedConfig, setUserEditedConfig] = useState(false);
+  const lastConfigSignatureRef = useRef('');
 
   const configuredFields = useMemo(() => buildConfiguredFilenameFields(fileNamingScheme), [fileNamingScheme]);
 
   // The filename stem used for the live preview (first selected file).
-  const previewStem = files.length > 0 ? stripExtension(files[0].name) : '';
+  const activePreviewFilename = files.length > 0 ? files[0].name : previewFilename;
+  const previewStem = activePreviewFilename ? stripExtension(activePreviewFilename) : '';
 
   useEffect(() => {
     if (userEditedConfig || !previewStem || pattern || keysInput) return;
@@ -210,19 +224,37 @@ function FilenameMetadataExtractor({ files, onConfigChange, fileNamingScheme = n
   // Notify the parent of configuration changes.
   useEffect(() => {
     if (onConfigChange) {
+      const error = extractError || (mismatch ? `Number of values (${previewValues.length}) does not match number of keys (${keys.length})` : null);
+      const signature = JSON.stringify({
+        isValid,
+        hasPattern: pattern.length > 0,
+        keys,
+        mode,
+        pattern,
+        previewValues,
+        previewJson,
+        error,
+      });
+      if (signature === lastConfigSignatureRef.current) return;
+      lastConfigSignatureRef.current = signature;
       onConfigChange({
         isValid,
         hasPattern: pattern.length > 0,
         extractMetadata,
         keys,
+        mode,
+        pattern,
+        previewValues,
+        previewJson,
+        error,
       });
     }
-  }, [isValid, pattern, extractMetadata, onConfigChange, keys]);
+  }, [isValid, pattern, extractMetadata, onConfigChange, keys, mode, previewValues, previewJson, extractError, mismatch]);
 
   return (
     <div className="filename-extractor">
       <div className="filename-extractor-header">
-        <h3 className="filename-extractor-title">Extract Metadata from Filenames (Optional)</h3>
+        <h3 className="filename-extractor-title">{title}</h3>
         <div className="filename-extractor-modes">
           <label className="filename-extractor-mode-label">
             <input
@@ -279,7 +311,7 @@ function FilenameMetadataExtractor({ files, onConfigChange, fileNamingScheme = n
 
       {pattern && previewStem && previewValues.length > 0 && !extractError && (
         <div className="form-group">
-          <label>Extracted Values (preview from &quot;{files[0].name}&quot;)</label>
+          <label>Extracted Values (preview from &quot;{activePreviewFilename}&quot;)</label>
           <div className="filename-extractor-array-preview">
             {JSON.stringify(previewValues)}
           </div>

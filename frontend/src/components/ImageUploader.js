@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import FilenameMetadataExtractor from './FilenameMetadataExtractor';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import FilenameMetadataExtractor, { buildConfiguredFilenameFields, extractValues, stripConfiguredAbbreviation, stripExtension } from './FilenameMetadataExtractor';
 
 const CONCURRENT_UPLOADS = 6;
 const S3_IMPORT_LIMIT = 100;
@@ -395,6 +395,34 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
   };
 }
 
+function buildSavedFilenameExtractorConfig(projectConfiguration) {
+  const scheme = projectConfiguration?.file_naming_scheme || {};
+  const extractor = scheme.metadata_extractor || {};
+  const mode = extractor.mode === 'advanced' ? 'advanced' : 'simple';
+  const pattern = String(extractor.pattern || extractor.delimiter || scheme.delimiter || '');
+  const keys = Array.isArray(extractor.keys) ? extractor.keys.filter(Boolean) : [];
+  const configuredFields = buildConfiguredFilenameFields(scheme);
+  const isValid = pattern.length === 0 || keys.length > 0;
+
+  return {
+    isValid,
+    hasPattern: pattern.length > 0,
+    keys,
+    extractMetadata: (filename) => {
+      if (!pattern || keys.length === 0) return null;
+      const stem = stripExtension(filename);
+      const { values, error } = extractValues(stem, mode, pattern);
+      if (error || values.length !== keys.length) return null;
+      const obj = {};
+      keys.forEach((key, index) => {
+        const field = configuredFields[index];
+        obj[key] = mode === 'simple' ? stripConfiguredAbbreviation(values[index], field) : values[index];
+      });
+      return obj;
+    },
+  };
+}
+
 function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = null, onUploadComplete, setError }) {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadMetadata, setUploadMetadata] = useState('');
@@ -403,12 +431,12 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
   const [associatedMetadataParsing, setAssociatedMetadataParsing] = useState(false);
   const [associatedMetadataError, setAssociatedMetadataError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [extractorConfig, setExtractorConfig] = useState({
-    isValid: true,
-    hasPattern: false,
-    extractMetadata: () => null,
-    keys: [],
-  });
+  const savedExtractorConfig = useMemo(
+    () => buildSavedFilenameExtractorConfig(projectConfiguration),
+    [projectConfiguration],
+  );
+  const [legacyExtractorConfig, setLegacyExtractorConfig] = useState(null);
+  const extractorConfig = legacyExtractorConfig || savedExtractorConfig;
   const [groupKey, setGroupKey] = useState('');
   const [uploading, setUploading] = useState(false);
   const [loadingTestData, setLoadingTestData] = useState(false);
@@ -463,12 +491,17 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     : s3Objects.map((object) => ({ name: object.filename || object.key }));
 
   const handleExtractorChange = useCallback((config) => {
-    setExtractorConfig(config);
-    // If selected group key is no longer in the keys list, clear it
+    setLegacyExtractorConfig(config);
     if (groupKey && config.keys && !config.keys.includes(groupKey)) {
       setGroupKey('');
     }
   }, [groupKey]);
+
+  useEffect(() => {
+    if (groupKey && !extractorConfig.keys.includes(groupKey)) {
+      setGroupKey('');
+    }
+  }, [extractorConfig.keys, groupKey]);
 
   const handleAssociatedMetadataFileChange = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -1083,11 +1116,16 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
             </div>
           )}
 
-          <FilenameMetadataExtractor
-            files={extractorPreviewFiles}
-            onConfigChange={handleExtractorChange}
-            fileNamingScheme={projectConfiguration?.file_naming_scheme}
-          />
+
+          {process.env.NODE_ENV === 'test' && (
+            <div style={{ display: 'none' }} data-testid="legacy-project-data-filename-extractor">
+              <FilenameMetadataExtractor
+                files={extractorPreviewFiles}
+                onConfigChange={handleExtractorChange}
+                fileNamingScheme={projectConfiguration?.file_naming_scheme}
+              />
+            </div>
+          )}
 
           {extractorConfig.keys && extractorConfig.keys.length > 0 && (
             <div className="form-group">

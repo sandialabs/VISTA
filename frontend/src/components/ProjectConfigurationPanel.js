@@ -1,6 +1,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { PROJECT_PHASE_LABELS, PROJECT_PHASE_SEQUENCE } from '../utils/projectPhases';
 import { buildErrorWithServiceDiagnostics } from '../utils/serviceDiagnostics';
+import FilenameMetadataExtractor from './FilenameMetadataExtractor';
 
 
 function isSingleAlphanumeric(value) {
@@ -316,19 +317,11 @@ function normalizeFilenameToken(value, fallback) {
   return token || fallback;
 }
 
-function getExampleValueToken(index) {
-  const codePoint = 'a'.charCodeAt(0) + index;
-  if (codePoint <= 'z'.charCodeAt(0)) {
-    return String.fromCharCode(codePoint).repeat(3);
-  }
-  return `value${index + 1}`;
-}
-
 function buildExpectedFilenameExample(fileNamingScheme) {
   const normalizedScheme = normalizeFileNamingScheme({ file_naming_scheme: fileNamingScheme });
   const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) => {
     const prefix = (level.abbreviation || getFilenameEntryName(level, `level ${index + 1}`)).trim();
-    return `${prefix}${getExampleValueToken(index)}`;
+    return `${prefix}001`;
   });
   const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) => {
     const descriptorName = descriptor.id === 'view'
@@ -336,7 +329,53 @@ function buildExpectedFilenameExample(fileNamingScheme) {
       : getFilenameEntryName(descriptor, `descriptor ${index + 1}`);
     return normalizeFilenameToken(descriptorName, `descriptor${index + 1}`);
   });
-  return [...hierarchySegments, ...descriptorSegments].filter(Boolean).join('_') + '.type';
+  const delimiter = normalizedScheme.delimiter || '_';
+  return [...hierarchySegments, ...descriptorSegments].filter(Boolean).join(delimiter) + '.type';
+}
+
+
+const FILENAME_CONVENTION_COLORS = [
+  '#2563eb',
+  '#7c3aed',
+  '#0891b2',
+  '#16a34a',
+  '#f97316',
+  '#dc2626',
+  '#4f46e5',
+  '#0f766e',
+];
+
+function getFilenameConventionSegments(fileNamingScheme) {
+  const normalizedScheme = normalizeFileNamingScheme({ file_naming_scheme: fileNamingScheme });
+  const delimiter = normalizedScheme.delimiter || '_';
+  const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) => {
+    const prefix = (level.abbreviation || getFilenameEntryName(level, `level ${index + 1}`)).trim();
+    return {
+      type: 'hierarchy',
+      index,
+      key: `hierarchy-${index}`,
+      label: getFilenameEntryName(level, `Level ${index + 1}`),
+      token: `${prefix}001`,
+      color: FILENAME_CONVENTION_COLORS[index % FILENAME_CONVENTION_COLORS.length],
+    };
+  });
+  const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) => {
+    const descriptorName = descriptor.id === 'view'
+      ? 'side'
+      : getFilenameEntryName(descriptor, `descriptor ${index + 1}`);
+    return {
+      type: 'descriptor',
+      index,
+      key: `descriptor-${index}`,
+      label: getFilenameEntryName(descriptor, `Descriptor ${index + 1}`),
+      token: normalizeFilenameToken(descriptorName, `descriptor${index + 1}`),
+      color: FILENAME_CONVENTION_COLORS[(hierarchySegments.length + index) % FILENAME_CONVENTION_COLORS.length],
+    };
+  });
+  return {
+    delimiter,
+    segments: [...hierarchySegments, ...descriptorSegments],
+  };
 }
 
 function normalizeProjectTypeSuffix(projectType) {
@@ -403,7 +442,14 @@ function normalizeFileNamingScheme(config) {
   const imageDescriptors = Array.isArray(source.image_descriptors) && source.image_descriptors.length > 0
     ? source.image_descriptors.map(normalizeEntry)
     : defaultScheme.image_descriptors;
-  return { hierarchy_levels: hierarchyLevels, image_descriptors: imageDescriptors };
+  return {
+    hierarchy_levels: hierarchyLevels,
+    image_descriptors: imageDescriptors,
+    delimiter: String(source.delimiter || '_'),
+    metadata_extractor: source.metadata_extractor && typeof source.metadata_extractor === 'object'
+      ? source.metadata_extractor
+      : null,
+  };
 }
 
 const AUTOSAVE_DELAY_MS = 500;
@@ -431,6 +477,7 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
   const loadCompleteRef = useRef(false);
   const lastSavedSignatureRef = useRef(getConfigurationSignature(EMPTY_CONFIG));
   const saveLoopPromiseRef = useRef(null);
+  const filenameExtractorInitializedRef = useRef(false);
   const autosaveRequestedDuringSaveRef = useRef(false);
 
   useEffect(() => {
@@ -469,6 +516,15 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
   const [primaryError, diagnosticError] = typeof error === 'string'
     ? error.split('\n\n', 2)
     : ['', ''];
+  const normalizedFileNamingScheme = normalizeFileNamingScheme(config);
+  const filenameConvention = useMemo(
+    () => getFilenameConventionSegments(normalizedFileNamingScheme),
+    [normalizedFileNamingScheme],
+  );
+  const expectedFilenameExample = useMemo(
+    () => buildExpectedFilenameExample(normalizedFileNamingScheme),
+    [normalizedFileNamingScheme],
+  );
 
   useEffect(() => {
     const loadConfiguration = async () => {
@@ -846,6 +902,35 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
     }));
   };
 
+
+  const handleFilenameExtractorConfigChange = useCallback((extractorState) => {
+    if (!filenameExtractorInitializedRef.current) {
+      filenameExtractorInitializedRef.current = true;
+      return;
+    }
+    const nextMetadataExtractor = {
+      mode: extractorState.mode,
+      pattern: extractorState.pattern,
+      keys: extractorState.keys,
+    };
+    setConfig((previous) => {
+      const currentScheme = normalizeFileNamingScheme(previous);
+      const nextScheme = {
+        ...currentScheme,
+        delimiter: extractorState.mode === 'simple' ? extractorState.pattern : currentScheme.delimiter,
+        metadata_extractor: nextMetadataExtractor,
+      };
+      if (JSON.stringify(currentScheme.metadata_extractor || null) === JSON.stringify(nextScheme.metadata_extractor)
+        && currentScheme.delimiter === nextScheme.delimiter) {
+        return previous;
+      }
+      return {
+        ...previous,
+        file_naming_scheme: nextScheme,
+      };
+    });
+  }, []);
+
   const copyConfiguration = async () => {
     if (!copySourceProjectId || copyingConfiguration) return;
 
@@ -945,85 +1030,202 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
             </div>
           </section>
 
-          <section className="part-detail-panel" aria-label="File naming configuration">
-            <h3>Project Configuration: File Name Convention</h3>
-            <div className="filename-convention-preview" aria-label="Expected filename preview">
-              <span className="filename-convention-preview-label">Expected filename</span>
-              <code data-testid="expected-filename-preview">
-                {buildExpectedFilenameExample(normalizeFileNamingScheme(config))}
-              </code>
-              <p>
-                Name uploaded files in this underscore-separated order so VISTA can parse configured
-                hierarchy values first, followed by image descriptors, and then the file type extension.
-              </p>
+          <section className="part-detail-panel filename-convention-panel" aria-label="Filename convention">
+            <div className="filename-convention-heading">
+              <div>
+                <h3>Filename Convention</h3>
+                <p>
+                  Build the filename from left to right. Colors link each filename segment to the
+                  hierarchy, descriptor, modality, and decoding controls that define it.
+                </p>
+              </div>
+              <code data-testid="expected-filename-preview">{expectedFilenameExample}</code>
             </div>
-            <p>Customize the hierarchy and descriptor elements that produce the expected filename above.</p>
+
+            <div className="filename-breakdown" aria-label="Expected filename preview">
+              {filenameConvention.segments.map((segment, index) => (
+                <React.Fragment key={segment.key}>
+                  <div className="filename-breakdown-segment" style={{ '--segment-color': segment.color }}>
+                    <span className="filename-breakdown-label">{segment.label}</span>
+                    <strong>{segment.token}</strong>
+                    <span className="filename-breakdown-decodes">
+                      {segment.type === 'hierarchy' ? 'ID value: 001' : 'Filename descriptor'}
+                    </span>
+                  </div>
+                  {index < filenameConvention.segments.length - 1 && (
+                    <span className="filename-breakdown-delimiter">{filenameConvention.delimiter}</span>
+                  )}
+                </React.Fragment>
+              ))}
+              <span className="filename-breakdown-extension">.type</span>
+            </div>
+
+            <p>
+              Configure each option directly under the filename part it controls. Numeric placeholders use
+              <strong> 001 </strong> because these fields normally decode image or part identifiers from the filename.
+            </p>
+
             <h4>Hierarchy Levels</h4>
+            <div className="filename-option-grid">
+              {normalizedFileNamingScheme.hierarchy_levels.map((level, index) => {
+                const segment = filenameConvention.segments.find((item) => item.type === 'hierarchy' && item.index === index);
+                return (
+                  <div className="filename-option-card" style={{ '--segment-color': segment?.color }} key={`hierarchy-level-${index}`}>
+                    <div className="filename-option-card-header">
+                      <span>{segment?.token}</span>
+                      <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('hierarchy_levels', index)}>Remove</button>
+                    </div>
+                    <label htmlFor={`hierarchy-level-select-${index}`}>Level {index + 1}</label>
+                    <select
+                      id={`hierarchy-level-select-${index}`}
+                      value={level.id}
+                      onChange={(event) => {
+                        const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
+                        updateFileNameEntry('hierarchy_levels', index, selected
+                          ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
+                          : { id: 'other', label: '', abbreviation: '' });
+                      }}
+                    >
+                      {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      <option value="other">Other</option>
+                    </select>
+                    {level.id === 'other' && (
+                      <>
+                        <label htmlFor={`hierarchy-level-custom-label-${index}`}>Custom Label</label>
+                        <input id={`hierarchy-level-custom-label-${index}`} value={level.label} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { label: event.target.value })} />
+                      </>
+                    )}
+                    <label htmlFor={`hierarchy-level-abbreviation-${index}`}>Abbreviation</label>
+                    <input id={`hierarchy-level-abbreviation-${index}`} value={level.abbreviation} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { abbreviation: event.target.value })} />
+                  </div>
+                );
+              })}
+            </div>
             <div className="workbench-controls-row">
               <button className="btn btn-secondary" type="button" onClick={() => addFileNameEntry('hierarchy_levels')}>
                 Add Hierarchy Level
               </button>
             </div>
-            {normalizeFileNamingScheme(config).hierarchy_levels.map((level, index) => (
-              <div className="workbench-controls-row config-entry-grid" key={`hierarchy-level-${index}`}>
-                <label htmlFor={`hierarchy-level-select-${index}`}>Level {index + 1}</label>
-                <select
-                  id={`hierarchy-level-select-${index}`}
-                  value={level.id}
-                  onChange={(event) => {
-                    const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
-                    updateFileNameEntry('hierarchy_levels', index, selected
-                      ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
-                      : { id: 'other', label: '', abbreviation: '' });
-                  }}
-                >
-                  {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                  <option value="other">Other</option>
-                </select>
-                {level.id === 'other' && (
-                  <>
-                    <label htmlFor={`hierarchy-level-custom-label-${index}`}>Custom Label</label>
-                    <input id={`hierarchy-level-custom-label-${index}`} value={level.label} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { label: event.target.value })} />
-                  </>
-                )}
-                <label htmlFor={`hierarchy-level-abbreviation-${index}`}>Abbreviation</label>
-                <input id={`hierarchy-level-abbreviation-${index}`} value={level.abbreviation} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { abbreviation: event.target.value })} />
-                <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('hierarchy_levels', index)}>Remove</button>
-              </div>
-            ))}
+
             <h4>Image Descriptors</h4>
+            <div className="filename-option-grid">
+              {normalizedFileNamingScheme.image_descriptors.map((descriptor, index) => {
+                const segment = filenameConvention.segments.find((item) => item.type === 'descriptor' && item.index === index);
+                return (
+                  <div className="filename-option-card" style={{ '--segment-color': segment?.color }} key={`image-descriptor-${index}`}>
+                    <div className="filename-option-card-header">
+                      <span>{segment?.token}</span>
+                      <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('image_descriptors', index)}>Remove</button>
+                    </div>
+                    <label htmlFor={`image-descriptor-select-${index}`}>Descriptor {index + 1}</label>
+                    <select
+                      id={`image-descriptor-select-${index}`}
+                      value={descriptor.id}
+                      onChange={(event) => {
+                        const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
+                        updateFileNameEntry('image_descriptors', index, selected
+                          ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
+                          : { id: 'other', label: '', abbreviation: '' });
+                      }}
+                    >
+                      {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      <option value="other">Other</option>
+                    </select>
+                    {descriptor.id === 'other' && (
+                      <>
+                        <label htmlFor={`image-descriptor-custom-label-${index}`}>Custom Label</label>
+                        <input id={`image-descriptor-custom-label-${index}`} value={descriptor.label} onChange={(event) => updateFileNameEntry('image_descriptors', index, { label: event.target.value })} />
+                      </>
+                    )}
+                    <label htmlFor={`image-descriptor-abbreviation-${index}`}>Abbreviation</label>
+                    <input id={`image-descriptor-abbreviation-${index}`} value={descriptor.abbreviation} onChange={(event) => updateFileNameEntry('image_descriptors', index, { abbreviation: event.target.value })} />
+                  </div>
+                );
+              })}
+            </div>
             <div className="workbench-controls-row">
               <button className="btn btn-secondary" type="button" onClick={() => addFileNameEntry('image_descriptors')}>
                 Add Image Descriptor
               </button>
             </div>
-            {normalizeFileNamingScheme(config).image_descriptors.map((descriptor, index) => (
-              <div className="workbench-controls-row config-entry-grid" key={`image-descriptor-${index}`}>
-                <label htmlFor={`image-descriptor-select-${index}`}>Descriptor {index + 1}</label>
-                <select
-                  id={`image-descriptor-select-${index}`}
-                  value={descriptor.id}
-                  onChange={(event) => {
-                    const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
-                    updateFileNameEntry('image_descriptors', index, selected
-                      ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
-                      : { id: 'other', label: '', abbreviation: '' });
-                  }}
-                >
-                  {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                  <option value="other">Other</option>
-                </select>
-                {descriptor.id === 'other' && (
-                  <>
-                    <label htmlFor={`image-descriptor-custom-label-${index}`}>Custom Label</label>
-                    <input id={`image-descriptor-custom-label-${index}`} value={descriptor.label} onChange={(event) => updateFileNameEntry('image_descriptors', index, { label: event.target.value })} />
-                  </>
-                )}
-                <label htmlFor={`image-descriptor-abbreviation-${index}`}>Abbreviation</label>
-                <input id={`image-descriptor-abbreviation-${index}`} value={descriptor.abbreviation} onChange={(event) => updateFileNameEntry('image_descriptors', index, { abbreviation: event.target.value })} />
-                <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('image_descriptors', index)}>Remove</button>
+
+            <h4>Image Modalities</h4>
+            <p>Modalities are also filename values, so define their labels and identifiers alongside the filename descriptor they populate.</p>
+            <div className="workbench-controls-row">
+              <button className="btn btn-secondary" type="button" onClick={addImageModality} disabled={saving}>
+                Add Modality
+              </button>
+            </div>
+            {(config.image_modalities || []).length === 0 ? (
+              <p>No image modalities configured yet.</p>
+            ) : (
+              <div className="filename-option-grid modality-option-grid">
+                {(config.image_modalities || []).map((modality, index) => (
+                  <div className="filename-option-card" style={{ '--segment-color': '#f97316' }} key={`image-modality-${index}`}>
+                    <div className="filename-option-card-header">
+                      <span>{modality.id || `modality-${index + 1}`}</span>
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        aria-label={`Remove image modality ${index + 1}`}
+                        onClick={() => removeImageModality(index)}
+                        disabled={saving}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <label htmlFor={`image-modality-label-${index}`}>Label</label>
+                    <input
+                      id={`image-modality-label-${index}`}
+                      aria-label={`Image modality label ${index + 1}`}
+                      type="text"
+                      value={modality.label || ''}
+                      onChange={(event) => updateImageModality(index, { label: event.target.value })}
+                    />
+                    <label htmlFor={`image-modality-id-${index}`}>Identifier</label>
+                    <input
+                      id={`image-modality-id-${index}`}
+                      aria-label={`Image modality id ${index + 1}`}
+                      type="text"
+                      value={modality.id || ''}
+                      onChange={(event) => updateImageModality(index, { id: event.target.value })}
+                    />
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label={`Image modality calibration required ${index + 1}`}
+                        checked={Boolean(modality.calibration_required)}
+                        onChange={(event) =>
+                          updateImageModality(index, { calibration_required: event.target.checked })
+                        }
+                      />
+                      Calibration required
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label={`Image modality example uploaded ${index + 1}`}
+                        checked={Boolean(modality.example_image_uploaded)}
+                        onChange={(event) =>
+                          updateImageModality(index, { example_image_uploaded: event.target.checked })
+                        }
+                      />
+                      Example uploaded
+                    </label>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+
+            <div className="filename-decoder-utility">
+              <FilenameMetadataExtractor
+                fileNamingScheme={normalizedFileNamingScheme}
+                initialConfig={normalizedFileNamingScheme.metadata_extractor || { mode: 'simple', pattern: normalizedFileNamingScheme.delimiter, keys: [] }}
+                previewFilename={expectedFilenameExample}
+                title="Filename Regex & Delimiter Decoder"
+                onConfigChange={handleFilenameExtractorConfigChange}
+              />
+            </div>
           </section>
           <section className="part-detail-panel" aria-label="Process settings">
             <h3>Process Settings</h3>
@@ -1264,71 +1466,6 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
                 ))}
               </select>
             </div>
-          </section>
-
-          <section className="part-detail-panel" aria-label="Image modalities">
-            <h3>Image Modalities</h3>
-            <p>Manage modality definitions and calibration requirements for this project.</p>
-            <div className="workbench-controls-row">
-              <button className="btn btn-secondary" type="button" onClick={addImageModality} disabled={saving}>
-                Add Modality
-              </button>
-            </div>
-            {(config.image_modalities || []).length === 0 ? (
-              <p>No image modalities configured yet.</p>
-            ) : (
-              (config.image_modalities || []).map((modality, index) => (
-                <div className="workbench-controls-row config-entry-grid" key={`image-modality-${index}`}>
-                  <label htmlFor={`image-modality-label-${index}`}>Label</label>
-                  <input
-                    id={`image-modality-label-${index}`}
-                    aria-label={`Image modality label ${index + 1}`}
-                    type="text"
-                    value={modality.label || ''}
-                    onChange={(event) => updateImageModality(index, { label: event.target.value })}
-                  />
-                  <label htmlFor={`image-modality-id-${index}`}>Identifier</label>
-                  <input
-                    id={`image-modality-id-${index}`}
-                    aria-label={`Image modality id ${index + 1}`}
-                    type="text"
-                    value={modality.id || ''}
-                    onChange={(event) => updateImageModality(index, { id: event.target.value })}
-                  />
-                  <label>
-                    <input
-                      type="checkbox"
-                      aria-label={`Image modality calibration required ${index + 1}`}
-                      checked={Boolean(modality.calibration_required)}
-                      onChange={(event) =>
-                        updateImageModality(index, { calibration_required: event.target.checked })
-                      }
-                    />
-                    Calibration required
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      aria-label={`Image modality example uploaded ${index + 1}`}
-                      checked={Boolean(modality.example_image_uploaded)}
-                      onChange={(event) =>
-                        updateImageModality(index, { example_image_uploaded: event.target.checked })
-                      }
-                    />
-                    Example uploaded
-                  </label>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    aria-label={`Remove image modality ${index + 1}`}
-                    onClick={() => removeImageModality(index)}
-                    disabled={saving}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))
-            )}
           </section>
 
           <section className="part-detail-panel" aria-label="Defect types">

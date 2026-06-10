@@ -268,16 +268,14 @@ describe('ProjectConfigurationPanel', () => {
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
     const preview = await screen.findByTestId('expected-filename-preview');
-    expect(preview).toHaveTextContent('Daaa_Lbbb_PNccc_side_modality.type');
-    expect(screen.getByLabelText('Expected filename preview')).toHaveTextContent(
-      'Name uploaded files in this underscore-separated order',
-    );
+    expect(preview).toHaveTextContent('D001_L001_PN001_side_modality.type');
+    expect(screen.getByLabelText('Expected filename preview')).toHaveTextContent('ID value: 001');
 
     fireEvent.change(screen.getByLabelText('Abbreviation', { selector: '#hierarchy-level-abbreviation-2' }), {
       target: { value: 'PART' },
     });
 
-    expect(screen.getByTestId('expected-filename-preview')).toHaveTextContent('Daaa_Lbbb_PARTccc_side_modality.type');
+    expect(screen.getByTestId('expected-filename-preview')).toHaveTextContent('D001_L001_PART001_side_modality.type');
   });
 
   test('keeps view descriptors user-facing as side in the expected filename preview', async () => {
@@ -287,7 +285,7 @@ describe('ProjectConfigurationPanel', () => {
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
     expect(await screen.findByTestId('expected-filename-preview')).toHaveTextContent(
-      'Daaa_Pbbb_Lccc_Sddd_Reee_side_modality.type',
+      'D001_P001_L001_S001_R001_side_modality.type',
     );
   });
 
@@ -312,7 +310,7 @@ describe('ProjectConfigurationPanel', () => {
     mockFetch(config, 'PT1');
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-    await waitFor(() => expect(screen.getByText('Project Configuration: File Name Convention')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Filename Convention' })).toBeInTheDocument());
     expect(screen.getByLabelText('Level 1')).toBeInTheDocument();
     expect(screen.getByDisplayValue('D')).toBeInTheDocument();
 
