@@ -42,10 +42,14 @@ def _make_tiff_bytes(frame_count=1, size=(10, 10)):
 
 
 def _make_uint16_tiff_bytes(values):
-    array = np.array(values, dtype=np.uint16)
+    return _make_scalar_image_bytes("TIFF", np.uint16, values)
+
+
+def _make_scalar_image_bytes(fmt, dtype, values):
+    array = np.array(values, dtype=dtype)
     img = Image.fromarray(array)
     buf = io.BytesIO()
-    img.save(buf, format="TIFF")
+    img.save(buf, format=fmt)
     buf.seek(0)
     return buf
 
@@ -253,6 +257,56 @@ def test_upload_uint16_tiff_records_actual_intensity_range_for_pt3_window(client
     assert metadata.get("value_range") == {"min": 1024, "max": 12000}
     assert metadata.get("intensity_range") == {"min": 1024, "max": 12000}
 
+
+@pytest.mark.parametrize(
+    "filename,content_type,pil_format,dtype,values,expected_dtype,expected_bit_depth,expected_range",
+    [
+        (
+            "scalar8.png", "image/png", "PNG", np.uint8,
+            [[0, 64], [128, 255]], "uint8", 8, {"min": 0, "max": 255},
+        ),
+        (
+            "scalar16.png", "image/png", "PNG", np.uint16,
+            [[1024, 2048], [4096, 12000]], "uint16", 16, {"min": 1024, "max": 12000},
+        ),
+        (
+            "scalar8.tif", "image/tiff", "TIFF", np.uint8,
+            [[0, 64], [128, 255]], "uint8", 8, {"min": 0, "max": 255},
+        ),
+        (
+            "scalar16.tif", "image/tiff", "TIFF", np.uint16,
+            [[1024, 2048], [4096, 12000]], "uint16", 16, {"min": 1024, "max": 12000},
+        ),
+    ],
+)
+def test_upload_variable_bit_depth_scalar_images_records_actual_display_window_metadata(
+    client,
+    filename,
+    content_type,
+    pil_format,
+    dtype,
+    values,
+    expected_dtype,
+    expected_bit_depth,
+    expected_range,
+):
+    pid = _create_project(client, name=f"scalar-{pil_format}-{expected_bit_depth}")
+
+    payload = _make_scalar_image_bytes(pil_format, dtype, values)
+    r = client.post(
+        f"/api/projects/{pid}/images",
+        files={"file": (filename, payload, content_type)},
+    )
+
+    assert r.status_code == 201
+    metadata = r.json().get("metadata") or {}
+    assert metadata.get("pixel_dtype") == expected_dtype
+    assert metadata.get("voxel_dtype") == expected_dtype
+    assert metadata.get("bit_depth") == expected_bit_depth
+    assert metadata.get("bits_per_sample") == expected_bit_depth
+    assert metadata.get("pixel_value_range") == expected_range
+    assert metadata.get("value_range") == expected_range
+    assert metadata.get("intensity_range") == expected_range
 
 def test_upload_inspiro_voxel_data_accepts_3d_arrays(client):
     pr = client.post("/api/projects/", json={"name": "P7", "description": None, "meta_group_id": "g"})

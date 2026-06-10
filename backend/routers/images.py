@@ -38,6 +38,8 @@ router = APIRouter(
 
 VOXEL_DATA_EXTENSIONS = {".npy", ".npz", ".inspiro"}
 TIFF_EXTENSIONS = {".tif", ".tiff"}
+PNG_EXTENSIONS = {".png"}
+SCALAR_INTENSITY_EXTENSIONS = TIFF_EXTENSIONS | PNG_EXTENSIONS
 
 
 def _flatten_image_extrema(extrema: Any) -> list[tuple[float, float]]:
@@ -136,7 +138,7 @@ def _prepare_thumbnail_image(image: Image.Image) -> tuple[Image.Image, str]:
 
 def _image_intensity_metadata(file: UploadFile) -> Dict[str, Any]:
     filename = (file.filename or '').lower()
-    if not (filename.endswith('.tif') or filename.endswith('.tiff')):
+    if not any(filename.endswith(ext) for ext in SCALAR_INTENSITY_EXTENSIONS):
         return {}
 
     try:
@@ -157,7 +159,7 @@ def _image_intensity_metadata(file: UploadFile) -> Dict[str, Any]:
     finally:
         file.file.seek(0)
 
-    if not frame_ranges:
+    if not frame_ranges or (pixel_dtype is None and bit_depth is None):
         return {}
 
     minimum = min(item[0] for item in frame_ranges)

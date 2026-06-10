@@ -2091,61 +2091,112 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.queryByText('IMAGE 2')).not.toBeInTheDocument();
   });
 
-  test('uses loaded 16-bit TIFF value range for PT3 display window controls', async () => {
+  test.each([
+    {
+      extension: 'png',
+      label: 'PNG 8-bit',
+      bitDepth: 8,
+      dtype: 'uint8',
+      lowRange: { min: 12, max: 96 },
+      highRange: { min: 64, max: 240 },
+      editValue: 180,
+    },
+    {
+      extension: 'png',
+      label: 'PNG 16-bit',
+      bitDepth: 16,
+      dtype: 'uint16',
+      lowRange: { min: 1024, max: 4096 },
+      highRange: { min: 2048, max: 12000 },
+      editValue: 8000,
+    },
+    {
+      extension: 'tif',
+      label: 'TIFF 8-bit',
+      bitDepth: 8,
+      dtype: 'uint8',
+      lowRange: { min: 12, max: 96 },
+      highRange: { min: 64, max: 240 },
+      editValue: 180,
+    },
+    {
+      extension: 'tif',
+      label: 'TIFF 16-bit',
+      bitDepth: 16,
+      dtype: 'uint16',
+      lowRange: { min: 1024, max: 4096 },
+      highRange: { min: 2048, max: 12000 },
+      editValue: 8000,
+    },
+  ])('uses loaded $label value range for PT3 display window controls', async ({
+    extension,
+    label,
+    bitDepth,
+    dtype,
+    lowRange,
+    highRange,
+    editValue,
+  }) => {
+    const expectedDomain = `${lowRange.min}-${highRange.max}`;
     mockWorkbenchFetch({
-      user: 'pt3-uint16-window',
-      batches: [{ id: 'batch-uint16', name: 'Batch UInt16' }],
+      user: `pt3-${extension}-${bitDepth}-window`,
+      batches: [{ id: `batch-${extension}-${bitDepth}`, name: `Batch ${label}` }],
       parts: [
         {
-          id: 'part-uint16-1',
-          batch_id: 'batch-uint16',
-          serial_number: 'SN-U16-1',
-          display_name: 'UInt16 TIFF Part',
+          id: `part-${extension}-${bitDepth}-1`,
+          batch_id: `batch-${extension}-${bitDepth}`,
+          serial_number: `SN-${extension.toUpperCase()}-${bitDepth}-1`,
+          display_name: `${label} Part`,
           review_state: 'in_review',
           metadata: {
-            voxel_dtype: 'uint16',
+            voxel_dtype: dtype,
             volume_shape: { axial: 2, coronal: 2, sagittal: 2 },
             source_images: [
               {
-                filename: 'slice-low.tif',
-                image_id: 'slice-low-id',
+                filename: `slice-low.${extension}`,
+                image_id: `slice-low-${extension}-${bitDepth}-id`,
                 metadata: {
                   slice_index: 0,
-                  pixel_dtype: 'uint16',
-                  bit_depth: 16,
-                  pixel_value_range: { min: 1024, max: 4096 },
+                  pixel_dtype: dtype,
+                  bit_depth: bitDepth,
+                  pixel_value_range: lowRange,
                 },
               },
               {
-                filename: 'slice-high.tif',
-                image_id: 'slice-high-id',
+                filename: `slice-high.${extension}`,
+                image_id: `slice-high-${extension}-${bitDepth}-id`,
                 metadata: {
                   slice_index: 1,
-                  pixel_dtype: 'uint16',
-                  bit_depth: 16,
-                  pixel_value_range: { min: 2048, max: 12000 },
+                  pixel_dtype: dtype,
+                  bit_depth: bitDepth,
+                  pixel_value_range: highRange,
                 },
               },
             ],
           },
         },
       ],
-      workspaceState: { selected_part_id: 'part-uint16-1' },
+      workspaceState: { selected_part_id: `part-${extension}-${bitDepth}-1` },
       hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
     });
 
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
 
-    await waitFor(() => expect(screen.getByText('UInt16 TIFF Part')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(`${label} Part`)).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('3D view'), { target: { value: 'stack' } });
 
-    expect(screen.getByText('1024-12000 loaded image range')).toBeInTheDocument();
-    expect(screen.getByLabelText('Display window minimum handle')).toHaveAttribute('min', '1024');
-    expect(screen.getByLabelText('Display window maximum handle')).toHaveAttribute('max', '12000');
-    expect(screen.getAllByTestId('mpr-preview-axial')[0].querySelector('.mpr-slice-canvas')).toHaveAttribute('data-display-domain', '1024-12000');
+    expect(screen.getByText(`${expectedDomain} loaded image range`)).toBeInTheDocument();
+    expect(screen.getByLabelText('Display window minimum handle')).toHaveAttribute('min', String(lowRange.min));
+    expect(screen.getByLabelText('Display window maximum handle')).toHaveAttribute('max', String(highRange.max));
+    expect(screen.getAllByTestId('mpr-preview-axial')[0].querySelector('.mpr-slice-canvas')).toHaveAttribute(
+      'data-display-domain',
+      expectedDomain,
+    );
 
-    fireEvent.change(screen.getByLabelText('Display window maximum handle'), { target: { value: '8000' } });
-    expect(screen.getByLabelText('Display window maximum')).toHaveValue(8000);
+    fireEvent.change(screen.getByLabelText('Display window maximum handle'), {
+      target: { value: String(editValue) },
+    });
+    expect(screen.getByLabelText('Display window maximum')).toHaveValue(editValue);
   });
 
   test('defaults PT3 to focused four-quadrant MPR with modal access and wheel controls', async () => {
