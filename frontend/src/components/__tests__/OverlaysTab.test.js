@@ -58,13 +58,13 @@ describe('OverlaysTab', () => {
     );
 
     fireEvent.dragStart(screen.getByRole('button', { name: 'overlay.png' }), { dataTransfer: { setData: jest.fn() } });
-    fireEvent.drop(screen.getByTestId('overlay-target-base.png'));
+    fireEvent.drop(screen.getByTestId('overlay-target-base-id'));
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/overlay-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overlay_filename: 'overlay.png', base_filename: 'base.png' }),
+        body: JSON.stringify({ overlay_filename: 'overlay.png', overlay_image_id: 'overlay-id', base_filename: 'base.png', base_image_id: 'base-id' }),
       });
     });
     await waitFor(() => expect(onAssignmentsChanged).toHaveBeenCalled());
@@ -89,5 +89,32 @@ describe('OverlaysTab', () => {
     expect(buckets.baseBuckets).toHaveLength(1);
     expect(buckets.baseBuckets[0].overlays.map((image) => image.filename)).toEqual(['overlay.png']);
     expect(buckets.unassignedOverlays.map((image) => image.filename)).toEqual(['loose.png']);
+  });
+
+  test('assigns one duplicate stack as the overlay for the same-name base stack', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    render(
+      <OverlaysTab
+        projectId="proj-pt3"
+        parts={[{
+          id: 'part-1',
+          display_name: 'PT3 Part',
+          metadata: { source_images: [{ filename: 'scan.npy', image_id: 'stack-base-id', overlay: false }] },
+        }]}
+        images={[{ id: 'stack-base-id', filename: 'scan.npy' }, { id: 'stack-overlay-id', filename: 'scan.npy' }]}
+      />
+    );
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'scan (duplicate).npy' }), { dataTransfer: { setData: jest.fn() } });
+    fireEvent.drop(screen.getByTestId('overlay-target-stack-base-id'));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-pt3/parts/overlay-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overlay_filename: 'scan.npy', overlay_image_id: 'stack-overlay-id', base_filename: 'scan.npy', base_image_id: 'stack-base-id' }),
+      });
+    });
   });
 });

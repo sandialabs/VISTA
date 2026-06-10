@@ -1,101 +1,155 @@
 import React, { useMemo, useState } from 'react';
 
-function buildImageLookup(images) {
-  return (Array.isArray(images) ? images : []).reduce((lookup, image) => {
-    if (image?.filename && !image?.deleted_at) lookup.set(image.filename, image);
-    return lookup;
-  }, new Map());
+function tagDuplicateFilename(filename = '', occurrence = 0) {
+  const safeFilename = String(filename || 'image').trim() || 'image';
+  if (occurrence <= 0) return safeFilename;
+  const dotIndex = safeFilename.lastIndexOf('.');
+  const suffix = occurrence === 1 ? ' (duplicate)' : ` (duplicate ${occurrence})`;
+  if (dotIndex > 0) return `${safeFilename.slice(0, dotIndex)}${suffix}${safeFilename.slice(dotIndex)}`;
+  return `${safeFilename}${suffix}`;
 }
 
-function makeImageRef(filename, imageLookup, sourceRecord = {}) {
-  const image = imageLookup.get(filename) || {};
-  const imageId = sourceRecord?.image_id || image.id || '';
+function buildImageIndexes(images) {
+  const refs = [];
+  const byId = new Map();
+  const byFilename = new Map();
+  const filenameCounts = new Map();
+  (Array.isArray(images) ? images : [])
+    .filter((image) => image?.filename && !image?.deleted_at)
+    .forEach((image, index) => {
+      const filename = String(image.filename || '');
+      const occurrence = filenameCounts.get(filename) || 0;
+      filenameCounts.set(filename, occurrence + 1);
+      const id = image?.id ? String(image.id) : '';
+      const ref = {
+        key: id || `filename:${filename}:${index}`,
+        filename,
+        displayName: tagDuplicateFilename(filename, occurrence),
+        id,
+        thumbnailUrl: id ? `/api/images/${encodeURIComponent(id)}/thumbnail?width=96&height=96` : '',
+        contentUrl: id ? `/api/images/${encodeURIComponent(id)}/content` : '',
+      };
+      refs.push(ref);
+      if (id) byId.set(id, ref);
+      if (!byFilename.has(filename)) byFilename.set(filename, []);
+      byFilename.get(filename).push(ref);
+    });
+  return { refs, byId, byFilename };
+}
+
+function makeImageRef(sourceRecord, imageIndexes) {
+  const filename = typeof sourceRecord === 'string' ? sourceRecord : String(sourceRecord?.filename || '');
+  const imageId = typeof sourceRecord === 'object' && sourceRecord?.image_id ? String(sourceRecord.image_id) : '';
+  const matched = (imageId && imageIndexes.byId.get(imageId)) || (filename && (imageIndexes.byFilename.get(filename) || [])[0]) || null;
+  if (!matched && !filename) return null;
   return {
-    filename,
-    id: imageId ? String(imageId) : '',
-    thumbnailUrl: imageId ? `/api/images/${encodeURIComponent(String(imageId))}/thumbnail?width=96&height=96` : '',
-    contentUrl: imageId ? `/api/images/${encodeURIComponent(String(imageId))}/content` : '',
+    ...(matched || {}),
+    key: matched?.key || imageId || filename,
+    filename: filename || matched?.filename || '',
+    displayName: matched?.displayName || filename,
+    id: imageId || matched?.id || '',
+    thumbnailUrl: (imageId || matched?.id) ? `/api/images/${encodeURIComponent(imageId || matched.id)}/thumbnail?width=96&height=96` : '',
+    contentUrl: (imageId || matched?.id) ? `/api/images/${encodeURIComponent(imageId || matched.id)}/content` : '',
   };
 }
 
+function getImageKey(image) {
+  return image?.id ? `id:${image.id}` : `filename:${image?.filename || ''}`;
+}
+
 function buildOverlayBuckets({ parts, images }) {
-  const imageLookup = buildImageLookup(images);
-  const overlayFilenames = new Set();
+  const imageIndexes = buildImageIndexes(images);
+  const overlayKeys = new Set();
+  const assignedBaseKeys = new Set();
   const baseBuckets = [];
 
   (Array.isArray(parts) ? parts : []).forEach((part) => {
     const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
     const bases = sourceImages
-      .filter((record) => record && !record.overlay && record.filename && imageLookup.has(record.filename))
-      .map((record) => ({
-        partId: part.id,
-        partName: part.display_name || part.serial_number || 'Unassigned part',
-        image: { ...makeImageRef(record.filename, imageLookup, record), side: record.side || '' },
-        overlays: [],
-      }));
+      .filter((record) => record && !record.overlay && record.filename)
+      .map((record) => {
+        const image = makeImageRef(record, imageIndexes);
+        if (!image?.id && !imageIndexes.byFilename.has(record.filename)) return null;
+        assignedBaseKeys.add(getImageKey(image));
+        return {
+          partId: part.id,
+          partName: part.display_name || part.serial_number || 'Unassigned part',
+          image: { ...image, side: record.side || '' },
+          overlays: [],
+        };
+      })
+      .filter(Boolean);
+    const bucketsByImageId = new Map(bases.filter((bucket) => bucket.image.id).map((bucket) => [bucket.image.id, bucket]));
     const bucketsByFilename = new Map(bases.map((bucket) => [bucket.image.filename, bucket]));
     sourceImages
-      .filter((record) => record && record.overlay && record.filename && imageLookup.has(record.filename))
+      .filter((record) => record && record.overlay && record.filename)
       .forEach((record) => {
-        overlayFilenames.add(record.filename);
+        const overlayRef = makeImageRef(record, imageIndexes);
+        if (!overlayRef?.id && !imageIndexes.byFilename.has(record.filename)) return;
+        overlayKeys.add(getImageKey(overlayRef));
+        const baseImageId = String(record.overlay_base_image_id || '').trim();
         const baseFilename = String(record.overlay_base_filename || '').trim();
         const fallbackSide = String(record.side || '').trim().toLowerCase();
-        let target = baseFilename ? bucketsByFilename.get(baseFilename) : null;
+        let target = baseImageId ? bucketsByImageId.get(baseImageId) : null;
+        if (!target) target = baseFilename ? bucketsByFilename.get(baseFilename) : null;
         if (!target && fallbackSide) {
           target = bases.find((bucket) => String(bucket.image.side || '').toLowerCase() === fallbackSide) || null;
         }
         if (!target && bases.length === 1) target = bases[0];
-        if (target) target.overlays.push(makeImageRef(record.filename, imageLookup, record));
+        if (target) target.overlays.push(overlayRef);
       });
     baseBuckets.push(...bases);
   });
 
-  const assignedBaseFilenames = new Set(baseBuckets.map((bucket) => bucket.image.filename));
-  const unassignedOverlays = (Array.isArray(images) ? images : [])
-    .filter((image) => image?.filename && !image?.deleted_at)
-    .filter((image) => !overlayFilenames.has(image.filename) && !assignedBaseFilenames.has(image.filename))
-    .sort((left, right) => left.filename.localeCompare(right.filename))
-    .map((image) => makeImageRef(image.filename, imageLookup));
+  const unassignedOverlays = imageIndexes.refs
+    .filter((image) => !overlayKeys.has(getImageKey(image)) && !assignedBaseKeys.has(getImageKey(image)))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName));
 
-  baseBuckets.sort((left, right) => left.image.filename.localeCompare(right.image.filename));
-  baseBuckets.forEach((bucket) => bucket.overlays.sort((left, right) => left.filename.localeCompare(right.filename)));
+  baseBuckets.sort((left, right) => left.image.displayName.localeCompare(right.image.displayName));
+  baseBuckets.forEach((bucket) => bucket.overlays.sort((left, right) => left.displayName.localeCompare(right.displayName)));
   return { baseBuckets, unassignedOverlays };
 }
-
 function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged, setError }) {
   const initialBuckets = useMemo(() => buildOverlayBuckets({ parts, images }), [parts, images]);
   const [localBuckets, setLocalBuckets] = useState(initialBuckets);
-  const [movingFilename, setMovingFilename] = useState('');
+  const [movingImage, setMovingImage] = useState(null);
 
   React.useEffect(() => {
     setLocalBuckets(initialBuckets);
   }, [initialBuckets]);
 
-  const assignOverlay = async (overlayFilename, baseFilename) => {
-    if (!overlayFilename) return;
+  const assignOverlay = async (overlayImage, baseImage = null) => {
+    if (!overlayImage?.filename) return;
+    const overlayKey = getImageKey(overlayImage);
+    const baseKey = baseImage ? getImageKey(baseImage) : '';
     try {
       const response = await fetch(`/api/projects/${projectId}/parts/overlay-assignments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overlay_filename: overlayFilename, base_filename: baseFilename || null }),
+        body: JSON.stringify({
+          overlay_filename: overlayImage.filename,
+          overlay_image_id: overlayImage.id || null,
+          base_filename: baseImage?.filename || null,
+          base_image_id: baseImage?.id || null,
+        }),
       });
       if (!response.ok) throw new Error(`Failed to move overlay (${response.status})`);
       setLocalBuckets((previous) => {
-        const moved = previous.unassignedOverlays.find((image) => image.filename === overlayFilename)
-          || previous.baseBuckets.flatMap((bucket) => bucket.overlays).find((image) => image.filename === overlayFilename)
-          || { filename: overlayFilename };
+        const moved = previous.unassignedOverlays.find((image) => getImageKey(image) === overlayKey)
+          || previous.baseBuckets.flatMap((bucket) => bucket.overlays).find((image) => getImageKey(image) === overlayKey)
+          || overlayImage;
         return {
-          unassignedOverlays: baseFilename ? previous.unassignedOverlays.filter((image) => image.filename !== overlayFilename) : [...previous.unassignedOverlays.filter((image) => image.filename !== overlayFilename), moved].sort((a, b) => a.filename.localeCompare(b.filename)),
+          unassignedOverlays: baseImage ? previous.unassignedOverlays.filter((image) => getImageKey(image) !== overlayKey) : [...previous.unassignedOverlays.filter((image) => getImageKey(image) !== overlayKey), moved].sort((a, b) => a.displayName.localeCompare(b.displayName)),
           baseBuckets: previous.baseBuckets.map((bucket) => ({
             ...bucket,
             overlays: [
-              ...bucket.overlays.filter((image) => image.filename !== overlayFilename),
-              ...(baseFilename && bucket.image.filename === baseFilename ? [moved] : []),
-            ].sort((a, b) => a.filename.localeCompare(b.filename)),
+              ...bucket.overlays.filter((image) => getImageKey(image) !== overlayKey),
+              ...(baseImage && getImageKey(bucket.image) === baseKey ? [moved] : []),
+            ].sort((a, b) => a.displayName.localeCompare(b.displayName)),
           })),
         };
       });
-      setMovingFilename('');
+      setMovingImage(null);
       if (onAssignmentsChanged) await onAssignmentsChanged();
       if (setError) setError(null);
     } catch (err) {
@@ -105,24 +159,24 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
 
   const renderChip = (image, assigned = false) => (
     <button
-      key={image.filename}
+      key={image.key || image.id || image.filename}
       type="button"
       className="image-part-chip overlay-image-chip"
       draggable
       onDragStart={(event) => {
-        event.dataTransfer.setData('text/plain', image.filename);
-        setMovingFilename(image.filename);
+        event.dataTransfer.setData('text/plain', image.id || image.filename);
+        setMovingImage(image);
       }}
-      aria-label={image.filename}
+      aria-label={image.displayName || image.filename}
     >
       {image.thumbnailUrl ? <img src={image.thumbnailUrl} alt="" className="image-part-chip-thumbnail" loading="lazy" /> : null}
-      <span>{image.filename}</span>
+      <span>{image.displayName || image.filename}</span>
       {assigned ? <small>overlay</small> : null}
     </button>
   );
 
-  const dropToBase = (baseFilename) => {
-    if (movingFilename) assignOverlay(movingFilename, baseFilename);
+  const dropToBase = (baseImage) => {
+    if (movingImage) assignOverlay(movingImage, baseImage);
   };
 
   return (
@@ -135,7 +189,7 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
           </div>
         </header>
         <div className="images-to-parts-grid overlays-grid">
-          <div className="images-to-parts-column" onDragOver={(event) => event.preventDefault()} onDrop={() => assignOverlay(movingFilename, null)} data-testid="overlays-unassigned-target">
+          <div className="images-to-parts-column" onDragOver={(event) => event.preventDefault()} onDrop={() => assignOverlay(movingImage, null)} data-testid="overlays-unassigned-target">
             <h3>Available overlay images</h3>
             <div className="image-part-chip-list">
               {localBuckets.unassignedOverlays.length === 0 ? <p className="muted">No available overlay images.</p> : localBuckets.unassignedOverlays.map((image) => renderChip(image))}
@@ -146,9 +200,9 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
               <h3>Image / Overlay Assignments</h3>
             </div>
             {localBuckets.baseBuckets.length === 0 ? <p className="muted">Assign images to parts before mapping overlays.</p> : localBuckets.baseBuckets.map((bucket) => (
-              <article key={`${bucket.partId}-${bucket.image.filename}`} className="images-to-parts-part-card overlay-assignment-card" onDragOver={(event) => event.preventDefault()} onDrop={() => dropToBase(bucket.image.filename)} data-testid={`overlay-target-${bucket.image.filename}`}>
+              <article key={`${bucket.partId}-${bucket.image.id || bucket.image.filename}`} className="images-to-parts-part-card overlay-assignment-card" onDragOver={(event) => event.preventDefault()} onDrop={() => dropToBase(bucket.image)} data-testid={`overlay-target-${bucket.image.id || bucket.image.filename}`}>
                 <div className="overlay-base-column">
-                  <h3>{bucket.image.filename}</h3>
+                  <h3>{bucket.image.displayName || bucket.image.filename}</h3>
                   <p className="muted">{bucket.partName}</p>
                   {renderChip(bucket.image)}
                 </div>
