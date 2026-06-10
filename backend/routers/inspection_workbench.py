@@ -651,6 +651,32 @@ def _record_matches_filename(record: object, filename: str) -> bool:
     return isinstance(record, dict) and str(record.get("filename") or "").strip() == filename
 
 
+def _record_matches_image_identity(record: object, *, filename: str = "", image_id: uuid.UUID | str | None = None) -> bool:
+    if not isinstance(record, dict):
+        return False
+    if image_id and str(record.get("image_id") or "").strip() == str(image_id):
+        return True
+    if image_id:
+        return False
+    return str(record.get("filename") or "").strip() == filename
+
+
+async def _get_active_project_image_by_id(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    image_id: uuid.UUID,
+) -> models.DataInstance | None:
+    result = await db.execute(
+        select(models.DataInstance).where(
+            models.DataInstance.project_id == project_id,
+            models.DataInstance.id == image_id,
+            models.DataInstance.deleted_at.is_(None),
+        )
+    )
+    return result.scalars().first()
+
+
 async def _get_active_project_image_by_filename(
     *,
     db: AsyncSession,
@@ -1056,6 +1082,7 @@ async def assign_image_to_part(
 
     all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
     filename = payload.filename.strip()
+    payload_image_id = payload.image_id
     source_entry = None
     from_part_id = None
 
@@ -1066,11 +1093,11 @@ async def assign_image_to_part(
             continue
         retained = []
         for record in source_images:
-            if isinstance(record, dict) and str(record.get("filename") or "").strip() == filename:
+            if _record_matches_image_identity(record, filename=filename, image_id=payload_image_id):
                 source_entry = {
                     **record,
-                    "filename": filename,
-                    "image_id": record.get("image_id") or None,
+                    "filename": str(record.get("filename") or filename).strip(),
+                    "image_id": record.get("image_id") or (str(payload_image_id) if payload_image_id else None),
                 }
                 from_part_id = part.id
                 continue
@@ -1086,16 +1113,13 @@ async def assign_image_to_part(
             )
 
     if source_entry is None:
-        image_result = await db.execute(
-            select(models.DataInstance).where(
-                models.DataInstance.project_id == project_id,
-                models.DataInstance.filename == filename,
-                models.DataInstance.deleted_at.is_(None),
-            )
-        )
-        image = image_result.scalars().first()
+        if payload_image_id:
+            image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=payload_image_id)
+        else:
+            image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=filename)
         if not image:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+        filename = image.filename
         image_metadata = image.metadata_json if isinstance(image.metadata_json, dict) else {}
         source_entry = {
             "filename": filename,
@@ -1154,7 +1178,7 @@ async def assign_image_to_part(
         target_source_images = target_source_images if isinstance(target_source_images, list) else []
         target_source_images = [
             record for record in target_source_images
-            if not (isinstance(record, dict) and str(record.get("filename") or "").strip() == filename)
+            if not _record_matches_image_identity(record, filename=filename, image_id=payload_image_id)
         ]
         target_source_images.append(source_entry)
         normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
@@ -1186,15 +1210,21 @@ async def assign_overlay_to_base_image(
 ):
     await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
     overlay_filename = payload.overlay_filename.strip()
+    overlay_image_id = payload.overlay_image_id
     base_filename = payload.base_filename.strip() if payload.base_filename else None
+    base_image_id = payload.base_image_id
     if base_filename == "":
         base_filename = None
-    if base_filename and overlay_filename == base_filename:
+    if base_filename and overlay_filename == base_filename and (not overlay_image_id or not base_image_id or overlay_image_id == base_image_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Overlay image cannot be assigned to itself")
 
-    overlay_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=overlay_filename)
+    if overlay_image_id:
+        overlay_image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=overlay_image_id)
+    else:
+        overlay_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=overlay_filename)
     if not overlay_image:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overlay image not found")
+    overlay_filename = overlay_image.filename
 
     all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
     from_part_id = None
@@ -1208,8 +1238,8 @@ async def assign_overlay_to_base_image(
         retained = []
         removed = False
         for record in source_images:
-            if _record_matches_filename(record, overlay_filename):
-                overlay_entry = {**record, "filename": overlay_filename, "image_id": record.get("image_id") or str(overlay_image.id)}
+            if _record_matches_image_identity(record, filename=overlay_filename, image_id=overlay_image_id):
+                overlay_entry = {**record, "filename": str(record.get("filename") or overlay_filename).strip(), "image_id": record.get("image_id") or str(overlay_image.id)}
                 from_part_id = part.id
                 removed = True
                 continue
@@ -1231,16 +1261,20 @@ async def assign_overlay_to_base_image(
     target_part = None
     base_entry = None
     if base_filename:
-        base_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=base_filename)
+        if base_image_id:
+            base_image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=base_image_id)
+        else:
+            base_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=base_filename)
         if not base_image:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base image not found")
+        base_filename = base_image.filename
         for part in all_parts:
             metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
             source_images = metadata.get("source_images")
             if not isinstance(source_images, list):
                 continue
             for record in source_images:
-                if _record_matches_filename(record, base_filename) and not bool(record.get("overlay")):
+                if _record_matches_image_identity(record, filename=base_filename, image_id=base_image_id) and not bool(record.get("overlay")):
                     target_part = part
                     base_entry = record
                     break
@@ -1263,7 +1297,7 @@ async def assign_overlay_to_base_image(
         target_source_images = target_source_images if isinstance(target_source_images, list) else []
         target_source_images = [
             record for record in target_source_images
-            if not _record_matches_filename(record, overlay_filename)
+            if not _record_matches_image_identity(record, filename=overlay_filename, image_id=overlay_image_id)
         ]
         target_source_images.append(overlay_entry)
         normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})

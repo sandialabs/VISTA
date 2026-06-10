@@ -450,6 +450,7 @@ class InspectionBulkIngestResponse(BaseModel):
 
 class InspectionPartImageAssignmentRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=1024)
+    image_id: Optional[uuid.UUID] = None
     to_part_id: Optional[uuid.UUID] = None
 
 
@@ -462,7 +463,9 @@ class InspectionPartImageAssignmentResponse(BaseModel):
 
 class InspectionOverlayAssignmentRequest(BaseModel):
     overlay_filename: str = Field(..., min_length=1, max_length=1024)
+    overlay_image_id: Optional[uuid.UUID] = None
     base_filename: Optional[str] = Field(default=None, max_length=1024)
+    base_image_id: Optional[uuid.UUID] = None
 
 
 class InspectionOverlayAssignmentResponse(BaseModel):

@@ -59,7 +59,7 @@ describe('ImagesToPartsTab', () => {
       expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: 'unassigned-z.png', to_part_id: 'part-1' }),
+        body: JSON.stringify({ filename: 'unassigned-z.png', image_id: null, to_part_id: 'part-1' }),
       });
     });
     await waitFor(() => {
@@ -294,7 +294,7 @@ describe('ImagesToPartsTab', () => {
       expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: 'assigned-a.png', to_part_id: null }),
+        body: JSON.stringify({ filename: 'assigned-a.png', image_id: 'img-assigned-a', to_part_id: null }),
       });
     });
     await waitFor(() => expect(screen.getByTestId('images-to-parts-unassigned-target')).toHaveTextContent('assigned-a.png'));
@@ -343,5 +343,37 @@ describe('ImagesToPartsTab', () => {
     fireEvent.click(screen.getByLabelText('Show image thumbnails'));
 
     expect(container.querySelectorAll('.image-part-chip-thumbnail')).toHaveLength(0);
+  });
+
+  test('keeps same-name numpy stacks distinct and moves only the dragged duplicate to a part', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    render(
+      <ImagesToPartsTab
+        projectId="proj-pt3"
+        parts={[{ id: 'part-1', serial_number: 'PT3-001', display_name: 'PT3 Part', metadata: { source_images: [] } }]}
+        images={[
+          { id: 'stack-base-id', filename: 'scan.npy' },
+          { id: 'stack-overlay-id', filename: 'scan.npy' },
+        ]}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'scan.npy' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'scan (duplicate).npy' })).toBeInTheDocument();
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'scan.npy' }));
+    fireEvent.drop(screen.getByTestId('images-to-parts-target-part-1'));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-pt3/parts/image-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: 'scan.npy', image_id: 'stack-base-id', to_part_id: 'part-1' }),
+      });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('images-to-parts-unassigned-target')).toHaveTextContent('scan (duplicate).npy'));
+    await waitFor(() => expect(screen.getByTestId('images-to-parts-unassigned-target')).not.toHaveTextContent('scan.npy'));
   });
 });
