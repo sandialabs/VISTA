@@ -1867,3 +1867,77 @@ def test_delete_part_removes_part_without_deleting_images(client):
     images_response = client.get(f"/api/projects/{project_id}/images", headers=headers)
     assert images_response.status_code == 200
     assert [image["filename"] for image in images_response.json()] == [uploaded["filename"]]
+
+
+def test_overlay_assignment_maps_overlay_to_base_image(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Overlay assignment project")
+    base = _upload_part_test_image(client, project_id, headers, "base.png", {"side": "front", "modality": "visual"})
+    overlay = _upload_part_test_image(client, project_id, headers, "overlay.png", {"modality": "heatmap", "overlay": True})
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-OVERLAY", "display_name": "Overlay Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_base = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": base["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_base.status_code == 200, assign_base.text
+
+    assign_overlay = client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={"overlay_filename": overlay["filename"], "base_filename": base["filename"]},
+        headers=headers,
+    )
+    assert assign_overlay.status_code == 200, assign_overlay.text
+    assert assign_overlay.json()["to_part_id"] == part_id
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    metadata = parts_response.json()[0]["metadata"]
+    overlay_records = [record for record in metadata["source_images"] if record.get("overlay")]
+    assert len(overlay_records) == 1
+    assert overlay_records[0]["filename"] == "overlay.png"
+    assert overlay_records[0]["overlay_base_filename"] == "base.png"
+    assert overlay_records[0]["overlay_base_image_id"] == base["id"]
+    assert overlay_records[0]["side"] == "front"
+
+
+def test_overlay_assignment_can_unassign_overlay(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Overlay unassignment project")
+    base = _upload_part_test_image(client, project_id, headers, "base-unassign.png", {"side": "front"})
+    overlay = _upload_part_test_image(client, project_id, headers, "overlay-unassign.png", {"overlay": True})
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-OVERLAY-UNASSIGN", "display_name": "Overlay Unassign Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+    assert client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": base["filename"], "to_part_id": part_id},
+        headers=headers,
+    ).status_code == 200
+    assert client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={"overlay_filename": overlay["filename"], "base_filename": base["filename"]},
+        headers=headers,
+    ).status_code == 200
+
+    unassign_overlay = client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={"overlay_filename": overlay["filename"], "base_filename": None},
+        headers=headers,
+    )
+    assert unassign_overlay.status_code == 200, unassign_overlay.text
+    assert unassign_overlay.json()["from_part_id"] == part_id
+    assert unassign_overlay.json()["to_part_id"] is None
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    assert [record for record in parts_response.json()[0]["metadata"]["source_images"] if record.get("overlay")] == []

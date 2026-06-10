@@ -635,6 +635,38 @@ def _rebuild_part_image_maps(metadata: dict) -> dict:
     }
 
 
+def _metadata_for_overlay_assignment(image: models.DataInstance) -> dict:
+    image_metadata = image.metadata_json if isinstance(image.metadata_json, dict) else {}
+    return {
+        "filename": image.filename,
+        "image_id": str(image.id),
+        "side": str(image_metadata.get("side") or "").strip().lower(),
+        "modality": str(image_metadata.get("modality") or "overlay").strip().lower() or "overlay",
+        "overlay": True,
+        "content_type": image.content_type,
+    }
+
+
+def _record_matches_filename(record: object, filename: str) -> bool:
+    return isinstance(record, dict) and str(record.get("filename") or "").strip() == filename
+
+
+async def _get_active_project_image_by_filename(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    filename: str,
+) -> models.DataInstance | None:
+    result = await db.execute(
+        select(models.DataInstance).where(
+            models.DataInstance.project_id == project_id,
+            models.DataInstance.filename == filename,
+            models.DataInstance.deleted_at.is_(None),
+        )
+    )
+    return result.scalars().first()
+
+
 async def _create_test_image_if_missing(
     *,
     project_id: uuid.UUID,
@@ -1139,6 +1171,116 @@ async def assign_image_to_part(
         filename=filename,
         from_part_id=from_part_id,
         to_part_id=payload.to_part_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/parts/overlay-assignments",
+    response_model=schemas.InspectionOverlayAssignmentResponse,
+)
+async def assign_overlay_to_base_image(
+    project_id: uuid.UUID,
+    payload: schemas.InspectionOverlayAssignmentRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    overlay_filename = payload.overlay_filename.strip()
+    base_filename = payload.base_filename.strip() if payload.base_filename else None
+    if base_filename == "":
+        base_filename = None
+    if base_filename and overlay_filename == base_filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Overlay image cannot be assigned to itself")
+
+    overlay_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=overlay_filename)
+    if not overlay_image:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overlay image not found")
+
+    all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
+    from_part_id = None
+    overlay_entry = None
+
+    for part in all_parts:
+        metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+        source_images = metadata.get("source_images")
+        if not isinstance(source_images, list):
+            continue
+        retained = []
+        removed = False
+        for record in source_images:
+            if _record_matches_filename(record, overlay_filename):
+                overlay_entry = {**record, "filename": overlay_filename, "image_id": record.get("image_id") or str(overlay_image.id)}
+                from_part_id = part.id
+                removed = True
+                continue
+            retained.append(record)
+        if removed:
+            normalized = _rebuild_part_image_maps({**metadata, "source_images": retained})
+            await crud.update_inspection_part_metadata(
+                db=db,
+                project_id=project_id,
+                part_id=part.id,
+                metadata_patch=normalized,
+                updated_by=current_user.email,
+            )
+
+    if overlay_entry is None:
+        overlay_entry = _metadata_for_overlay_assignment(overlay_image)
+    overlay_entry = {**overlay_entry, "overlay": True}
+
+    target_part = None
+    base_entry = None
+    if base_filename:
+        base_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=base_filename)
+        if not base_image:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base image not found")
+        for part in all_parts:
+            metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+            source_images = metadata.get("source_images")
+            if not isinstance(source_images, list):
+                continue
+            for record in source_images:
+                if _record_matches_filename(record, base_filename) and not bool(record.get("overlay")):
+                    target_part = part
+                    base_entry = record
+                    break
+            if target_part:
+                break
+        if not target_part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base image is not assigned to an inspection part")
+
+        base_image_id = str(base_entry.get("image_id") or base_image.id)
+        overlay_entry = {
+            **overlay_entry,
+            "overlay": True,
+            "side": str(base_entry.get("side") or overlay_entry.get("side") or "").strip().lower(),
+            "modality": str(overlay_entry.get("modality") or "overlay").strip().lower() or "overlay",
+            "overlay_base_filename": base_filename,
+            "overlay_base_image_id": base_image_id,
+        }
+        target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
+        target_source_images = target_metadata.get("source_images")
+        target_source_images = target_source_images if isinstance(target_source_images, list) else []
+        target_source_images = [
+            record for record in target_source_images
+            if not _record_matches_filename(record, overlay_filename)
+        ]
+        target_source_images.append(overlay_entry)
+        normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
+        await crud.update_inspection_part_metadata(
+            db=db,
+            project_id=project_id,
+            part_id=target_part.id,
+            metadata_patch=normalized_target,
+            updated_by=current_user.email,
+        )
+
+    return schemas.InspectionOverlayAssignmentResponse(
+        project_id=project_id,
+        overlay_filename=overlay_filename,
+        base_filename=base_filename,
+        from_part_id=from_part_id,
+        to_part_id=target_part.id if target_part else None,
     )
 
 

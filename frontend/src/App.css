@@ -7735,3 +7735,56 @@ ul li:hover {
 .preview-project-card {
   box-shadow: var(--shadow-sm);
 }
+
+.overlays-grid {
+  grid-template-columns: minmax(260px, 1fr) minmax(560px, 3fr);
+}
+
+.overlay-assignment-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.4fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.overlay-base-column,
+.overlay-side-column {
+  min-width: 0;
+}
+
+.overlay-side-column {
+  border-left: 1px solid #e2e8f0;
+  padding-left: 14px;
+}
+
+.overlay-side-column h4 {
+  margin: 0 0 8px;
+  color: #334155;
+}
+
+.overlay-image-chip small {
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+
+.overlay-chip-list {
+  align-content: flex-start;
+}
+
+@media (max-width: 900px) {
+  .overlay-assignment-card {
+    grid-template-columns: 1fr;
+  }
+
+  .overlay-side-column {
+    border-left: 0;
+    border-top: 1px solid #e2e8f0;
+    padding-left: 0;
+    padding-top: 12px;
+  }
+}

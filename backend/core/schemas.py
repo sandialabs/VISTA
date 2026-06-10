@@ -460,6 +460,19 @@ class InspectionPartImageAssignmentResponse(BaseModel):
     to_part_id: Optional[uuid.UUID] = None
 
 
+class InspectionOverlayAssignmentRequest(BaseModel):
+    overlay_filename: str = Field(..., min_length=1, max_length=1024)
+    base_filename: Optional[str] = Field(default=None, max_length=1024)
+
+
+class InspectionOverlayAssignmentResponse(BaseModel):
+    project_id: uuid.UUID
+    overlay_filename: str
+    base_filename: Optional[str] = None
+    from_part_id: Optional[uuid.UUID] = None
+    to_part_id: Optional[uuid.UUID] = None
+
+
 # ImageGroup schemas
 class ImageGroupBase(BaseModel):
     identifier: str = Field(..., min_length=1, max_length=255)
