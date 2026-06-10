@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 
 const EXPORT_OPTIONS = [
   {
@@ -83,19 +83,80 @@ function filenameFromDisposition(disposition, fallback) {
   return match ? match[1] : fallback;
 }
 
-function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError }) {
+function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError, onImportComplete }) {
   const [options, setOptions] = useState(() => (
     EXPORT_OPTIONS.reduce((acc, option) => ({ ...acc, [option.key]: true }), {})
   ));
   const [exportState, setExportState] = useState({ loading: false, detail: null, progress: null });
+  const [importState, setImportState] = useState({ loading: false, detail: null, file: null, mode: null, modalOpen: false });
+  const importInputRef = useRef(null);
 
   const selectedCount = useMemo(
     () => Object.values(options).filter(Boolean).length,
     [options]
   );
 
+  const hasProjectData = (counts.rawImages || 0) > 0
+    || (counts.overlayImages || 0) > 0
+    || (counts.annotations || 0) > 0
+    || (counts.partsLoaded || 0) > 0
+    || (counts.imageMetadata || 0) > 0;
+
   const updateOption = (key, checked) => {
     setOptions((prev) => ({ ...prev, [key]: checked }));
+  };
+
+  const resetImportSelection = () => {
+    setImportState({ loading: false, detail: null, file: null, mode: null, modalOpen: false });
+    if (importInputRef.current) importInputRef.current.value = '';
+  };
+
+  const runImportProjectData = async (file, mode) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', mode);
+    formData.append('confirmation', 'IMPORT');
+
+    try {
+      setImportState((prev) => ({ ...prev, loading: true, detail: null, modalOpen: false, mode }));
+      const response = await fetch(`/api/projects/${projectId}/import`, {
+        method: 'POST',
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || `Import failed (${response.status})`);
+      }
+      const projectResult = payload.project || {};
+      setImportState({
+        loading: false,
+        detail: `${mode === 'overwrite_active' ? 'Overwrote' : 'Appended'} project bundle: ${projectResult.images_created || 0} images imported.`,
+        file: null,
+        mode,
+        modalOpen: false,
+      });
+      if (importInputRef.current) importInputRef.current.value = '';
+      if (setError) setError(null);
+      onImportComplete?.(payload);
+    } catch (err) {
+      setImportState((prev) => ({ ...prev, loading: false, detail: null, modalOpen: false }));
+      if (setError) setError(err.message || 'Failed to import project data');
+    }
+  };
+
+  const handleImportFileSelected = (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (hasProjectData) {
+      setImportState({ loading: false, detail: null, file, mode: null, modalOpen: true });
+      return;
+    }
+    runImportProjectData(file, 'append_active');
+  };
+
+  const confirmImportMode = (mode) => {
+    if (!importState.file) return;
+    runImportProjectData(importState.file, mode);
   };
 
   const exportProjectData = async () => {
@@ -226,7 +287,52 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError 
             {exportState.detail}
           </div>
         )}
+
+        <div className="project-data-import-section" aria-label="Project data import">
+          <h3>Import Data</h3>
+          <p>Load a VISTA project bundle into this active project.</p>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".zip,.vistabundle,application/zip"
+            aria-label="Choose project bundle to import"
+            onChange={handleImportFileSelected}
+            disabled={importState.loading}
+          />
+          <small>Supported formats: project export .zip or VISTA .vistabundle with one project.</small>
+          {importState.loading && (
+            <div role="status" className="export-data-status">Importing project bundle...</div>
+          )}
+          {importState.detail && (
+            <div className="alert alert-success export-data-status" data-testid="project-data-import-result">
+              {importState.detail}
+            </div>
+          )}
+        </div>
       </div>
+
+      {importState.modalOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="project-import-mode-title">
+            <h2 id="project-import-mode-title">Import into non-blank project?</h2>
+            <p>
+              This project already has data. Choose whether the bundle should replace the current active project data
+              or be appended alongside it. Appended duplicate filenames are tagged with “(duplicate)”.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-danger" onClick={() => confirmImportMode('overwrite_active')}>
+                Overwrite Current Project
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => confirmImportMode('append_active')}>
+                Append to Current Project
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={resetImportSelection}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

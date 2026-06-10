@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func as _func
+from sqlalchemy import select, delete, func as _func
 from sqlalchemy.exc import IntegrityError
 
 from core import models, schemas
@@ -31,6 +31,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Export"])
 
 PROJECT_CONFIGURATION_KEY = "inspection_workbench.project_configuration"
+
+
+def _tag_duplicate_filename(filename: str, occurrence: int) -> str:
+    safe_filename = str(filename or "").strip() or "imported.bin"
+    if occurrence <= 0:
+        return safe_filename
+    dot_index = safe_filename.rfind(".")
+    suffix = " (duplicate)" if occurrence == 1 else f" (duplicate {occurrence})"
+    if dot_index > 0:
+        return f"{safe_filename[:dot_index]}{suffix}{safe_filename[dot_index:]}"
+    return f"{safe_filename}{suffix}"
+
+
+def _dedupe_import_filename(filename: str, used_counts: dict[str, int]) -> str:
+    safe_filename = str(filename or "").strip() or "imported.bin"
+    occurrence = used_counts.get(safe_filename, 0)
+    used_counts[safe_filename] = occurrence + 1
+    return _tag_duplicate_filename(safe_filename, occurrence)
 
 
 async def _get_project_with_export_access(
@@ -1043,6 +1061,53 @@ async def _unique_import_project_name(db: AsyncSession, name: str, mode: str) ->
         suffix += 1
 
 
+async def _clear_project_import_data(db: AsyncSession, project_id: uuid.UUID) -> None:
+    image_ids_result = await db.execute(select(models.DataInstance.id).where(models.DataInstance.project_id == project_id))
+    image_ids = [row[0] for row in image_ids_result.all()]
+    if image_ids:
+        analysis_ids_result = await db.execute(select(models.MLAnalysis.id).where(models.MLAnalysis.image_id.in_(image_ids)))
+        analysis_ids = [row[0] for row in analysis_ids_result.all()]
+        if analysis_ids:
+            await db.execute(delete(models.MLAnnotation).where(models.MLAnnotation.analysis_id.in_(analysis_ids)))
+        await db.execute(delete(models.ImageDeletionEvent).where(models.ImageDeletionEvent.image_id.in_(image_ids)))
+        await db.execute(delete(models.MLAnalysis).where(models.MLAnalysis.image_id.in_(image_ids)))
+        await db.execute(delete(models.ImageClassification).where(models.ImageClassification.image_id.in_(image_ids)))
+        await db.execute(delete(models.ImageComment).where(models.ImageComment.image_id.in_(image_ids)))
+        await db.execute(delete(models.ImageReview).where(models.ImageReview.image_id.in_(image_ids)))
+        await db.execute(delete(models.DataInstance).where(models.DataInstance.id.in_(image_ids)))
+
+    await db.execute(delete(models.ImageClass).where(models.ImageClass.project_id == project_id))
+    await db.execute(delete(models.InspectionPart).where(models.InspectionPart.project_id == project_id))
+    await db.execute(delete(models.InspectionBatch).where(models.InspectionBatch.project_id == project_id))
+    await db.execute(delete(models.ImageGroup).where(models.ImageGroup.project_id == project_id))
+    await db.execute(delete(models.ProjectMetadata).where(models.ProjectMetadata.project_id == project_id))
+
+
+async def _existing_filename_counts(db: AsyncSession, project_id: uuid.UUID) -> dict[str, int]:
+    result = await db.execute(
+        select(models.DataInstance.filename)
+        .where(models.DataInstance.project_id == project_id)
+        .where(models.DataInstance.deleted_at.is_(None))
+    )
+    counts: dict[str, int] = {}
+    for (filename,) in result.all():
+        safe_filename = str(filename or "").strip()
+        if safe_filename:
+            counts[safe_filename] = counts.get(safe_filename, 0) + 1
+    return counts
+
+
+async def _existing_value_counts(db: AsyncSession, model, column_name: str, project_id: uuid.UUID) -> dict[str, int]:
+    column = getattr(model, column_name)
+    result = await db.execute(select(column).where(model.project_id == project_id))
+    counts: dict[str, int] = {}
+    for (value,) in result.all():
+        safe_value = str(value or "").strip()
+        if safe_value:
+            counts[safe_value] = counts.get(safe_value, 0) + 1
+    return counts
+
+
 async def _import_project_backup_payload(
     *,
     archive: zipfile.ZipFile,
@@ -1050,34 +1115,58 @@ async def _import_project_backup_payload(
     db: AsyncSession,
     current_user: schemas.User,
     mode: str,
+    target_project: models.Project | None = None,
 ) -> dict:
     source_project = payload["project"]
-    target_group = source_project.get("meta_group_id") or ""
-    if not is_user_in_group(current_user.email, target_group):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{current_user.email}' cannot import project into group '{target_group}'.",
-        )
+    if target_project is None:
+        target_group = source_project.get("meta_group_id") or ""
+        if not is_user_in_group(current_user.email, target_group):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"User '{current_user.email}' cannot import project into group '{target_group}'.",
+            )
+    else:
+        target_group = target_project.meta_group_id
+        if not is_user_in_group(current_user.email, target_group):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"User '{current_user.email}' cannot import into project '{target_project.id}'.",
+            )
 
     source_user_by_id = {str(user.get("id")): user for user in payload.get("users", []) if user.get("id")}
-    project_name = await _unique_import_project_name(db, source_project.get("name") or "Imported Project", mode)
-    db_project = models.Project(
-        name=project_name,
-        description=source_project.get("description") or "",
-        meta_group_id=target_group,
-        project_type=source_project.get("project_type") or "PT1",
-        created_by=current_user.email,
-        is_archived=bool(source_project.get("is_archived", False)),
-        archived_at=None,
-    )
-    db.add(db_project)
-    await db.flush()
+    if target_project is None:
+        project_name = await _unique_import_project_name(db, source_project.get("name") or "Imported Project", mode)
+        db_project = models.Project(
+            name=project_name,
+            description=source_project.get("description") or "",
+            meta_group_id=target_group,
+            project_type=source_project.get("project_type") or "PT1",
+            created_by=current_user.email,
+            is_archived=bool(source_project.get("is_archived", False)),
+            archived_at=None,
+        )
+        db.add(db_project)
+        await db.flush()
+    else:
+        db_project = target_project
+        if mode == "overwrite_active":
+            await _clear_project_import_data(db, db_project.id)
+            db_project.project_type = source_project.get("project_type") or db_project.project_type
+            db_project.description = source_project.get("description") or db_project.description
+            await db.flush()
+
+    filename_counts = await _existing_filename_counts(db, db_project.id)
+    group_identifier_counts = await _existing_value_counts(db, models.ImageGroup, "identifier", db_project.id)
+    metadata_key_counts = await _existing_value_counts(db, models.ProjectMetadata, "key", db_project.id)
+    batch_name_counts = await _existing_value_counts(db, models.InspectionBatch, "name", db_project.id)
+    part_serial_counts = await _existing_value_counts(db, models.InspectionPart, "serial_number", db_project.id)
 
     group_map: dict[str, uuid.UUID] = {}
     for source_group in payload.get("image_groups", []):
+        identifier = _dedupe_import_filename(source_group.get("identifier") or "imported", group_identifier_counts)
         db_group = models.ImageGroup(
             project_id=db_project.id,
-            identifier=source_group.get("identifier") or "imported",
+            identifier=identifier,
             display_name=source_group.get("display_name") or None,
         )
         db.add(db_group)
@@ -1085,17 +1174,19 @@ async def _import_project_backup_payload(
         group_map[str(source_group.get("id"))] = db_group.id
 
     for source_metadata in payload.get("project_metadata", []):
+        key = _dedupe_import_filename(source_metadata.get("key") or "imported.metadata", metadata_key_counts)
         db.add(models.ProjectMetadata(
             project_id=db_project.id,
-            key=source_metadata.get("key") or "imported.metadata",
+            key=key,
             value=source_metadata.get("value_json"),
         ))
 
     batch_map: dict[str, uuid.UUID] = {}
     for source_batch in payload.get("batches", []):
+        batch_name = _dedupe_import_filename(source_batch.get("name") or "Imported Batch", batch_name_counts)
         db_batch = models.InspectionBatch(
             project_id=db_project.id,
-            name=source_batch.get("name") or "Imported Batch",
+            name=batch_name,
             description=source_batch.get("description") or None,
             owner=source_batch.get("owner") or None,
             status=source_batch.get("status") or "not_started",
@@ -1106,10 +1197,11 @@ async def _import_project_backup_payload(
 
     part_map: dict[str, uuid.UUID] = {}
     for source_part in payload.get("parts", []):
+        serial_number = _dedupe_import_filename(source_part.get("serial_number") or str(uuid.uuid4()), part_serial_counts)
         db_part = models.InspectionPart(
             project_id=db_project.id,
             batch_id=batch_map.get(str(source_part.get("batch_id"))),
-            serial_number=source_part.get("serial_number") or str(uuid.uuid4()),
+            serial_number=serial_number,
             display_name=source_part.get("display_name") or None,
             review_state=source_part.get("review_state") or "unreviewed",
             metadata_json=source_part.get("metadata_json") if isinstance(source_part.get("metadata_json"), dict) else {},
@@ -1123,7 +1215,8 @@ async def _import_project_backup_payload(
     missing_files = 0
     for source_image in payload.get("images", []):
         new_image_id = uuid.uuid4()
-        filename = source_image.get("filename") or f"{new_image_id}.bin"
+        source_filename = source_image.get("filename") or f"{new_image_id}.bin"
+        filename = _dedupe_import_filename(source_filename, filename_counts)
         object_storage_key = f"{db_project.id}/{new_image_id}/{filename}"
         archive_path = source_image.get("archive_path") or ""
         artifact_present = bool(archive_path and archive_path in archive.namelist())
@@ -1146,6 +1239,8 @@ async def _import_project_backup_payload(
                 "project_id": source_project.get("id"),
                 "image_id": source_image.get("image_id"),
                 "artifact_present": artifact_present,
+                "original_filename": source_filename,
+                "duplicate_filename_tagged": filename != source_filename,
             },
         }
         uploader = await _ensure_import_user(db, source_image.get("uploader_id"), source_user_by_id, current_user)
@@ -1770,7 +1865,7 @@ async def import_project_backup(
     current_user: schemas.User = Depends(get_current_user),
 ):
     if mode != "restore_as_new":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only restore_as_new import mode is currently supported")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only restore_as_new import mode is supported by this endpoint")
     if confirmation != "IMPORT":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type IMPORT to confirm import")
     try:
@@ -1812,6 +1907,67 @@ async def import_project_backup(
         "project_count": len(imported_projects),
         "dashboard_state": dashboard_state,
     }
+
+@router.post("/projects/{project_id}/import")
+async def import_project_backup_into_active_project(
+    project_id: uuid.UUID,
+    file: UploadFile = File(...),
+    mode: str = Form("append_active"),
+    confirmation: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    if mode not in {"append_active", "overwrite_active"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose append_active or overwrite_active import mode")
+    if confirmation != "IMPORT":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type IMPORT to confirm import")
+
+    db_project = await _get_project_with_export_access(
+        project_id=project_id,
+        db=db,
+        current_user=current_user,
+    )
+    try:
+        with zipfile.ZipFile(file.file) as archive:
+            manifest = _manifest_from_zip(archive)
+            project_paths = _project_backup_paths(manifest, archive)
+            if len(project_paths) != 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Importing into the active project requires a bundle with exactly one project",
+                )
+            payload = _load_project_backup_payload(archive, project_paths[0])
+            imported_project = await _import_project_backup_payload(
+                archive=archive,
+                payload=payload,
+                db=db,
+                current_user=current_user,
+                mode=mode,
+                target_project=db_project,
+            )
+    except zipfile.BadZipFile as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Backup file is not a valid ZIP archive") from exc
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Import failed due to conflicting imported records") from exc
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await file.close()
+
+    return {
+        "ok": True,
+        "format": manifest.get("format"),
+        "mode": mode,
+        "project": imported_project,
+        "project_count": 1,
+    }
+
 
 
 @router.post("/dashboard/export")

@@ -7788,3 +7788,25 @@ ul li:hover {
     padding-top: 12px;
   }
 }
+
+.project-data-import-section {
+  border-top: 1px solid var(--border-light);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+.project-data-import-section h3 {
+  font-size: 1rem;
+  margin: 0 0 var(--space-2);
+}
+
+.project-data-import-section p,
+.project-data-import-section small {
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: var(--space-3);
+}
+
+.project-data-export-card .modal-content {
+  padding: var(--space-6);
+}

@@ -6,6 +6,29 @@ const S3_IMPORT_LIMIT = 100;
 
 const ASSOCIATED_METADATA_EXTENSIONS = ['.json', '.nsipro'];
 
+export function tagDuplicateFilename(filename = '', occurrence = 0) {
+  const safeFilename = String(filename || 'upload.bin').trim() || 'upload.bin';
+  if (occurrence <= 0) return safeFilename;
+  const dotIndex = safeFilename.lastIndexOf('.');
+  const suffix = occurrence === 1 ? ' (duplicate)' : ` (duplicate ${occurrence})`;
+  if (dotIndex > 0) {
+    return `${safeFilename.slice(0, dotIndex)}${suffix}${safeFilename.slice(dotIndex)}`;
+  }
+  return `${safeFilename}${suffix}`;
+}
+
+export function buildDuplicateFilenameMap(files = []) {
+  const counts = new Map();
+  const mapped = new Map();
+  files.forEach((file, index) => {
+    const filename = file?.name || `upload-${index}.bin`;
+    const occurrence = counts.get(filename) || 0;
+    counts.set(filename, occurrence + 1);
+    mapped.set(file, tagDuplicateFilename(filename, occurrence));
+  });
+  return mapped;
+}
+
 function getFileExtension(filename = '') {
   const normalized = String(filename).toLowerCase();
   const dotIndex = normalized.lastIndexOf('.');
@@ -480,6 +503,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setUploading(true);
     cancelledRef.current = false;
     const total = selectedFiles.length;
+    const uploadFilenameMap = buildDuplicateFilenameMap(selectedFiles);
     setUploadProgress({ completed: 0, failed: 0, total });
 
     let associatedMetadataReference = null;
@@ -510,7 +534,8 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
         if (!file) return;
 
         const formData = new FormData();
-        formData.append('file', file);
+        const uploadFilename = uploadFilenameMap.get(file) || file.name;
+        formData.append('file', file, uploadFilename);
 
         const extractedMetadata = extractorConfig.extractMetadata(file.name);
         const mergedMetadata = (extractedMetadata || manualMetadata)
@@ -524,9 +549,14 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
           }
           : mergedMetadata;
         const hierarchyMetadata = normalizeHierarchyMetadata(metadataWithAssociatedReference);
+        const duplicateMetadata = uploadFilename !== file.name
+          ? { original_filename: file.name, duplicate_filename_tagged: true }
+          : {};
         const metadataForUpload = hierarchyMetadata
-          ? { ...metadataWithAssociatedReference, ...hierarchyMetadata }
-          : metadataWithAssociatedReference;
+          ? { ...metadataWithAssociatedReference, ...hierarchyMetadata, ...duplicateMetadata }
+          : (Object.keys(duplicateMetadata).length > 0
+            ? { ...(metadataWithAssociatedReference || {}), ...duplicateMetadata }
+            : metadataWithAssociatedReference);
 
         if (metadataForUpload) {
           formData.append('metadata', JSON.stringify(metadataForUpload));
@@ -548,7 +578,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
           results.push(uploadedImage);
           uploadedRecords.push({
             image: uploadedImage,
-            filename: file.name,
+            filename: uploadFilename,
             metadata: metadataForUpload || {},
           });
         } catch (err) {

@@ -18,6 +18,70 @@ describe('ProjectDataExportPanel', () => {
     jest.resetAllMocks();
   });
 
+
+
+  test('asks whether to overwrite or append when importing into a non-blank project', async () => {
+    const user = userEvent.setup();
+    const setError = jest.fn();
+    const onImportComplete = jest.fn();
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: async () => ({ project: { images_created: 3 } }),
+    }));
+
+    render(
+      <ProjectDataExportPanel
+        projectId="project-123"
+        projectName="Inspection Project"
+        counts={{ rawImages: 5, overlayImages: 2, annotations: 7 }}
+        setError={setError}
+        onImportComplete={onImportComplete}
+      />
+    );
+
+    await user.upload(
+      screen.getByLabelText(/Choose project bundle to import/i),
+      new File(['zip-bytes'], 'bundle.zip', { type: 'application/zip' })
+    );
+
+    expect(screen.getByRole('dialog', { name: /Import into non-blank project/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Append to Current Project/i }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/projects/project-123/import');
+    expect(options.method).toBe('POST');
+    expect(options.body.get('mode')).toBe('append_active');
+    expect(options.body.get('confirmation')).toBe('IMPORT');
+    expect(await screen.findByTestId('project-data-import-result')).toHaveTextContent('Appended project bundle: 3 images imported');
+    expect(onImportComplete).toHaveBeenCalled();
+  });
+
+  test('imports blank projects without prompting and uses append mode', async () => {
+    const user = userEvent.setup();
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: async () => ({ project: { images_created: 1 } }),
+    }));
+
+    render(
+      <ProjectDataExportPanel
+        projectId="project-blank"
+        projectName="Blank"
+        counts={{ rawImages: 0, overlayImages: 0, annotations: 0 }}
+      />
+    );
+
+    await user.upload(
+      screen.getByLabelText(/Choose project bundle to import/i),
+      new File(['zip-bytes'], 'bundle.zip', { type: 'application/zip' })
+    );
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(global.fetch.mock.calls[0][1].body.get('mode')).toBe('append_active');
+  });
+
   test('exports selected project artifacts with TOML bundle options', async () => {
     const user = userEvent.setup();
     const setError = jest.fn();
