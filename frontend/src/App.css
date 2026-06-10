@@ -6249,6 +6249,84 @@ ul li:hover {
   overflow: auto;
 }
 
+.part-metadata-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.metadata-modal-part-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  color: #334155;
+}
+
+.metadata-modal-part-summary span {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.metadata-modal-tabs {
+  margin-bottom: 0;
+}
+
+.metadata-modal-tab-panel {
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #fff;
+  overflow: auto;
+}
+
+.metadata-modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.metadata-modal-table th,
+.metadata-modal-table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.metadata-modal-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.metadata-modal-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.metadata-modal-path {
+  width: 32%;
+  min-width: 220px;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.metadata-modal-table pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #1f2937;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+.metadata-modal-empty {
+  margin: 0;
+  padding: 18px;
+  color: #64748b;
+}
+
 .mpr-controls {
   border: 1px solid #dbe2ea;
   border-radius: 8px;
