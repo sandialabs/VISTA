@@ -1232,6 +1232,7 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getByTestId('annotation-controls')).toHaveTextContent('For selected part: No part selected');
     expect(screen.getByRole('button', { name: 'Measure on tiles' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Draw box on tiles' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'New Crop on tiles' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Other' })).toBeDisabled();
 
     unmount();
@@ -1696,17 +1697,18 @@ describe('InspectionWorkbenchPanel', () => {
       const uploadCall = global.fetch.mock.calls.find((call) => call[0] === '/api/projects/proj-1/images' && call[1]?.method === 'POST');
       const uploadedFile = uploadCall[1].body.get('file');
       const uploadedMetadata = JSON.parse(uploadCall[1].body.get('metadata'));
-      expect(uploadedFile.name).toBe('25_40_crop of front-basic.png.png');
+      expect(uploadedFile.name).toBe('25_40_child of front-basic.png.png');
       expect(uploadedMetadata).toEqual(expect.objectContaining({
         crop_child_image: true,
         parent_image_id: 'part-basic-1-image-1',
         parent_image_filename: 'front-basic.png',
         crop_annotation_id: 'box-crop-a',
+        crop_title: 'Child of front-basic.png',
       }));
       expect(uploadedMetadata.crop_bbox).toEqual(expect.objectContaining({ x: 25, y: 40, width: 80, height: 50 }));
       expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ filename: '25_40_crop of front-basic.png.png', to_part_id: 'part-basic-1' }),
+        body: JSON.stringify({ filename: '25_40_child of front-basic.png.png', to_part_id: 'part-basic-1' }),
       }));
       await waitFor(() => expect(screen.getByAltText('crop view')).toBeInTheDocument());
     } finally {

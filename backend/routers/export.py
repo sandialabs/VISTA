@@ -1345,6 +1345,14 @@ async def _import_project_backup_payload(
     }
 
 
+def _normalize_part_report_status(review_state: object) -> str:
+    state = str(review_state or "").strip().lower()
+    if state == "pass":
+        return "pass"
+    if state in {"reject_pending", "reject_confirmed", "reject"}:
+        return "reject"
+    return "unreviewed"
+
 async def _build_project_report_payload(project_id: uuid.UUID, db: AsyncSession, db_project: models.Project) -> dict:
     image_count_result = await db.execute(
         select(_func.count())
@@ -1431,8 +1439,12 @@ async def _build_project_report_payload(project_id: uuid.UUID, db: AsyncSession,
             })
 
     part_assignments = []
+    part_review_summary = []
+    part_status_counts = {"pass": 0, "reject": 0, "unreviewed": 0}
     image_part_mappings = []
     for part_id, serial_number, review_state, updated_at, metadata, batch_owner in part_rows:
+        report_status = _normalize_part_report_status(review_state)
+        part_status_counts[report_status] += 1
         metadata_obj = metadata if isinstance(metadata, dict) else {}
         assigned_by = (
             metadata_obj.get("review_state_assigned_by")
@@ -1453,9 +1465,18 @@ async def _build_project_report_payload(project_id: uuid.UUID, db: AsyncSession,
                 "part_id": str(part_id),
                 "part_identifier": serial_number,
                 "pass_fail": review_state,
+                "review_status": report_status,
                 "username": assigned_by,
                 "batch_owner": batch_owner or "",
                 "assigned_at": assigned_at or "",
+            }
+        )
+        part_review_summary.append(
+            {
+                "part_id": str(part_id),
+                "part_identifier": serial_number,
+                "review_status": report_status,
+                "raw_review_state": review_state,
             }
         )
 
@@ -1482,11 +1503,13 @@ async def _build_project_report_payload(project_id: uuid.UUID, db: AsyncSession,
             "total_parts": total_parts,
             "reviewed_parts": reviewed_parts,
             "unreviewed_parts": max(total_parts - reviewed_parts, 0),
+            "part_status_counts": part_status_counts,
             "metadata_normalization": {
                 "dropped_non_object_items": metadata_drop_counts,
             },
         },
         "part_assignments": part_assignments,
+        "part_review_summary": part_review_summary,
         "image_part_mappings": image_part_mappings,
     }
 
@@ -1496,6 +1519,7 @@ def _build_simple_report_pdf(report_payload: dict) -> bytes:
     summary = report_payload.get("summary", {})
     dropped = summary.get("metadata_normalization", {}).get("dropped_non_object_items", {})
     assignments = report_payload.get("part_assignments", [])
+    part_review_summary = report_payload.get("part_review_summary", [])
     image_mappings = report_payload.get("image_part_mappings", [])
     lines = [
         "VISTA Inspection Report",
@@ -1507,10 +1531,16 @@ def _build_simple_report_pdf(report_payload: dict) -> bytes:
         f"Total Parts: {summary.get('total_parts', 0)}",
         f"Reviewed Parts: {summary.get('reviewed_parts', 0)}",
         f"Unreviewed Parts: {summary.get('unreviewed_parts', 0)}",
+        f"Part Status Counts: pass={summary.get('part_status_counts', {}).get('pass', 0)}, "
+        f"reject={summary.get('part_status_counts', {}).get('reject', 0)}, "
+        f"unreviewed={summary.get('part_status_counts', {}).get('unreviewed', 0)}",
         "Dropped Metadata Items:",
     ]
     for field, count in dropped.items():
         lines.append(f"- {field or 'unknown_field'}: {count}")
+    lines.append("Part Status Summary:")
+    for part_status in part_review_summary[:40]:
+        lines.append(f"- {part_status.get('part_identifier', '')}: {part_status.get('review_status', 'unreviewed')}")
     lines.append("Part Pass/Fail Assignments:")
     for assignment in assignments[:20]:
         lines.append(

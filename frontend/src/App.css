@@ -7888,3 +7888,28 @@ ul li:hover {
 .project-data-export-card .modal-content {
   padding: var(--space-6);
 }
+
+.view-cell-title-crop-child {
+  align-items: flex-start;
+}
+
+.view-cell-title-text {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.view-cell-subtitle-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: normal;
+}

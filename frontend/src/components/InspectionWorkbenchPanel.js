@@ -758,13 +758,14 @@ function sanitizeCropFilename(value) {
     .slice(0, 180) || 'image';
 }
 
-function getCropImageTitle(annotation, parentImageName) {
-  const box = getAnnotationCropBox(annotation);
-  return `${formatCropCoordinate(box?.x)}_${formatCropCoordinate(box?.y)}_crop of ${parentImageName || 'image'}`;
+function getCropImageTitle(_annotation, parentImageName) {
+  return `Child of ${parentImageName || 'image'}`;
 }
 
 function getCropUploadFilename(annotation, parentImageName) {
-  return `${sanitizeCropFilename(getCropImageTitle(annotation, parentImageName))}.png`;
+  const box = getAnnotationCropBox(annotation);
+  const title = `${formatCropCoordinate(box?.x)}_${formatCropCoordinate(box?.y)}_child of ${parentImageName || 'image'}`;
+  return `${sanitizeCropFilename(title)}.png`;
 }
 
 function loadImageElement(src) {
@@ -1163,6 +1164,7 @@ function getPartImageRefs(part) {
     if (record.overlay_delete_candidate || record.delete_candidate) return;
     const overlay = forceOverlay || record.overlay === true || record.analysis_output === true;
     const cropChild = record.crop_child_image === true || record.cropChildImage === true;
+    const cropSubtitle = String(record.crop_subtitle || record.cropSubtitle || '').trim();
     if (!overlay && hasViewRefs && !cropChild) return;
     const imageRef = String(record.image_id || record.filename || '');
     if (!imageRef || seen.has(imageRef)) return;
@@ -1183,6 +1185,9 @@ function getPartImageRefs(part) {
       imageId: record.image_id ? String(record.image_id) : '',
       overlay,
       cropChild,
+      cropSubtitle,
+      parentImageId: record.parent_image_id ? String(record.parent_image_id) : '',
+      parentImageFilename: record.parent_image_filename ? String(record.parent_image_filename) : '',
       overlayBaseImageId: record.overlay_base_image_id ? String(record.overlay_base_image_id) : '',
       overlayBaseFilename: record.overlay_base_filename ? String(record.overlay_base_filename) : '',
     });
@@ -2286,6 +2291,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [fullscreenImageModal, setFullscreenImageModal] = useState(null);
   const [fullscreenMeasureActive, setFullscreenMeasureActive] = useState(false);
   const [fullscreenBoxActive, setFullscreenBoxActive] = useState(false);
+  const [fullscreenCropActive, setFullscreenCropActive] = useState(false);
   const [fullscreenMeasurements, setFullscreenMeasurements] = useState([]);
   const [fullscreenCalibrationPromptVisible, setFullscreenCalibrationPromptVisible] = useState(false);
   const [fullscreenEditingEndpoint, setFullscreenEditingEndpoint] = useState(null);
@@ -2875,7 +2881,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   }, [selectedPartImageRefs, selectedImageRef]);
 
   useEffect(() => {
-    if (!selectedPart || !['PT2', 'PT3'].includes(projectType)) return;
+    if (!selectedPart || projectType !== 'PT3') return;
     const savedMpr = workspaceHydration?.mpr || {};
     const savedSlice = savedMpr?.slice_position || {};
     const savedViewport = savedMpr?.viewport_transform || {};
@@ -3006,7 +3012,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
               part_filter: partFilter,
               sort_mode: sortMode,
               selected_part_id: selectedPart?.id || '',
-              mpr: ['PT2', 'PT3'].includes(projectType)
+              mpr: projectType === 'PT3'
                 ? {
                   slice_position: slicePosition,
                   viewport_transform: viewportTransform,
@@ -4110,19 +4116,15 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     }
   };
 
-  const cropBoxAnnotation = async (annotation) => {
-    if (!selectedPart?.id || !annotation?.id || !isBoundingBoxAnnotation(annotation)) return;
-    const cropBox = getAnnotationCropBox(annotation);
-    if (!cropBox) return;
-    const annotationImageId = getAnnotationSourceImageIdForImage(annotation.image_id || annotation.imageId || annotation?.geometry?.image_id);
-    if (!annotationImageId) throw new Error('Annotation source image is unavailable for crop');
-    const parentImage = projectImageLookup[annotationImageId] || {};
-    const parentFilename = parentImage.filename || annotationImageId || 'image';
-    const cropFilename = getCropUploadFilename(annotation, parentFilename);
-    setCroppingAnnotationId(annotation.id);
+  const createCropChildImage = async ({ parentImageId, cropBox, cropAnnotationId = '', title = '' }) => {
+    if (!selectedPart?.id || !parentImageId || !isFiniteAnnotationBox(cropBox)) return null;
+    const parentImage = projectImageLookup[parentImageId] || {};
+    const parentFilename = parentImage.filename || parentImageId || 'image';
+    const cropFilename = getCropUploadFilename(cropBox, parentFilename);
+    const cropTitle = title || getCropImageTitle(cropBox, parentFilename);
     setError(null);
     try {
-      const sourceImage = await loadImageElement(`/api/images/${encodeURIComponent(String(annotationImageId))}/content`);
+      const sourceImage = await loadImageElement(`/api/images/${encodeURIComponent(String(parentImageId))}/content`);
       const naturalWidth = Number(sourceImage.naturalWidth || sourceImage.width || cropBox.imageWidth || 0);
       const naturalHeight = Number(sourceImage.naturalHeight || sourceImage.height || cropBox.imageHeight || 0);
       if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
@@ -4145,10 +4147,11 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       const blob = await canvasToBlob(canvas, 'image/png');
       const metadata = {
         crop_child_image: true,
-        parent_image_id: String(annotationImageId),
+        parent_image_id: String(parentImageId),
         parent_image_filename: parentFilename,
-        crop_annotation_id: String(annotation.id),
-        crop_title: getCropImageTitle(annotation, parentFilename),
+        crop_annotation_id: cropAnnotationId ? String(cropAnnotationId) : '',
+        crop_title: cropTitle,
+        crop_subtitle: '',
         crop_bbox: {
           x: cropBox.x,
           y: cropBox.y,
@@ -4184,9 +4187,11 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
         modality: 'visual',
         overlay: false,
         crop_child_image: true,
-        parent_image_id: String(annotationImageId),
+        parent_image_id: String(parentImageId),
         parent_image_filename: parentFilename,
-        crop_annotation_id: String(annotation.id),
+        crop_annotation_id: cropAnnotationId ? String(cropAnnotationId) : '',
+        crop_title: cropTitle,
+        crop_subtitle: '',
         crop_bbox: metadata.crop_bbox,
       };
       setProjectImageLookup((prev) => ({
@@ -4207,10 +4212,58 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
         };
       }));
       setSelectedImageRef(sourceEntry.image_id || sourceEntry.filename);
+      return sourceEntry;
     } catch (err) {
-      setError(err.message || 'Failed to crop annotation');
+      setError(err.message || 'Failed to create crop child image');
+      return null;
+    }
+  };
+
+  const cropBoxAnnotation = async (annotation) => {
+    if (!selectedPart?.id || !annotation?.id || !isBoundingBoxAnnotation(annotation)) return;
+    const cropBox = getAnnotationCropBox(annotation);
+    if (!cropBox) return;
+    const annotationImageId = getAnnotationSourceImageIdForImage(annotation.image_id || annotation.imageId || annotation?.geometry?.image_id);
+    if (!annotationImageId) throw new Error('Annotation source image is unavailable for crop');
+    setCroppingAnnotationId(annotation.id);
+    try {
+      await createCropChildImage({
+        parentImageId: annotationImageId,
+        cropBox,
+        cropAnnotationId: annotation.id,
+        title: getCropImageTitle(annotation, (projectImageLookup[annotationImageId] || {}).filename || annotationImageId || 'image'),
+      });
     } finally {
       setCroppingAnnotationId(null);
+    }
+  };
+
+  const updateCropChildSubtitle = async (entry, subtitle) => {
+    if (!selectedPart?.id || !entry?.cropChild) return;
+    const imageKey = String(entry.imageId || entry.imageRef || entry.filename || '');
+    setParts((prev) => prev.map((part) => {
+      if (String(part.id) !== String(selectedPart.id)) return part;
+      const sourceImages = Array.isArray(part.metadata?.source_images) ? part.metadata.source_images : [];
+      return {
+        ...part,
+        metadata: {
+          ...(part.metadata || {}),
+          source_images: sourceImages.map((record) => {
+            const recordKey = String(record?.image_id || record?.filename || '');
+            return recordKey === imageKey ? { ...record, crop_subtitle: subtitle } : record;
+          }),
+        },
+      };
+    }));
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/parts/${selectedPart.id}/source-images/${encodeURIComponent(imageKey)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ crop_subtitle: subtitle }),
+      });
+      if (!resp.ok) throw new Error(`Failed to save crop subtitle (${resp.status})`);
+    } catch (err) {
+      setError(err.message || 'Failed to save crop subtitle');
     }
   };
 
@@ -4809,7 +4862,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	                const tilePreviewLines = tileAnnotationPreview?.mode === 'measure' && tileAnnotationPreview.imageId === tileAnnotationSourceImageId
 	                  ? [tileAnnotationPreview.line].filter(isFiniteMeasurementLine)
 	                  : [];
-	                const tilePreviewBoxes = tileAnnotationPreview?.mode === 'box' && tileAnnotationPreview.imageId === tileAnnotationSourceImageId
+	                const tilePreviewBoxes = ['box', 'crop'].includes(tileAnnotationPreview?.mode) && tileAnnotationPreview.imageId === tileAnnotationSourceImageId
 		                  ? [tileAnnotationPreview.box].filter(isFiniteAnnotationBox).map((box) => getBoxWithDerivedDimensions(box, tileAnnotationSourceImageId))
 		                  : [];
                 return (
@@ -4830,8 +4883,22 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                       }
                     }}
                   >
-                    <div className="view-cell-title">
-                      <span>{entry.label || viewName.toUpperCase()}</span>
+                    <div className={`view-cell-title ${entry.cropChild ? 'view-cell-title-crop-child' : ''}`}>
+                      <div className="view-cell-title-text">
+                        <span>{entry.label || viewName.toUpperCase()}</span>
+                        {entry.cropChild && (
+                          <input
+                            type="text"
+                            className="view-cell-subtitle-input"
+                            aria-label={`Subtitle for ${entry.label || 'crop child image'}`}
+                            placeholder="Add subtitle (e.g. Feature 1)"
+                            value={entry.cropSubtitle || ''}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onChange={(event) => updateCropChildSubtitle(entry, event.target.value)}
+                          />
+                        )}
+                      </div>
                       {entry.overlay && entry.imageId && (
                         <button
                           type="button"
@@ -4958,6 +5025,17 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          >
 	            Draw box
 	          </button>
+          {projectType !== 'PT3' && (
+            <button
+              type="button"
+              className={`btn btn-secondary ${annotationToolMode === 'crop' ? 'active' : ''}`}
+              aria-label="New Crop on tiles"
+              onClick={() => setTileAnnotationMode('crop')}
+              disabled={!selectedPart}
+            >
+              New Crop
+            </button>
+          )}
 	          {projectType === 'PT3' && (
 	            <button
 	              type="button"
@@ -4990,6 +5068,11 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          <p className="muted annotation-tool-hint">
 	            Drag two corners {projectType === 'PT3' ? 'on the active MPR slice' : 'on a tile'} to draw a bounding box.
 	          </p>
+        )}
+        {annotationToolMode === 'crop' && (
+          <p className="muted annotation-tool-hint">
+            Drag around part of a parent image to create a child crop tile.
+          </p>
         )}
 	        {annotationToolMode === 'cube' && (
 	          <p className="muted annotation-tool-hint">
@@ -5971,12 +6054,12 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      setAnnotationToolMode('');
 	      return true;
 	    }
-	    if (annotationToolMode === 'box') return true;
+	    if (annotationToolMode === 'box' || annotationToolMode === 'crop') return true;
 	    return true;
 	  };
 
 	  const handleTileBoxPointerDown = (event, imageId) => {
-	    if (annotationToolMode !== 'box') return false;
+	    if (!['box', 'crop'].includes(annotationToolMode)) return false;
 	    if (event.button !== undefined && event.button !== 0) return false;
 	    event.preventDefault();
 	    event.stopPropagation();
@@ -5993,7 +6076,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const handleTileBoxPointerUp = (event, imageId) => {
-	    if (annotationToolMode !== 'box') return false;
+	    if (!['box', 'crop'].includes(annotationToolMode)) return false;
 	    event.preventDefault();
 	    event.stopPropagation();
 	    suppressNextTileClickRef.current = true;
@@ -6003,6 +6086,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
 	      const box = makeBoxFromPoints(firstPoint, position);
 	      if (isFiniteAnnotationBox(box)) {
+        if (annotationToolMode === 'crop') {
+          createCropChildImage({ parentImageId: annotationImageId, cropBox: box });
+        } else {
 	        const existingBoxCount = (boxAnnotationsByImageId[String(annotationImageId || '')] || []).length;
 	        createBoxAnnotation({
 	          imageId: annotationImageId,
@@ -6010,6 +6096,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          name: 'Drawn bounding box',
 	          color: MEASUREMENT_COLORS[existingBoxCount % MEASUREMENT_COLORS.length],
 	        });
+        }
 	      }
 	    }
 	    tileAnnotationDraftRef.current = null;
@@ -6029,7 +6116,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    setTileAnnotationPreview(null);
 	    setAnnotationToolMode('');
 	    suppressNextTileClickRef.current = true;
-	    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
+	    setFullscreenBoxActive(false);
+    setFullscreenCropActive(false);
+    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
 	  };
 
 	  const handleTileAnnotationPointerMove = (event, imageId) => {
@@ -6057,14 +6146,14 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      return;
 	    }
 	    const firstPoint = tileAnnotationDraftRef.current || (tileAnnotationDraft?.mode === 'box' ? tileAnnotationDraft : null);
-	    if (annotationToolMode === 'box' && firstPoint && String(firstPoint.imageId || '') === String(annotationImageId || '')) {
+	    if (['box', 'crop'].includes(annotationToolMode) && firstPoint && String(firstPoint.imageId || '') === String(annotationImageId || '')) {
 	      const box = {
 	        ...makeBoxFromPoints(firstPoint, position),
 	        id: 'tile-box-preview',
 	        imageId: String(annotationImageId || ''),
 	        color: '#f97316',
 	      };
-	      setTileAnnotationPreview({ mode: 'box', imageId: String(annotationImageId || ''), box });
+	      setTileAnnotationPreview({ mode: annotationToolMode, imageId: String(annotationImageId || ''), box });
 	    }
 	  };
 
@@ -6246,7 +6335,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 
 
 	  const updateFullscreenImageZoomFromWheel = (event) => {
-	    if (fullscreenMeasureActive || fullscreenBoxActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner) return;
+	    if (fullscreenMeasureActive || fullscreenBoxActive || fullscreenCropActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner) return;
 	    const position = getFullscreenImagePointerPosition(event);
 	    if (!position) return;
     event.preventDefault();
@@ -6280,6 +6369,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     }
 	    setFullscreenCalibrationPromptVisible(false);
 	    setFullscreenBoxActive(false);
+    setFullscreenCropActive(false);
 	    setPendingBoxPoint(null);
 	    pendingBoxPointRef.current = null;
     setFullscreenEditingBoxCorner(null);
@@ -6288,7 +6378,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const toggleFullscreenBox = () => {
-	    if (fullscreenBoxActive) {
+	    if (fullscreenBoxActive || fullscreenCropActive) {
 	      setFullscreenBoxActive(false);
 	      setPendingBoxPoint(null);
 	      pendingBoxPointRef.current = null;
@@ -6297,6 +6387,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      return;
 	    }
 	    setFullscreenMeasureActive(false);
+    setFullscreenCropActive(false);
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
 	    setFullscreenCalibrationPromptVisible(false);
@@ -6305,6 +6396,28 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    setFullscreenAnnotationPreview(null);
 	    setFullscreenBoxActive(true);
 	  };
+
+  const toggleFullscreenCrop = () => {
+    if (fullscreenCropActive) {
+      setFullscreenCropActive(false);
+      setPendingBoxPoint(null);
+      pendingBoxPointRef.current = null;
+      setFullscreenEditingBoxCorner(null);
+      setFullscreenAnnotationPreview(null);
+      return;
+    }
+    setFullscreenMeasureActive(false);
+    setFullscreenBoxActive(false);
+    setPendingMeasurePoint(null);
+    pendingMeasurePointRef.current = null;
+    setPendingBoxPoint(null);
+    pendingBoxPointRef.current = null;
+    setFullscreenCalibrationPromptVisible(false);
+    setFullscreenEditingEndpoint(null);
+    setFullscreenEditingBoxCorner(null);
+    setFullscreenAnnotationPreview(null);
+    setFullscreenCropActive(true);
+  };
 
 	  const commitFullscreenBox = async (box) => {
 	    if (isFiniteAnnotationBox(box)) {
@@ -6387,7 +6500,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       setFullscreenEditingBoxCorner(null);
       return;
     }
-	    if (fullscreenBoxActive) return;
+	    if (fullscreenBoxActive || fullscreenCropActive) return;
 	    if (!fullscreenMeasureActive) return;
     if (!getCalibrationForImage(getAnnotationSourceImageIdForImage(fullscreenImageModal?.imageId))) {
       setFullscreenMeasureActive(false);
@@ -6412,7 +6525,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const handleFullscreenBoxPointerDown = (event) => {
-	    if (!fullscreenBoxActive) return;
+	    if (!fullscreenBoxActive && !fullscreenCropActive) return;
 	    if (event.button !== undefined && event.button !== 0) return;
 	    const position = getFullscreenImagePointerPosition(event);
 	    if (!position) return;
@@ -6431,7 +6544,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const handleFullscreenBoxPointerUp = async (event) => {
-	    if (!fullscreenBoxActive) return;
+	    if (!fullscreenBoxActive && !fullscreenCropActive) return;
 	    const position = getFullscreenImagePointerPosition(event);
 	    event.preventDefault();
 	    event.stopPropagation();
@@ -6443,18 +6556,24 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	        imageWidth: position.naturalWidth,
 	        imageHeight: position.naturalHeight,
 	      });
-	      await commitFullscreenBox(box);
+	      if (fullscreenCropActive) {
+	        await createCropChildImage({ parentImageId: getAnnotationSourceImageIdForImage(fullscreenImageModal?.imageId), cropBox: box });
+	      } else {
+	        await commitFullscreenBox(box);
+	      }
 	    } else {
 	      setPendingBoxPoint(null);
 	      pendingBoxPointRef.current = null;
 	      setFullscreenAnnotationPreview(null);
 	      setFullscreenBoxActive(false);
 	    }
+        setFullscreenBoxActive(false);
+        setFullscreenCropActive(false);
 	    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
 	  };
 
 	  const handleFullscreenBoxPointerCancel = (event) => {
-	    if (!fullscreenBoxActive && !pendingBoxPointRef.current) return;
+	    if (!fullscreenBoxActive && !fullscreenCropActive && !pendingBoxPointRef.current) return;
 	    event.preventDefault();
 	    event.stopPropagation();
 	    setPendingBoxPoint(null);
@@ -6513,7 +6632,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    if (fullscreenEditingEndpoint?.lineId || fullscreenEditingBoxCorner?.boxId) {
 	      return;
 	    }
-	    if (fullscreenBoxActive) {
+	    if (fullscreenBoxActive || fullscreenCropActive) {
 	      const firstPoint = pendingBoxPointRef.current || pendingBoxPoint;
 	      if (firstPoint && position) {
 	        const box = {
@@ -6526,7 +6645,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          id: 'fullscreen-box-preview',
 	          color: '#f97316',
 	        };
-	        setFullscreenAnnotationPreview({ mode: 'box', box });
+	        setFullscreenAnnotationPreview({ mode: fullscreenCropActive ? 'crop' : 'box', box });
 	      }
 		      return;
 	    }
@@ -6611,6 +6730,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    setFullscreenImagePanning(false);
 	    setFullscreenMeasureActive(false);
 	    setFullscreenBoxActive(false);
+        setFullscreenCropActive(false);
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
 	    setPendingBoxPoint(null);
@@ -6642,7 +6762,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    const fullscreenPreviewLines = fullscreenAnnotationPreview?.mode === 'measure'
 	      ? [fullscreenAnnotationPreview.line].filter(isFiniteMeasurementLine)
 	      : [];
-	    const fullscreenPreviewBoxes = fullscreenAnnotationPreview?.mode === 'box'
+	    const fullscreenPreviewBoxes = ['box', 'crop'].includes(fullscreenAnnotationPreview?.mode)
 	      ? [fullscreenAnnotationPreview.box].filter(isFiniteAnnotationBox).map((box) => getBoxWithDerivedDimensions(box, fullscreenAnnotationSourceImageId))
 	      : [];
 	    const fullscreenAnnotationItems = [
@@ -6671,6 +6791,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	              <button type="button" className={`btn btn-secondary ${fullscreenBoxActive ? 'active' : ''}`} onClick={toggleFullscreenBox}>
 	                Draw box
 	              </button>
+                  <button type="button" className={`btn btn-secondary ${fullscreenCropActive ? 'active' : ''}`} onClick={toggleFullscreenCrop}>
+                    New Crop
+                  </button>
 	              <button type="button" className="modal-close-btn" aria-label="Close fullscreen image" onClick={closeFullscreenImageModal}>&times;</button>
 	            </div>
           </div>
@@ -6691,6 +6814,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          <div className="inspection-fullscreen-stage">
 	            {fullscreenMeasureActive && <div className="workbench-notice">Click to set first point, click again to set second point.</div>}
 	            {fullscreenBoxActive && <div className="workbench-notice">Press and drag to draw a bounding box.</div>}
+            {fullscreenCropActive && <div className="workbench-notice">Press and drag around the parent image feature to create a child crop.</div>}
 	            {(fullscreenEditingEndpoint || fullscreenEditingBoxCorner) && <div className="workbench-notice">Click the new endpoint or corner position to update the selected annotation.</div>}
             <div className="inspection-fullscreen-workspace">
               <div
@@ -6721,7 +6845,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     ref={fullscreenImageRef}
                     src={`/api/images/${encodeURIComponent(fullscreenImageModal.imageId)}/content`}
 	                    alt={`${fullscreenImageModal.label} fullscreen`}
-		                    className={`inspection-fullscreen-image ${fullscreenBaseImageId ? 'analysis-overlay-image' : ''} ${fullscreenMeasureActive || fullscreenBoxActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner ? 'measurement-active' : ''}`}
+		                    className={`inspection-fullscreen-image ${fullscreenBaseImageId ? 'analysis-overlay-image' : ''} ${fullscreenMeasureActive || fullscreenBoxActive || fullscreenCropActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner ? 'measurement-active' : ''}`}
 		                    onMouseDown={handleFullscreenBoxPointerDown}
 		                    onMouseUp={handleFullscreenBoxPointerUp}
 		                    onMouseLeave={handleFullscreenBoxPointerCancel}

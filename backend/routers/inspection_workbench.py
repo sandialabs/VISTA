@@ -853,12 +853,16 @@ async def _resolve_project_type_interface_layout_default(
     *,
     project_type: str,
 ) -> Optional[dict]:
-    metadata_key = _project_type_interface_layout_metadata_key(project_type)
+    normalized_project_type = _normalize_project_type(project_type)
+    # PT2 intentionally inherits the PT1 inspection interface unless a project-level
+    # default_model is already saved on the PT2 project configuration.
+    default_project_type = "PT1" if normalized_project_type == "PT2" else normalized_project_type
+    metadata_key = _project_type_interface_layout_metadata_key(default_project_type)
     stmt = (
         select(models.ProjectMetadata.value)
         .join(models.Project, models.Project.id == models.ProjectMetadata.project_id)
         .where(
-            models.Project.project_type == project_type,
+            models.Project.project_type == default_project_type,
             models.ProjectMetadata.key == metadata_key,
         )
         .order_by(models.ProjectMetadata.updated_at.desc())
@@ -1112,6 +1116,7 @@ async def assign_image_to_part(
             "parent_image_filename",
             "crop_annotation_id",
             "crop_title",
+            "crop_subtitle",
             "crop_bbox",
             "pixel_dtype",
             "voxel_dtype",
@@ -1315,6 +1320,56 @@ async def assign_part_to_batch(
         to_batch_id=payload.to_batch_id,
     )
 
+
+@router.patch("/projects/{project_id}/parts/{part_id}/source-images/{image_ref:path}", response_model=schemas.InspectionPart)
+async def update_inspection_part_source_image(
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    image_ref: str,
+    payload: schemas.InspectionPartSourceImageUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+    source_images = metadata.get("source_images")
+    if not isinstance(source_images, list):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source image not found")
+    target_ref = str(image_ref or "").strip()
+    updated_images = []
+    found = False
+    for record in source_images:
+        if not isinstance(record, dict):
+            updated_images.append(record)
+            continue
+        record_refs = {
+            str(record.get("image_id") or "").strip(),
+            str(record.get("filename") or "").strip(),
+        }
+        if target_ref and target_ref in record_refs:
+            found = True
+            next_record = dict(record)
+            if payload.crop_subtitle is not None:
+                next_record["crop_subtitle"] = payload.crop_subtitle.strip()
+            updated_images.append(next_record)
+        else:
+            updated_images.append(record)
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source image not found")
+    normalized = _rebuild_part_image_maps({**metadata, "source_images": updated_images})
+    updated = await crud.update_inspection_part_metadata(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        metadata_patch=normalized,
+        updated_by=current_user.email,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    return _serialize_inspection_part(updated)
 
 @router.patch("/projects/{project_id}/parts/{part_id}/manual-flag", response_model=schemas.InspectionPart)
 async def update_inspection_part_manual_flag(

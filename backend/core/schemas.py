@@ -152,6 +152,10 @@ class InspectionPartManualFlagUpdateRequest(BaseModel):
     manual_flagged: bool = False
 
 
+class InspectionPartSourceImageUpdateRequest(BaseModel):
+    crop_subtitle: Optional[str] = Field(default=None, max_length=255)
+
+
 class InspectionPart(InspectionPartBase):
     id: uuid.UUID
     project_id: uuid.UUID
