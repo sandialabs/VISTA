@@ -15,6 +15,7 @@ import ProjectPhaseFlow from './components/ProjectPhaseFlow';
 import ImagesToPartsTab from './components/ImagesToPartsTab';
 import BatchesTab from './components/BatchesTab';
 import RemoveImagesTab from './components/RemoveImagesTab';
+import OverlaysTab from './components/OverlaysTab';
 import { resolveCurrentProjectPhase } from './utils/projectPhases';
 import { DEFAULT_INTERFACE_HIERARCHY, loadInterfaceHierarchy } from './utils/interfaceHierarchy';
 
@@ -28,6 +29,7 @@ const MAIN_TAB_DEFINITIONS = {
 const PROJECT_DATA_TABS = {
   load_images: { label: 'Load Images' },
   images_to_parts: { label: 'Images to Parts' },
+  overlays: { label: 'Overlays' },
   batches: { label: 'Batches' },
   remove_images: { label: 'Unload Images' },
   recently_deleted: { label: 'Recently Deleted' },
@@ -428,6 +430,15 @@ function Project({ currentUserGroups = [] }) {
         />
       )}
 
+      {activeProjectDataTab === 'overlays' && (
+        <OverlaysTab
+          projectId={id}
+          parts={projectParts}
+          images={projectImages}
+          onAssignmentsChanged={refreshProjectCounts}
+          setError={setError}
+        />
+      )}
 
       {activeProjectDataTab === 'remove_images' && (
         <RemoveImagesTab

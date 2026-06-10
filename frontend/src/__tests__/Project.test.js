@@ -32,6 +32,7 @@ jest.mock('../components/ProjectDataExportPanel', () => () => <div>Project data 
 jest.mock('../components/ProjectReportTab', () => () => <div>Project report</div>);
 jest.mock('../components/ProjectPhaseFlow', () => () => <div>Project phase flow</div>);
 jest.mock('../components/ImagesToPartsTab', () => () => <div>Images to parts</div>);
+jest.mock('../components/OverlaysTab', () => () => <div>Overlays tab</div>);
 jest.mock('../components/BatchesTab', () => () => <div>Batches</div>);
 jest.mock('../components/RemoveImagesTab', () => () => <div>Remove images</div>);
 
