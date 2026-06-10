@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import ImageUploader, { buildInspectionPartIngestPayload } from '../ImageUploader';
+import ImageUploader, { buildDuplicateFilenameMap, buildInspectionPartIngestPayload, tagDuplicateFilename } from '../ImageUploader';
 
 const makeFile = (name) => new File(['data'], name, { type: 'image/png' });
 
@@ -26,6 +26,45 @@ beforeEach(() => {
 });
 
 describe('ImageUploader', () => {
+
+  describe('Duplicate filename tagging', () => {
+    test('tags selected duplicate filenames before extension', () => {
+      const first = makeFile('overlay.png');
+      const second = makeFile('overlay.png');
+      const third = makeFile('overlay.png');
+      const filenameMap = buildDuplicateFilenameMap([first, second, third]);
+
+      expect(tagDuplicateFilename('part.tif', 1)).toBe('part (duplicate).tif');
+      expect(filenameMap.get(first)).toBe('overlay.png');
+      expect(filenameMap.get(second)).toBe('overlay (duplicate).png');
+      expect(filenameMap.get(third)).toBe('overlay (duplicate 2).png');
+    });
+
+    test('uploads duplicate selections with duplicate tags and original filename metadata', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (url) => {
+        if (String(url).includes('/ingest')) return { ok: true, json: async () => ({}) };
+        return { ok: true, json: async () => ({ id: `img-${fetchSpy.mock.calls.length}` }) };
+      });
+
+      renderUploader();
+      selectFiles([makeFile('overlay.png'), makeFile('overlay.png')]);
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      });
+
+      const firstBody = fetchSpy.mock.calls[0][1].body;
+      const secondBody = fetchSpy.mock.calls[1][1].body;
+      expect(firstBody.get('file').name).toBe('overlay.png');
+      expect(firstBody.get('metadata')).toBeNull();
+      expect(secondBody.get('file').name).toBe('overlay (duplicate).png');
+      expect(JSON.parse(secondBody.get('metadata'))).toMatchObject({
+        original_filename: 'overlay.png',
+        duplicate_filename_tagged: true,
+      });
+    });
+  });
   describe('Upload button disabled state', () => {
     test('upload button is enabled by default', () => {
       renderUploader();

@@ -1406,3 +1406,82 @@ def test_dashboard_backup_export_and_import_preview(client):
     assert preview_resp.status_code == 200, preview_resp.text
     assert preview_resp.json()["format"] == "vista-dashboard-backup"
     assert preview_resp.json()["project_count"] == 1
+
+
+def test_project_import_into_active_project_append_tags_duplicate_part_serials(client):
+    group = "active-import-append"
+    headers = {"X-Forwarded-Email": f"user@{group}.test"}
+
+    source_resp = client.post("/api/projects/", json={"name": "Source", "meta_group_id": group}, headers=headers)
+    target_resp = client.post("/api/projects/", json={"name": "Target", "meta_group_id": group}, headers=headers)
+    assert source_resp.status_code == 201, source_resp.text
+    assert target_resp.status_code == 201, target_resp.text
+    source_id = source_resp.json()["id"]
+    target_id = target_resp.json()["id"]
+
+    for project_id in (source_id, target_id):
+        part_resp = client.post(
+            f"/api/projects/{project_id}/parts",
+            json={"serial_number": "PART-001", "display_name": "Part 001"},
+            headers=headers,
+        )
+        assert part_resp.status_code == 201, part_resp.text
+
+    bundle_resp = client.get(f"/api/projects/{source_id}/export-bundle", headers=headers)
+    assert bundle_resp.status_code == 200, bundle_resp.text
+
+    import_resp = client.post(
+        f"/api/projects/{target_id}/import",
+        files={"file": ("source.zip", bundle_resp.content, "application/zip")},
+        data={"mode": "append_active", "confirmation": "IMPORT"},
+        headers=headers,
+    )
+    assert import_resp.status_code == 200, import_resp.text
+    assert import_resp.json()["mode"] == "append_active"
+
+    parts_resp = client.get(f"/api/projects/{target_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    serials = sorted(part["serial_number"] for part in parts_resp.json())
+    assert serials == ["PART-001", "PART-001 (duplicate)"]
+
+
+def test_project_import_into_active_project_overwrite_replaces_current_parts(client):
+    group = "active-import-overwrite"
+    headers = {"X-Forwarded-Email": f"user@{group}.test"}
+
+    source_resp = client.post("/api/projects/", json={"name": "Source", "meta_group_id": group}, headers=headers)
+    target_resp = client.post("/api/projects/", json={"name": "Target", "meta_group_id": group}, headers=headers)
+    assert source_resp.status_code == 201, source_resp.text
+    assert target_resp.status_code == 201, target_resp.text
+    source_id = source_resp.json()["id"]
+    target_id = target_resp.json()["id"]
+
+    source_part_resp = client.post(
+        f"/api/projects/{source_id}/parts",
+        json={"serial_number": "SOURCE-001", "display_name": "Source Part"},
+        headers=headers,
+    )
+    target_part_resp = client.post(
+        f"/api/projects/{target_id}/parts",
+        json={"serial_number": "TARGET-001", "display_name": "Target Part"},
+        headers=headers,
+    )
+    assert source_part_resp.status_code == 201, source_part_resp.text
+    assert target_part_resp.status_code == 201, target_part_resp.text
+
+    bundle_resp = client.get(f"/api/projects/{source_id}/export-bundle", headers=headers)
+    assert bundle_resp.status_code == 200, bundle_resp.text
+
+    import_resp = client.post(
+        f"/api/projects/{target_id}/import",
+        files={"file": ("source.zip", bundle_resp.content, "application/zip")},
+        data={"mode": "overwrite_active", "confirmation": "IMPORT"},
+        headers=headers,
+    )
+    assert import_resp.status_code == 200, import_resp.text
+    assert import_resp.json()["mode"] == "overwrite_active"
+
+    parts_resp = client.get(f"/api/projects/{target_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    serials = sorted(part["serial_number"] for part in parts_resp.json())
+    assert serials == ["SOURCE-001"]

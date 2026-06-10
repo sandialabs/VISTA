@@ -367,6 +367,7 @@ function Project({ currentUserGroups = [] }) {
                   projectName={project?.name}
                   counts={dataCounts}
                   setError={setError}
+                  onImportComplete={handleUploadComplete}
                 />
               </div>
             </div>
