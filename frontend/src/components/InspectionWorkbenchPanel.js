@@ -259,6 +259,79 @@ const IMAGE_RENDER_CATEGORIES = [
   { id: 'source', label: 'Source images' },
   { id: 'overlay', label: 'Overlays' },
 ];
+
+const NSIPRO_METADATA_PATTERN = /nsi[\s_-]*pro|\.nsipro/i;
+
+function isPlainMetadataObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isNsiproMetadataKey(key) {
+  return NSIPRO_METADATA_PATTERN.test(String(key || ''));
+}
+
+function isNsiproMetadataString(value) {
+  return typeof value === 'string' && NSIPRO_METADATA_PATTERN.test(value);
+}
+
+function formatMetadataPath(parentPath, key) {
+  if (typeof key === 'number') return `${parentPath}[${key}]`;
+  return parentPath ? `${parentPath}.${key}` : String(key);
+}
+
+function collectNsiproMetadataEntries(value, path = 'metadata') {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => collectNsiproMetadataEntries(entry, formatMetadataPath(path, index)));
+  }
+  return Object.entries(value).flatMap(([key, entryValue]) => {
+    const nextPath = formatMetadataPath(path, key);
+    if (isNsiproMetadataKey(key) || isNsiproMetadataString(entryValue)) {
+      return [{ path: nextPath, value: entryValue }];
+    }
+    if (entryValue && typeof entryValue === 'object') {
+      return collectNsiproMetadataEntries(entryValue, nextPath);
+    }
+    return [];
+  });
+}
+
+function omitNsiproMetadata(value, key = '') {
+  if (isNsiproMetadataKey(key) || isNsiproMetadataString(value)) return undefined;
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => omitNsiproMetadata(entry))
+      .filter((entry) => entry !== undefined);
+  }
+  if (isPlainMetadataObject(value)) {
+    return Object.entries(value).reduce((acc, [entryKey, entryValue]) => {
+      const nextValue = omitNsiproMetadata(entryValue, entryKey);
+      if (nextValue !== undefined) acc[entryKey] = nextValue;
+      return acc;
+    }, {});
+  }
+  return value;
+}
+
+function getPartMetadataBreakout(part) {
+  const metadata = isPlainMetadataObject(part?.metadata) ? part.metadata : {};
+  return {
+    nsiproEntries: collectNsiproMetadataEntries(metadata),
+    otherMetadata: omitNsiproMetadata(metadata) || {},
+  };
+}
+
+function formatMetadataValue(value) {
+  if (value === null) return 'null';
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (err) {
+    return String(value);
+  }
+}
 function hasDroppedMetadataField(part, field) {
   const metadata = part?.metadata;
   if (!metadata || typeof metadata !== 'object') return false;
@@ -2148,6 +2221,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [mprReconstructionMode, setMprReconstructionMode] = useState(MPR_RECONSTRUCTION_MODES.orientation);
   const [mprProjectionMirror, setMprProjectionMirror] = useState(DEFAULT_MPR_PROJECTION_MIRROR);
   const [activeWorkbenchModal, setActiveWorkbenchModal] = useState(null);
+  const [activeMetadataTab, setActiveMetadataTab] = useState('nsipro');
   const [segmentationHelperOpen, setSegmentationHelperOpen] = useState(false);
   const [segmentationHelperAxis, setSegmentationHelperAxis] = useState('axial');
   const [segmentationSegments, setSegmentationSegments] = useState(() => [createDefaultSegment(0)]);
@@ -5632,9 +5706,84 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     );
   };
 
+  const renderMetadataTable = (rows, emptyMessage) => {
+    if (!rows.length) return <p className="metadata-modal-empty">{emptyMessage}</p>;
+    return (
+      <table className="metadata-modal-table">
+        <thead>
+          <tr>
+            <th scope="col">Metadata path</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.path}>
+              <td className="metadata-modal-path"><code>{row.path}</code></td>
+              <td><pre>{formatMetadataValue(row.value)}</pre></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
+  const renderMetadataModalBody = () => {
+    if (!selectedPart) return <p className="metadata-modal-empty">Select a part to view metadata.</p>;
+    const { nsiproEntries, otherMetadata } = getPartMetadataBreakout(selectedPart);
+    const otherRows = Object.entries(otherMetadata).map(([key, value]) => ({ path: `metadata.${key}`, value }));
+    return (
+      <div className="part-metadata-modal-body">
+        <div className="metadata-modal-part-summary">
+          <strong>{selectedPart.display_name || selectedPart.serial_number || selectedPart.id}</strong>
+          <span>{selectedPart.serial_number || selectedPart.id}</span>
+        </div>
+        <div className="project-tabs metadata-modal-tabs" role="tablist" aria-label="Part metadata categories">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeMetadataTab === 'nsipro'}
+            className={`project-tab ${activeMetadataTab === 'nsipro' ? 'active' : ''}`}
+            onClick={() => setActiveMetadataTab('nsipro')}
+          >
+            .nsipro
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeMetadataTab === 'other'}
+            className={`project-tab ${activeMetadataTab === 'other' ? 'active' : ''}`}
+            onClick={() => setActiveMetadataTab('other')}
+          >
+            Other
+          </button>
+        </div>
+        <section
+          className="metadata-modal-tab-panel"
+          role="tabpanel"
+          aria-label={activeMetadataTab === 'nsipro' ? '.nsipro metadata' : 'Other metadata'}
+        >
+          {activeMetadataTab === 'nsipro'
+            ? renderMetadataTable(nsiproEntries, 'No .nsipro metadata was found for the current part.')
+            : renderMetadataTable(otherRows, 'No other metadata was found for the current part.')}
+        </section>
+      </div>
+    );
+  };
+
   const renderWorkbenchModal = () => {
     if (!activeWorkbenchModal) return null;
-    const modalTitle = activeWorkbenchModal === 'parts' ? 'Part Selection' : 'Annotations';
+    const modalTitleByType = {
+      parts: 'Part Selection',
+      annotations: 'Annotations',
+      metadata: 'Part Metadata',
+    };
+    const modalTitle = modalTitleByType[activeWorkbenchModal] || 'Workbench';
+    const renderBody = () => {
+      if (activeWorkbenchModal === 'parts') return renderPartSummaryPane();
+      if (activeWorkbenchModal === 'metadata') return renderMetadataModalBody();
+      return renderAnnotationsPane();
+    };
     return (
       <div className="modal" style={{ display: 'flex' }} onClick={() => setActiveWorkbenchModal(null)}>
         <div className="modal-content workbench-utility-modal" onClick={(event) => event.stopPropagation()}>
@@ -5650,7 +5799,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
             </button>
           </div>
           <div className="modal-body">
-            {activeWorkbenchModal === 'parts' ? renderPartSummaryPane() : renderAnnotationsPane()}
+            {renderBody()}
           </div>
         </div>
       </div>
@@ -5675,6 +5824,17 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
         <div className="workbench-detail-actions">
           <button type="button" className="btn btn-secondary" onClick={() => setActiveWorkbenchModal('parts')}>
             Part Selection
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!selectedPart}
+            onClick={() => {
+              setActiveMetadataTab('nsipro');
+              setActiveWorkbenchModal('metadata');
+            }}
+          >
+            Metadata
           </button>
           {selectedPart && (
             <>

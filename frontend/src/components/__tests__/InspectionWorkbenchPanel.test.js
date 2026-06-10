@@ -625,6 +625,62 @@ function scenarioNameIncludesAdvanced(payload) {
 
 describe('InspectionWorkbenchPanel', () => {
 
+  test('opens PT3 current-part metadata modal with .nsipro and other tabs', async () => {
+    mockWorkbenchFetch({
+      user: 'metadata-modal',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-nsipro-1' },
+      parts: [
+        {
+          id: 'part-nsipro-1',
+          batch_id: 'batch-1',
+          serial_number: 'SN-NSIPRO-001',
+          display_name: 'Metadata Rich Part',
+          review_state: 'unreviewed',
+          metadata: {
+            nsipro_metadata: {
+              source_filename: 'scan-settings.nsipro',
+              exposure_ms: 12,
+              operator: 'QA Technician',
+            },
+            alloy: 'Ti-6Al-4V',
+            source_images: [
+              {
+                filename: 'slice-001.png',
+                image_id: 'img-slice-001',
+                side: 'front',
+                modality: 'visual',
+                selected_metadata_file: 'scan-settings.nsipro',
+                nsipro_payload: { voltage_kv: 80 },
+              },
+            ],
+            annotations: [],
+          },
+        },
+      ],
+    });
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByTestId('pt3-inspection-layout')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Metadata' }));
+
+    const modal = screen.getByRole('heading', { name: 'Part Metadata' }).closest('.modal-content');
+    expect(modal).toBeInTheDocument();
+    expect(within(modal).getByText('Metadata Rich Part')).toBeInTheDocument();
+    expect(within(modal).getByRole('tab', { name: '.nsipro' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(modal).getByText('metadata.nsipro_metadata')).toBeInTheDocument();
+    expect(within(modal).getAllByText(/scan-settings\.nsipro/).length).toBeGreaterThan(0);
+    expect(within(modal).getByText('metadata.source_images[0].nsipro_payload')).toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.alloy')).not.toBeInTheDocument();
+
+    fireEvent.click(within(modal).getByRole('tab', { name: 'Other' }));
+    expect(within(modal).getByRole('tab', { name: 'Other' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(modal).getByText('metadata.alloy')).toBeInTheDocument();
+    expect(within(modal).getByText('Ti-6Al-4V')).toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.source_images[0].selected_metadata_file')).not.toBeInTheDocument();
+  });
+
   test('shows part summary modality buttons only for loaded image modalities', async () => {
     mockWorkbenchFetch({
       user: 'loaded-modalities',
