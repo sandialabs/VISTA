@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import ImageUploader, { buildDuplicateFilenameMap, buildInspectionPartIngestPayload, tagDuplicateFilename } from '../ImageUploader';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import ImageUploader, { buildDuplicateFilenameMap, buildInspectionPartIngestPayload, formatUploadSize, tagDuplicateFilename } from '../ImageUploader';
 
 const makeFile = (name) => new File(['data'], name, { type: 'image/png' });
 
@@ -23,6 +23,7 @@ function renderUploader(props = {}) {
 
 beforeEach(() => {
   jest.restoreAllMocks();
+  jest.useRealTimers();
 });
 
 describe('ImageUploader', () => {
@@ -35,6 +36,8 @@ describe('ImageUploader', () => {
       const filenameMap = buildDuplicateFilenameMap([first, second, third]);
 
       expect(tagDuplicateFilename('part.tif', 1)).toBe('part (duplicate).tif');
+      expect(formatUploadSize(1024 ** 2)).toBe('1.00 MB');
+      expect(formatUploadSize(1024 ** 3)).toBe('1.00 GB');
       expect(filenameMap.get(first)).toBe('overlay.png');
       expect(filenameMap.get(second)).toBe('overlay (duplicate).png');
       expect(filenameMap.get(third)).toBe('overlay (duplicate 2).png');
@@ -62,6 +65,45 @@ describe('ImageUploader', () => {
       expect(JSON.parse(secondBody.get('metadata'))).toMatchObject({
         original_filename: 'overlay.png',
         duplicate_filename_tagged: true,
+      });
+    });
+
+
+    test('reports selected upload data size and refreshes byte progress every five seconds', async () => {
+      jest.useFakeTimers();
+      const firstUpload = {};
+      const secondUpload = {};
+      firstUpload.promise = new Promise((resolve) => { firstUpload.resolve = resolve; });
+      secondUpload.promise = new Promise((resolve) => { secondUpload.resolve = resolve; });
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockReturnValueOnce(firstUpload.promise)
+        .mockReturnValueOnce(secondUpload.promise);
+
+      renderUploader();
+      selectFiles([
+        new File(['a'.repeat(1024)], 'small.png', { type: 'image/png' }),
+        new File(['b'.repeat(2048)], 'large.png', { type: 'image/png' }),
+      ]);
+
+      expect(screen.getByText('2 files selected (3.00 KB)')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+      expect(screen.getByText('0 B / 3.00 KB uploaded')).toBeInTheDocument();
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        firstUpload.resolve({ ok: true, json: async () => ({ id: 'img-small', filename: 'small.png' }) });
+        await Promise.resolve();
+      });
+      expect(screen.getByText('0 B / 3.00 KB uploaded')).toBeInTheDocument();
+
+      await act(async () => {
+        jest.advanceTimersByTime(5000);
+      });
+      expect(screen.getByText('1.00 KB / 3.00 KB uploaded')).toBeInTheDocument();
+
+      await act(async () => {
+        secondUpload.resolve({ ok: true, json: async () => ({ id: 'img-large', filename: 'large.png' }) });
+        await Promise.resolve();
       });
     });
   });

@@ -1,8 +1,12 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import FilenameMetadataExtractor from './FilenameMetadataExtractor';
 
 const CONCURRENT_UPLOADS = 6;
 const S3_IMPORT_LIMIT = 100;
+const UPLOAD_PROGRESS_UPDATE_INTERVAL_MS = 5000;
+const BYTES_PER_KIB = 1024;
+const BYTES_PER_MIB = BYTES_PER_KIB ** 2;
+const BYTES_PER_GIB = BYTES_PER_KIB ** 3;
 
 const ASSOCIATED_METADATA_EXTENSIONS = ['.json', '.nsipro'];
 
@@ -27,6 +31,42 @@ export function buildDuplicateFilenameMap(files = []) {
     mapped.set(file, tagDuplicateFilename(filename, occurrence));
   });
   return mapped;
+}
+
+
+export function getUploadItemSizeBytes(item) {
+  return Math.max(0, Number(item?.size) || 0);
+}
+
+export function getTotalUploadSizeBytes(items = []) {
+  return items.reduce((sum, item) => sum + getUploadItemSizeBytes(item), 0);
+}
+
+export function formatUploadSize(bytes = 0) {
+  const safeBytes = Math.max(0, Number(bytes) || 0);
+  if (safeBytes >= BYTES_PER_GIB) return `${(safeBytes / BYTES_PER_GIB).toFixed(2)} GB`;
+  if (safeBytes >= BYTES_PER_MIB) return `${(safeBytes / BYTES_PER_MIB).toFixed(2)} MB`;
+  if (safeBytes >= BYTES_PER_KIB) return `${(safeBytes / BYTES_PER_KIB).toFixed(2)} KB`;
+  return `${safeBytes} B`;
+}
+
+function progressPercent(uploadProgress) {
+  if (!uploadProgress) return 0;
+  const totalBytes = Math.max(0, Number(uploadProgress.totalBytes) || 0);
+  if (totalBytes > 0) {
+    return Math.min(100, Math.round((Math.max(0, Number(uploadProgress.loadedBytes) || 0) / totalBytes) * 100));
+  }
+  const total = Math.max(1, Number(uploadProgress.total) || 0);
+  return Math.min(100, Math.round((Math.max(0, Number(uploadProgress.completed) || 0) / total) * 100));
+}
+
+function progressLabel(uploadProgress) {
+  if (!uploadProgress) return '';
+  const totalBytes = Math.max(0, Number(uploadProgress.totalBytes) || 0);
+  if (totalBytes > 0) {
+    return `${formatUploadSize(uploadProgress.loadedBytes)} / ${formatUploadSize(totalBytes)} uploaded`;
+  }
+  return `${uploadProgress.completed} / ${uploadProgress.total} uploaded`;
 }
 
 function getFileExtension(filename = '') {
@@ -381,6 +421,42 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
   const [importingS3Files, setImportingS3Files] = useState(false);
   const [s3PickerOpen, setS3PickerOpen] = useState(false);
   const cancelledRef = useRef(false);
+  const uploadProgressRef = useRef(null);
+  const uploadProgressTimerRef = useRef(null);
+
+  const clearUploadProgressTimer = useCallback(() => {
+    if (uploadProgressTimerRef.current) {
+      clearInterval(uploadProgressTimerRef.current);
+      uploadProgressTimerRef.current = null;
+    }
+  }, []);
+
+  const setUploadProgressSnapshot = useCallback((snapshot, { flush = false } = {}) => {
+    uploadProgressRef.current = snapshot;
+    if (flush) {
+      setUploadProgress(snapshot);
+    }
+  }, []);
+
+  const beginUploadProgress = useCallback((initialProgress) => {
+    clearUploadProgressTimer();
+    setUploadProgressSnapshot(initialProgress, { flush: true });
+    uploadProgressTimerRef.current = setInterval(() => {
+      if (uploadProgressRef.current) {
+        setUploadProgress({ ...uploadProgressRef.current });
+      }
+    }, UPLOAD_PROGRESS_UPDATE_INTERVAL_MS);
+  }, [clearUploadProgressTimer, setUploadProgressSnapshot]);
+
+  const finishUploadProgress = useCallback(() => {
+    clearUploadProgressTimer();
+    uploadProgressRef.current = null;
+    setUploadProgress(null);
+  }, [clearUploadProgressTimer]);
+
+  useEffect(() => () => {
+    clearUploadProgressTimer();
+  }, [clearUploadProgressTimer]);
 
   const extractorPreviewFiles = selectedFiles.length > 0
     ? selectedFiles
@@ -477,7 +553,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
   // Handle file upload
   const handleUpload = async (e) => {
     e.preventDefault();
-    
+
     if (selectedFiles.length === 0) {
       setError('Please select at least one file to upload.');
       return;
@@ -488,7 +564,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       setError('Filename metadata extractor has errors. Please fix them before uploading.');
       return;
     }
-    
+
     // Validate manual metadata JSON if provided
     let manualMetadata = null;
     if (uploadMetadata.trim()) {
@@ -503,8 +579,9 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setUploading(true);
     cancelledRef.current = false;
     const total = selectedFiles.length;
+    const totalBytes = getTotalUploadSizeBytes(selectedFiles);
     const uploadFilenameMap = buildDuplicateFilenameMap(selectedFiles);
-    setUploadProgress({ completed: 0, failed: 0, total });
+    beginUploadProgress({ completed: 0, failed: 0, total, loadedBytes: 0, totalBytes });
 
     let associatedMetadataReference = null;
     if (associatedMetadataFile) {
@@ -513,17 +590,18 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       } catch (err) {
         const detail = err?.message ? ` ${err.message}` : '';
         setError(`Unable to associate metadata file.${detail}`);
-        setUploadProgress(null);
+        finishUploadProgress();
         setUploading(false);
         return;
       }
     }
-    
+
 
     const results = [];
     const uploadedRecords = [];
     let completed = 0;
     let failed = 0;
+    let loadedBytes = 0;
 
     // Upload files with bounded concurrency
     const queue = [...selectedFiles];
@@ -586,7 +664,8 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
           failed += 1;
         }
         completed += 1;
-        setUploadProgress({ completed, failed, total });
+        loadedBytes += getUploadItemSizeBytes(file);
+        setUploadProgressSnapshot({ completed, failed, total, loadedBytes, totalBytes });
       }
     };
 
@@ -628,7 +707,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     }
     setSelectedFiles([]);
     setUploadMetadata('');
-    setUploadProgress(null);
+    finishUploadProgress();
     setUploading(false);
   };
 
@@ -739,9 +818,10 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     }
 
     setImportingS3Files(true);
-    setUploadProgress({ completed: 0, failed: 0, total: selectedS3Keys.length });
     try {
       const selectedObjects = s3Objects.filter((object) => selectedS3Keys.includes(object.key));
+      const totalBytes = getTotalUploadSizeBytes(selectedObjects);
+      beginUploadProgress({ completed: 0, failed: 0, total: selectedS3Keys.length, loadedBytes: 0, totalBytes });
       const perFileMetadata = {};
       const groupIdentifiers = {};
       selectedObjects.forEach((object) => {
@@ -778,7 +858,21 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       const payload = await response.json();
       const imported = payload.imported || [];
       const failed = payload.failed || [];
-      setUploadProgress({ completed: imported.length + failed.length, failed: failed.length, total: selectedS3Keys.length });
+      const completedKeys = new Set([
+        ...imported.map((item) => item.metadata?.source_s3_key).filter(Boolean),
+        ...imported.map((item) => item.source_s3_key).filter(Boolean),
+        ...failed.map((item) => item.key || item.source_s3_key).filter(Boolean),
+      ]);
+      const completedObjects = completedKeys.size > 0
+        ? selectedObjects.filter((object) => completedKeys.has(object.key))
+        : selectedObjects.slice(0, imported.length + failed.length);
+      setUploadProgressSnapshot({
+        completed: imported.length + failed.length,
+        failed: failed.length,
+        total: selectedS3Keys.length,
+        loadedBytes: getTotalUploadSizeBytes(completedObjects),
+        totalBytes,
+      }, { flush: true });
 
       let ingestError = null;
       const uploadedRecords = selectedObjects
@@ -829,7 +923,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       setError(`Failed to import selected S3 files.${detail}`);
     } finally {
       setImportingS3Files(false);
-      setUploadProgress(null);
+      finishUploadProgress();
     }
   };
 
@@ -864,6 +958,11 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     }
   };
 
+  const selectedFilesTotalBytes = getTotalUploadSizeBytes(selectedFiles);
+  const selectedS3TotalBytes = getTotalUploadSizeBytes(
+    s3Objects.filter((object) => selectedS3Keys.includes(object.key))
+  );
+
   return (
     <div className="card">
       <div className="card-header">
@@ -871,7 +970,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       </div>
       <div className="card-content">
         <form onSubmit={handleUpload}>
-          <div 
+          <div
             className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -889,16 +988,16 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
                 Supports image files and 3D voxel arrays (.npy, .npz, .inspiro)
               </div>
               <div className={`upload-area-status ${selectedFiles.length > 0 ? 'has-files' : 'no-files'}`}>
-                {selectedFiles.length > 0 
-                  ? `${selectedFiles.length} ${selectedFiles.length === 1 ? 'file' : 'files'} selected` 
+                {selectedFiles.length > 0
+                  ? `${selectedFiles.length} ${selectedFiles.length === 1 ? 'file' : 'files'} selected (${formatUploadSize(selectedFilesTotalBytes)})`
                   : 'No files selected'}
               </div>
             </div>
-            <input 
-              type="file" 
-              id="file-input" 
-              accept="image/*,image/tiff,.tiff,.tif,.npy,.npz,.inspiro" 
-              multiple 
+            <input
+              type="file"
+              id="file-input"
+              accept="image/*,image/tiff,.tiff,.tif,.npy,.npz,.inspiro"
+              multiple
               style={{ display: 'none' }}
               onChange={handleFileChange}
             />
@@ -937,7 +1036,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
               </div>
               <div className="card-content">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span>{selectedS3Keys.length} / {s3Objects.length} selected</span>
+                  <span>{selectedS3Keys.length} / {s3Objects.length} selected ({formatUploadSize(selectedS3TotalBytes)})</span>
                   <button type="button" className="btn btn-secondary" onClick={handleToggleAllS3Keys}>
                     {selectedS3Keys.length === s3Objects.length ? 'Clear Selection' : 'Select All'}
                   </button>
@@ -956,7 +1055,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
                       <span style={{ flex: 1 }}>
                         <strong>{object.filename}</strong>
                         <br />
-                        <small>{object.key} · {object.size || 0} bytes</small>
+                        <small>{object.key} · {formatUploadSize(object.size)}</small>
                       </span>
                     </label>
                   ))}
@@ -1009,7 +1108,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
               </small>
             </div>
           )}
-          
+
           <div className="form-group">
             <fieldset className="metadata-association-section" style={{ border: '1px solid #e9ecef', borderRadius: '4px', padding: '12px' }}>
               <legend style={{ fontSize: '1rem', fontWeight: 600, padding: '0 4px' }}>Associate Metadata</legend>
@@ -1039,15 +1138,15 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
 
           <div className="form-group">
             <label htmlFor="metadata-input">Metadata (Optional JSON)</label>
-            <textarea 
-              id="metadata-input" 
-              rows="3" 
+            <textarea
+              id="metadata-input"
+              rows="3"
               placeholder='{"key": "value"}'
               value={uploadMetadata}
               onChange={(e) => setUploadMetadata(e.target.value)}
             ></textarea>
           </div>
-          
+
           <div className="form-group">
             <button
               type="submit"
@@ -1079,15 +1178,22 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
           {uploadProgress && (
             <div style={{ marginTop: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                <span>{uploadProgress.completed} / {uploadProgress.total} uploaded</span>
+                <span>{progressLabel(uploadProgress)}</span>
                 {uploadProgress.failed > 0 && (
                   <span style={{ color: '#dc3545' }}>{uploadProgress.failed} failed</span>
                 )}
               </div>
-              <div style={{ width: '100%', height: '8px', backgroundColor: '#e9ecef', borderRadius: '4px', overflow: 'hidden' }}>
+              <div
+                role="progressbar"
+                aria-label="Image upload data progress"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={progressPercent(uploadProgress)}
+                style={{ width: '100%', height: '8px', backgroundColor: '#e9ecef', borderRadius: '4px', overflow: 'hidden' }}
+              >
                 <div
                   style={{
-                    width: `${Math.round((uploadProgress.completed / uploadProgress.total) * 100)}%`,
+                    width: `${progressPercent(uploadProgress)}%`,
                     height: '100%',
                     backgroundColor: uploadProgress.failed > 0 ? '#ffc107' : '#28a745',
                     transition: 'width 0.2s',
