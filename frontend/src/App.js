@@ -1,14 +1,15 @@
-import React, { useState, useEffect, lazy, Suspense, memo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, Suspense, memo, useRef, useCallback } from 'react';
 import { Route, Routes, Link, useLocation } from 'react-router-dom';
 import './App.css';
 import Toast from './components/Toast';
+import lazyWithRetry from './utils/lazyWithRetry';
 
 // Lazy load components
-const Project = lazy(() => import('./Project'));
-const ImageView = lazy(() => import('./ImageView'));
-const ApiKeys = lazy(() => import('./ApiKeys'));
-const ProjectReport = lazy(() => import('./components/ProjectReport'));
-const GroupGalleryView = lazy(() => import('./components/GroupGalleryView'));
+const Project = lazyWithRetry(() => import('./Project'));
+const ImageView = lazyWithRetry(() => import('./ImageView'));
+const ApiKeys = lazyWithRetry(() => import('./ApiKeys'));
+const ProjectReport = lazyWithRetry(() => import('./components/ProjectReport'));
+const GroupGalleryView = lazyWithRetry(() => import('./components/GroupGalleryView'));
 
 const DEFAULT_DASHBOARD_FETCH_TIMEOUT_MS = 10000;
 
