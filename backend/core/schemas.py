@@ -74,6 +74,8 @@ class Project(ProjectBase):
     created_by: Optional[str] = None
     is_archived: bool = False
     archived_at: Optional[datetime] = None
+    image_count: int = 0
+    part_count: int = 0
 
     model_config = {
         "from_attributes": True,

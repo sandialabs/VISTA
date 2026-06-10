@@ -26,6 +26,47 @@ test('renders image management platform header', () => {
   expect(headerElement).toBeInTheDocument();
 });
 
+
+test('renders project dashboard cards with loaded image and part counts from the projects API', async () => {
+  window.scrollTo = jest.fn();
+  global.fetch = jest.fn((input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.endsWith('/api/users/me')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'counts@example.com' }) });
+    }
+    if (url.endsWith('/api/users/me/groups')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ['counts-group'] });
+    }
+    if (url.endsWith('/api/projects/')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ([
+          {
+            id: 'counts-project',
+            name: 'Dashboard Counts Project',
+            description: 'Project card count regression',
+            meta_group_id: 'counts-group',
+            project_type: 'PT1',
+            image_count: 7,
+            part_count: 3,
+          },
+        ]),
+      });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+  });
+
+  render(
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  );
+
+  expect(await screen.findByText('Dashboard Counts Project')).toBeInTheDocument();
+  expect(screen.getByText('Images: 7 • Parts: 3')).toBeInTheDocument();
+});
+
 test('stops loading and shows an error when projects request stalls', async () => {
   jest.useFakeTimers();
   window.__VISTA_DASHBOARD_FETCH_TIMEOUT_MS = 25;
