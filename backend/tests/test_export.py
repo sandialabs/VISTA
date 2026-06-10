@@ -570,10 +570,14 @@ def test_project_json_report_supports_three_progressive_users(client, project_ty
         assert payload["summary"]["total_images"] == scenario["part_count"]
         assert payload["summary"]["reviewed_parts"] >= 0
         assert payload["summary"]["unreviewed_parts"] >= 0
+        assert payload["summary"]["part_status_counts"]["unreviewed"] >= 0
         assert "part_assignments" in payload
+        assert "part_review_summary" in payload
         assert "image_part_mappings" in payload
         assert isinstance(payload["part_assignments"], list)
+        assert isinstance(payload["part_review_summary"], list)
         assert isinstance(payload["image_part_mappings"], list)
+        assert {entry["review_status"] for entry in payload["part_review_summary"]}.issubset({"pass", "reject", "unreviewed"})
         if payload["part_assignments"]:
             assignment = payload["part_assignments"][0]
             assert "part_identifier" in assignment
