@@ -7888,3 +7888,139 @@ ul li:hover {
 .project-data-export-card .modal-content {
   padding: var(--space-6);
 }
+
+.project-configuration-panel .filename-convention-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.project-configuration-panel .filename-convention-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+}
+
+.project-configuration-panel .filename-convention-heading h3 {
+  margin: 0 0 6px;
+}
+
+.project-configuration-panel .filename-convention-heading p {
+  margin: 0;
+  color: #334155;
+}
+
+.project-configuration-panel .filename-convention-heading code {
+  flex: 0 1 460px;
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  font-weight: 800;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.project-configuration-panel .filename-breakdown {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.project-configuration-panel .filename-breakdown-segment {
+  min-width: 150px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 2px solid var(--segment-color, #2563eb);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--segment-color, #2563eb) 10%, white);
+  box-shadow: inset 0 4px 0 var(--segment-color, #2563eb);
+}
+
+.project-configuration-panel .filename-breakdown-label,
+.project-configuration-panel .filename-breakdown-decodes {
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.project-configuration-panel .filename-breakdown-segment strong {
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 1.15rem;
+}
+
+.project-configuration-panel .filename-breakdown-delimiter,
+.project-configuration-panel .filename-breakdown-extension {
+  display: inline-flex;
+  align-items: center;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.project-configuration-panel .filename-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.project-configuration-panel .filename-option-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #dbe2ea;
+  border-left: 6px solid var(--segment-color, #2563eb);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.project-configuration-panel .filename-option-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--segment-color, #2563eb);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-weight: 800;
+}
+
+.project-configuration-panel .filename-option-card-header .btn {
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+.project-configuration-panel .filename-decoder-utility {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 14px;
+}
+
+.project-configuration-panel .filename-decoder-utility .filename-extractor {
+  margin-bottom: 0;
+  background: #f8fafc;
+}
+
+@media (max-width: 760px) {
+  .project-configuration-panel .filename-convention-heading {
+    display: grid;
+  }
+
+  .project-configuration-panel .filename-convention-heading code {
+    text-align: left;
+  }
+}
