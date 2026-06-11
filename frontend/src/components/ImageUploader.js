@@ -148,6 +148,89 @@ function buildAssociatedMetadataBundle(file, text, parsedResult) {
   };
 }
 
+
+
+const RAW_ASSOCIATED_METADATA_KEYS = new Set([
+  'raw',
+  'raw_data',
+  'raw_payload',
+  'raw_content',
+  'file_content',
+  'binary',
+  'bytes',
+]);
+const MAX_ASSOCIATED_METADATA_STRING_LENGTH = 2048;
+
+function sanitizeAssociatedMetadataValue(value, parentKey = '') {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'string') {
+    if (value.length > MAX_ASSOCIATED_METADATA_STRING_LENGTH) {
+      return `${value.slice(0, MAX_ASSOCIATED_METADATA_STRING_LENGTH)}…`;
+    }
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAssociatedMetadataValue(item, parentKey));
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value).reduce((acc, [key, childValue]) => {
+      const normalizedKey = String(key || '').trim().toLowerCase();
+      if (RAW_ASSOCIATED_METADATA_KEYS.has(normalizedKey)) return acc;
+      if ((normalizedKey.includes('raw') || normalizedKey.includes('content')) && typeof childValue === 'string' && childValue.length > MAX_ASSOCIATED_METADATA_STRING_LENGTH) {
+        return acc;
+      }
+      const sanitized = sanitizeAssociatedMetadataValue(childValue, normalizedKey || parentKey);
+      if (sanitized !== undefined) acc[key] = sanitized;
+      return acc;
+    }, {});
+  }
+  return String(value);
+}
+
+function getAssociatedBundleNsiproMetadata(bundle) {
+  if (bundle?.value?.file_type !== 'nsipro') return null;
+  const metadata = bundle.value.metadata;
+  if (!metadata || typeof metadata !== 'object') return null;
+  return sanitizeAssociatedMetadataValue(metadata);
+}
+
+function getRecordNsiproMetadata(recordMetadata) {
+  const candidates = [
+    recordMetadata?.nsipro_metadata,
+    recordMetadata?.nsipro_payload,
+    recordMetadata?.associated_metadata?.nsipro_metadata,
+    recordMetadata?.associated_metadata?.nsipro_payload,
+  ];
+  return candidates.find((candidate) => candidate && typeof candidate === 'object') || null;
+}
+
+function getAssociatedMetadataFields(recordMetadata) {
+  const fields = {};
+  if (recordMetadata?.associated_metadata_ref) {
+    fields.associated_metadata_ref = recordMetadata.associated_metadata_ref;
+  }
+  if (recordMetadata?.associated_metadata && typeof recordMetadata.associated_metadata === 'object') {
+    fields.associated_metadata = recordMetadata.associated_metadata;
+  }
+  return fields;
+}
+
+function getNsiproIngestMetadata(recordMetadata) {
+  const nsiproMetadata = getRecordNsiproMetadata(recordMetadata);
+  return nsiproMetadata ? { nsipro_metadata: nsiproMetadata } : {};
+}
+
+function buildMetadataWithAssociatedReference(baseMetadata, associatedMetadataReference = null, nsiproMetadata = null) {
+  if (!associatedMetadataReference) return baseMetadata;
+  return {
+    ...(baseMetadata || {}),
+    associated_metadata_ref: associatedMetadataReference.project_metadata_key,
+    associated_metadata: associatedMetadataReference,
+    ...(nsiproMetadata ? { nsipro_metadata: nsiproMetadata } : {}),
+  };
+}
+
 function buildAssociatedMetadataImageReference(bundle) {
   if (!bundle?.key || !bundle?.value) return null;
   return {
@@ -214,6 +297,10 @@ const RESERVED_INGEST_METADATA_KEYS = new Set([
   'base_filename',
   'overlay_base_image_id',
   'base_image_id',
+  'associated_metadata_ref',
+  'associated_metadata',
+  'nsipro_metadata',
+  'nsipro_payload',
 ]);
 
 function getAdditionalFilenameMetadata(candidate) {
@@ -275,6 +362,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
             source: recordMetadata.source || 'manual-build-it',
             project_type: 'PT3',
             volume_stack_id: volumeStackId,
+            ...getAssociatedMetadataFields(recordMetadata),
+            ...getNsiproIngestMetadata(recordMetadata),
             source_images: [],
           },
         });
@@ -289,6 +378,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
         overlay: normalizeBoolean(recordMetadata.overlay),
         overlay_base_filename: recordMetadata.overlay_base_filename || null,
         overlay_base_image_id: recordMetadata.overlay_base_image_id || null,
+        ...getAssociatedMetadataFields(recordMetadata),
+        ...getNsiproIngestMetadata(recordMetadata),
       });
       return;
     }
@@ -328,6 +419,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
           modalities: [],
           view_images: {},
           overlay_images: {},
+          ...getAssociatedMetadataFields(metadata),
+          ...getNsiproIngestMetadata(metadata),
           source_images: [],
           ...(Object.keys(additionalFilenameMetadata).length > 0 ? { filename_identifiers: { ...additionalFilenameMetadata } } : {}),
         },
@@ -357,6 +450,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
       image_id: record.image?.id || null,
       overlay_base_filename: metadata.overlay_base_filename || null,
       overlay_base_image_id: metadata.overlay_base_image_id || null,
+      ...getAssociatedMetadataFields(metadata),
+      ...getNsiproIngestMetadata(metadata),
       ...additionalFilenameMetadata,
     });
     if (metadata.overlay) {
@@ -632,9 +727,11 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     beginUploadProgress({ completed: 0, failed: 0, total, loadedBytes: 0, totalBytes });
 
     let associatedMetadataReference = null;
+    let associatedMetadataNsiproMetadata = null;
     if (associatedMetadataFile) {
       try {
         associatedMetadataReference = await saveAssociatedMetadataBundle();
+        associatedMetadataNsiproMetadata = getAssociatedBundleNsiproMetadata(associatedMetadataBundle);
       } catch (err) {
         const detail = err?.message ? ` ${err.message}` : '';
         setError(`Unable to associate metadata file.${detail}`);
@@ -667,13 +764,11 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
         const mergedMetadata = (extractedMetadata || manualMetadata)
           ? { ...(extractedMetadata || {}), ...(manualMetadata || {}) }
           : null;
-        const metadataWithAssociatedReference = associatedMetadataReference
-          ? {
-            ...(mergedMetadata || {}),
-            associated_metadata_ref: associatedMetadataReference.project_metadata_key,
-            associated_metadata: associatedMetadataReference,
-          }
-          : mergedMetadata;
+        const metadataWithAssociatedReference = buildMetadataWithAssociatedReference(
+          mergedMetadata,
+          associatedMetadataReference,
+          associatedMetadataNsiproMetadata,
+        );
         const hierarchyMetadata = normalizeHierarchyMetadata(metadataWithAssociatedReference);
         const duplicateMetadata = uploadFilename !== file.name
           ? { original_filename: file.name, duplicate_filename_tagged: true }
@@ -759,18 +854,16 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setUploading(false);
   };
 
-  const getMergedMetadataForName = useCallback((filename, manualMetadata, associatedMetadataReference = null) => {
+  const getMergedMetadataForName = useCallback((filename, manualMetadata, associatedMetadataReference = null, associatedMetadataNsiproMetadata = null) => {
     const extractedMetadata = extractorConfig.extractMetadata(filename);
     const mergedMetadata = (extractedMetadata || manualMetadata)
       ? { ...(extractedMetadata || {}), ...(manualMetadata || {}) }
       : null;
-    const metadataWithAssociatedReference = associatedMetadataReference
-      ? {
-        ...(mergedMetadata || {}),
-        associated_metadata_ref: associatedMetadataReference.project_metadata_key,
-        associated_metadata: associatedMetadataReference,
-      }
-      : mergedMetadata;
+    const metadataWithAssociatedReference = buildMetadataWithAssociatedReference(
+      mergedMetadata,
+      associatedMetadataReference,
+      associatedMetadataNsiproMetadata,
+    );
     const hierarchyMetadata = normalizeHierarchyMetadata(metadataWithAssociatedReference);
     return hierarchyMetadata
       ? { ...metadataWithAssociatedReference, ...hierarchyMetadata }
@@ -855,9 +948,11 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     if (manualMetadata === undefined) return;
 
     let associatedMetadataReference = null;
+    let associatedMetadataNsiproMetadata = null;
     if (associatedMetadataFile) {
       try {
         associatedMetadataReference = await saveAssociatedMetadataBundle();
+        associatedMetadataNsiproMetadata = getAssociatedBundleNsiproMetadata(associatedMetadataBundle);
       } catch (err) {
         const detail = err?.message ? ` ${err.message}` : '';
         setError(`Unable to associate metadata file.${detail}`);
@@ -873,7 +968,12 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
       const perFileMetadata = {};
       const groupIdentifiers = {};
       selectedObjects.forEach((object) => {
-        const metadataForUpload = getMergedMetadataForName(object.filename, manualMetadata, associatedMetadataReference);
+        const metadataForUpload = getMergedMetadataForName(
+          object.filename,
+          manualMetadata,
+          associatedMetadataReference,
+          associatedMetadataNsiproMetadata,
+        );
         if (metadataForUpload) {
           perFileMetadata[object.key] = metadataForUpload;
         }
