@@ -975,6 +975,114 @@ describe('ImageUploader', () => {
       expect(imageMetadata.associated_metadata.metadata).toBeUndefined();
     });
 
+    test('adds decoded .nsipro deployment fields to hierarchy ingest payload while preserving lightweight references', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-front', filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }) });
+
+      renderUploader();
+      selectFiles([makeFile('D1001_LOT01_SET01_SN0001_front_visual_false.jpg')]);
+      fireEvent.change(screen.getByLabelText('Delimiter'), { target: { value: '_' } });
+      fireEvent.change(screen.getByLabelText('Keys (comma-separated)'), {
+        target: { value: 'design_number, lot_number, set_number, serial_number, side, modality, overlay' },
+      });
+      const metadataFile = new File([
+        '[deployment]\ndeployment_id=DEP-42\noperator=alice\nfixture=F-7\nraw_content=',
+        'x'.repeat(3000),
+      ], 'deployment.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Associated deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.value.metadata.deployment).toEqual(expect.objectContaining({
+        deployment_id: 'DEP-42',
+        operator: 'alice',
+        fixture: 'F-7',
+      }));
+
+      const imageMetadata = JSON.parse(fetchSpy.mock.calls[1][1].body.get('metadata'));
+      expect(imageMetadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(imageMetadata.associated_metadata).toEqual(expect.objectContaining({
+        reference_type: 'project_metadata',
+        project_metadata_key: projectMetadataPayload.key,
+        filename: 'deployment.nsipro',
+        file_type: 'nsipro',
+      }));
+      expect(imageMetadata.associated_metadata.metadata).toBeUndefined();
+      expect(imageMetadata.nsipro_metadata).toEqual({
+        deployment: {
+          deployment_id: 'DEP-42',
+          operator: 'alice',
+          fixture: 'F-7',
+        },
+      });
+
+      expect(fetchSpy.mock.calls[2][0]).toBe('/api/projects/proj-1/ingest');
+      const ingestPart = JSON.parse(fetchSpy.mock.calls[2][1].body).unassigned_parts[0];
+      expect(ingestPart.metadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(ingestPart.metadata.associated_metadata.metadata).toBeUndefined();
+      expect(ingestPart.metadata.nsipro_metadata.deployment).toEqual(expect.objectContaining({
+        deployment_id: 'DEP-42',
+        operator: 'alice',
+        fixture: 'F-7',
+      }));
+      expect(ingestPart.metadata.nsipro_metadata.deployment.raw_content).toBeUndefined();
+      expect(ingestPart.metadata.source_images[0]).toEqual(expect.objectContaining({
+        associated_metadata_ref: projectMetadataPayload.key,
+        nsipro_metadata: {
+          deployment: {
+            deployment_id: 'DEP-42',
+            operator: 'alice',
+            fixture: 'F-7',
+          },
+        },
+      }));
+    });
+
+    test('adds decoded .nsipro deployment fields to PT3 volume-stack ingest records', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'slice-1', filename: 'slice-001.png' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }) });
+
+      renderUploader({ projectType: 'PT3' });
+      selectFiles([makeFile('slice-001.png')]);
+      fireEvent.change(screen.getByLabelText('Metadata (Optional JSON)'), {
+        target: { value: JSON.stringify({ volume_stack_id: 'stack-7', serial_number: 'VOL-7', slice_axis: 'z', slice_index: 1, modality: 'ct' }) },
+      });
+      const metadataFile = new File(['[deployment]\ndeployment_id=DEP-PT3\nscanner=CT-9'], 'stack.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Associated stack\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      expect(fetchSpy.mock.calls[2][0]).toBe('/api/projects/proj-1/ingest');
+      const ingestPayload = JSON.parse(fetchSpy.mock.calls[2][1].body);
+      const pt3Part = ingestPayload.batches[0].parts[0];
+      const projectMetadataKey = JSON.parse(fetchSpy.mock.calls[0][1].body).key;
+      expect(pt3Part.metadata).toEqual(expect.objectContaining({
+        project_type: 'PT3',
+        volume_stack_id: 'stack-7',
+        associated_metadata_ref: projectMetadataKey,
+        nsipro_metadata: { deployment: { deployment_id: 'DEP-PT3', scanner: 'CT-9' } },
+      }));
+      expect(pt3Part.metadata.source_images[0]).toEqual(expect.objectContaining({
+        filename: 'slice-001.png',
+        image_id: 'slice-1',
+        associated_metadata_ref: projectMetadataKey,
+        nsipro_metadata: { deployment: { deployment_id: 'DEP-PT3', scanner: 'CT-9' } },
+      }));
+    });
+
     test('parses .nsipro key-value metadata files', async () => {
       const { parseAssociatedMetadataText } = await import('../ImageUploader');
       expect(parseAssociatedMetadataText('[capture]\noperator=alice\nexposure: 12\nvalid=true', 'scan.nsipro')).toEqual({
