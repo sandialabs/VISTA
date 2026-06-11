@@ -73,9 +73,6 @@ COPY ./frontend/public ./frontend/public
 COPY ./frontend/src ./frontend/src
 COPY ./frontend/config-overrides.js ./frontend/
 
-# copy the test folder over as well. 
-COPY test ./test
-
 # Install frontend dependencies and build
 WORKDIR /app/frontend
 RUN npm install
@@ -103,9 +100,6 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 COPY --from=builder /app/backend /app/backend
 # Copy frontend build files
 COPY --from=builder /app/frontend/build /app/ui2
-# Copy test folder
-COPY test ./test
-
 # Set frontend build path environment variable
 ENV FRONTEND_BUILD_PATH=/app/ui2
 
