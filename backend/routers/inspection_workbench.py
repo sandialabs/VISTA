@@ -71,11 +71,6 @@ SLICE_SEGMENTATION_METHOD_IDS = {
     "segmentation.anomalib.placeholder",
     "segmentation.sam.placeholder",
     "segmentation.opencv.placeholder",
-    "segmentation.connected_components",
-    "segmentation.watershed_seeds",
-    "ml.sam.segment_anything",
-    "ml.yolov8.segment",
-    "ml.yolov8.detect",
 }
 
 
@@ -1019,6 +1014,65 @@ async def _normalize_ingest_part_metadata(
         normalized["source_images"] = normalized_source_images
     return normalized
 
+
+def _source_image_match_key(record: dict) -> str:
+    image_id = str(record.get("image_id") or "").strip()
+    if image_id:
+        return f"image_id:{image_id}"
+    filename = str(record.get("filename") or "").strip()
+    return f"filename:{filename}" if filename else ""
+
+
+def _metadata_contains_nsipro_payload(metadata: object) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    if isinstance(metadata.get("nsipro_metadata"), dict) or isinstance(metadata.get("nsipro_payload"), dict):
+        return True
+    source_images = metadata.get("source_images")
+    if isinstance(source_images, list):
+        return any(
+            isinstance(record, dict)
+            and (isinstance(record.get("nsipro_metadata"), dict) or isinstance(record.get("nsipro_payload"), dict))
+            for record in source_images
+        )
+    return False
+
+
+def _merge_existing_part_nsipro_metadata(existing_metadata: object, incoming_metadata: object) -> dict:
+    current = existing_metadata if isinstance(existing_metadata, dict) else {}
+    incoming = incoming_metadata if isinstance(incoming_metadata, dict) else {}
+    patch: dict = {}
+    for key in ("nsipro_metadata", "nsipro_payload", "associated_metadata_ref", "associated_metadata"):
+        if key in incoming:
+            patch[key] = incoming[key]
+
+    incoming_source_images = incoming.get("source_images")
+    if isinstance(incoming_source_images, list):
+        current_source_images = current.get("source_images") if isinstance(current.get("source_images"), list) else []
+        merged_source_images = [dict(record) if isinstance(record, dict) else record for record in current_source_images]
+        index_by_key = {
+            _source_image_match_key(record): index
+            for index, record in enumerate(merged_source_images)
+            if isinstance(record, dict) and _source_image_match_key(record)
+        }
+        changed = False
+        for incoming_record in incoming_source_images:
+            if not isinstance(incoming_record, dict):
+                continue
+            record_key = _source_image_match_key(incoming_record)
+            if record_key and record_key in index_by_key and isinstance(merged_source_images[index_by_key[record_key]], dict):
+                existing_record = merged_source_images[index_by_key[record_key]]
+                next_record = {**existing_record, **incoming_record}
+                if next_record != existing_record:
+                    merged_source_images[index_by_key[record_key]] = next_record
+                    changed = True
+            elif _metadata_contains_nsipro_payload(incoming_record):
+                merged_source_images.append(incoming_record)
+                changed = True
+        if changed:
+            patch["source_images"] = merged_source_images
+    return patch
+
 async def _bulk_ingest_project_parts(
     *,
     project_id: uuid.UUID,
@@ -1084,6 +1138,27 @@ async def _bulk_ingest_project_parts(
                         }
                     )
                     continue
+                normalized_existing_metadata = await _normalize_ingest_part_metadata(
+                    db=db,
+                    project_id=project_id,
+                    metadata=ingest_part.metadata_json,
+                    configured_parser=configured_parser,
+                    expected_version=expected_version,
+                    expected_hash=expected_hash,
+                    strict=strict_parser_match,
+                )
+                if _metadata_contains_nsipro_payload(normalized_existing_metadata):
+                    metadata_patch = _merge_existing_part_nsipro_metadata(existing_part.metadata_json, normalized_existing_metadata)
+                    if metadata_patch:
+                        updated_part = await crud.update_inspection_part_metadata(
+                            db=db,
+                            project_id=project_id,
+                            part_id=existing_part.id,
+                            metadata_patch=metadata_patch,
+                            updated_by=current_user.email,
+                        )
+                        if updated_part:
+                            parts_by_serial[serial_number] = updated_part
                 counters["parts_skipped_existing"] += 1
                 continue
 

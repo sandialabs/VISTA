@@ -45,7 +45,6 @@ function makeDefaultNodes(methods) {
   const preferred = [
     'source.project_part_images',
     'preprocess.window_level_normalization',
-    'segmentation.watershed_seeds',
     'segmentation.opencv.placeholder',
     OUTPUT_METHOD_ID,
   ];
