@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { PROJECT_PHASE_LABELS, PROJECT_PHASE_SEQUENCE } from '../utils/projectPhases';
 import { buildErrorWithServiceDiagnostics } from '../utils/serviceDiagnostics';
-import FilenameMetadataExtractor from './FilenameMetadataExtractor';
+import FilenameMetadataExtractor, { metadataKeyFromFilenameEntry } from './FilenameMetadataExtractor';
 
 
 function isSingleAlphanumeric(value) {
@@ -282,6 +282,12 @@ const EMPTY_CONFIG = {
       { id: 'view', label: 'View', abbreviation: 'V' },
       { id: 'modality', label: 'Modality', abbreviation: 'M' },
     ],
+    overlay_indicator: {
+      enabled: true,
+      field_key: 'overlay',
+      values: ['true', 'overlay', 'ov', 'mask', 'heatmap'],
+      remove_from_base_filename: true,
+    },
   },
 };
 const FILE_NAME_ELEMENT_OPTIONS = [
@@ -294,6 +300,13 @@ const FILE_NAME_ELEMENT_OPTIONS = [
   { id: 'sub_batch', label: 'Sub Batch', abbreviation: 'SB' },
   { id: 'timestamp', label: 'Timestamp', abbreviation: 'T' },
   { id: 'operator', label: 'Operator', abbreviation: 'O' },
+  { id: 'version', label: 'Image Version', abbreviation: 'v' },
+  { id: 'image_identifier', label: 'Image Identifier', abbreviation: 'IMG' },
+  { id: 'image_sequence', label: 'Image Sequence', abbreviation: 'I' },
+  { id: 'channel', label: 'Channel', abbreviation: 'C' },
+  { id: 'wavelength', label: 'Wavelength', abbreviation: 'WL' },
+  { id: 'exposure', label: 'Exposure', abbreviation: 'EXP' },
+  { id: 'lighting', label: 'Lighting', abbreviation: 'LGT' },
   { id: 'view', label: 'View', abbreviation: 'V' },
   { id: 'side', label: 'Side', abbreviation: 'SIDE' },
   { id: 'modality', label: 'Modality', abbreviation: 'M' },
@@ -317,18 +330,41 @@ function normalizeFilenameToken(value, fallback) {
   return token || fallback;
 }
 
+
+function getFilenameEntryMetadataKey(entry, fallback) {
+  return metadataKeyFromFilenameEntry(entry, fallback) || fallback;
+}
+
+function normalizeOverlayIndicator(source = {}) {
+  const values = Array.isArray(source.values) ? source.values : String(source.values || '').split(',');
+  const normalizedValues = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return {
+    enabled: source.enabled !== false,
+    field_key: String(source.field_key || 'overlay').trim() || 'overlay',
+    values: normalizedValues.length > 0 ? normalizedValues : ['true', 'overlay', 'ov', 'mask', 'heatmap'],
+    remove_from_base_filename: source.remove_from_base_filename !== false,
+  };
+}
+
+function getDisplayTokenForFilenameEntry(entry, fallback, { hierarchy = false } = {}) {
+  const prefix = String(entry?.abbreviation || '').trim();
+  if (hierarchy) return `${prefix || getFilenameEntryName(entry, fallback)}001`;
+  const key = getFilenameEntryMetadataKey(entry, fallback);
+  if (key === 'overlay') return prefix ? `${prefix}overlay` : 'overlay';
+  if (key === 'version') return `${prefix || 'v'}1`;
+  return `${prefix}${normalizeFilenameToken(getFilenameEntryName(entry, fallback), fallback)}`;
+}
+
 function buildExpectedFilenameExample(fileNamingScheme) {
   const normalizedScheme = normalizeFileNamingScheme({ file_naming_scheme: fileNamingScheme });
-  const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) => {
-    const prefix = (level.abbreviation || getFilenameEntryName(level, `level ${index + 1}`)).trim();
-    return `${prefix}001`;
-  });
-  const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) => {
-    const descriptorName = descriptor.id === 'view'
-      ? 'side'
-      : getFilenameEntryName(descriptor, `descriptor ${index + 1}`);
-    return normalizeFilenameToken(descriptorName, `descriptor${index + 1}`);
-  });
+  const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) =>
+    getDisplayTokenForFilenameEntry(level, `level${index + 1}`, { hierarchy: true })
+  );
+  const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) =>
+    getDisplayTokenForFilenameEntry(descriptor, `descriptor${index + 1}`)
+  );
   const delimiter = normalizedScheme.delimiter || '_';
   return [...hierarchySegments, ...descriptorSegments].filter(Boolean).join(delimiter) + '.type';
 }
@@ -349,26 +385,22 @@ function getFilenameConventionSegments(fileNamingScheme) {
   const normalizedScheme = normalizeFileNamingScheme({ file_naming_scheme: fileNamingScheme });
   const delimiter = normalizedScheme.delimiter || '_';
   const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) => {
-    const prefix = (level.abbreviation || getFilenameEntryName(level, `level ${index + 1}`)).trim();
     return {
       type: 'hierarchy',
       index,
       key: `hierarchy-${index}`,
       label: getFilenameEntryName(level, `Level ${index + 1}`),
-      token: `${prefix}001`,
+      token: getDisplayTokenForFilenameEntry(level, `level${index + 1}`, { hierarchy: true }),
       color: FILENAME_CONVENTION_COLORS[index % FILENAME_CONVENTION_COLORS.length],
     };
   });
   const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) => {
-    const descriptorName = descriptor.id === 'view'
-      ? 'side'
-      : getFilenameEntryName(descriptor, `descriptor ${index + 1}`);
     return {
       type: 'descriptor',
       index,
       key: `descriptor-${index}`,
       label: getFilenameEntryName(descriptor, `Descriptor ${index + 1}`),
-      token: normalizeFilenameToken(descriptorName, `descriptor${index + 1}`),
+      token: getDisplayTokenForFilenameEntry(descriptor, `descriptor${index + 1}`),
       color: FILENAME_CONVENTION_COLORS[(hierarchySegments.length + index) % FILENAME_CONVENTION_COLORS.length],
     };
   });
@@ -449,6 +481,7 @@ function normalizeFileNamingScheme(config) {
     metadata_extractor: source.metadata_extractor && typeof source.metadata_extractor === 'object'
       ? source.metadata_extractor
       : null,
+    overlay_indicator: normalizeOverlayIndicator(source.overlay_indicator || defaultScheme.overlay_indicator),
   };
 }
 
@@ -903,6 +936,23 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
   };
 
 
+  const updateOverlayIndicator = (patch) => {
+    setConfig((previous) => {
+      const currentScheme = normalizeFileNamingScheme(previous);
+      return {
+        ...previous,
+        file_naming_scheme: {
+          ...currentScheme,
+          overlay_indicator: normalizeOverlayIndicator({
+            ...currentScheme.overlay_indicator,
+            ...patch,
+          }),
+        },
+      };
+    });
+  };
+
+
   const handleFilenameExtractorConfigChange = useCallback((extractorState) => {
     if (!filenameExtractorInitializedRef.current) {
       filenameExtractorInitializedRef.current = true;
@@ -1095,6 +1145,7 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
                         <input id={`hierarchy-level-custom-label-${index}`} value={level.label} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { label: event.target.value })} />
                       </>
                     )}
+                    <small className="filename-metadata-key">Metadata key: {getFilenameEntryMetadataKey(level, `hierarchy_${index + 1}`)}</small>
                     <label htmlFor={`hierarchy-level-abbreviation-${index}`}>Abbreviation</label>
                     <input id={`hierarchy-level-abbreviation-${index}`} value={level.abbreviation} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { abbreviation: event.target.value })} />
                   </div>
@@ -1137,6 +1188,7 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
                         <input id={`image-descriptor-custom-label-${index}`} value={descriptor.label} onChange={(event) => updateFileNameEntry('image_descriptors', index, { label: event.target.value })} />
                       </>
                     )}
+                    <small className="filename-metadata-key">Metadata key: {getFilenameEntryMetadataKey(descriptor, `descriptor_${index + 1}`)}</small>
                     <label htmlFor={`image-descriptor-abbreviation-${index}`}>Abbreviation</label>
                     <input id={`image-descriptor-abbreviation-${index}`} value={descriptor.abbreviation} onChange={(event) => updateFileNameEntry('image_descriptors', index, { abbreviation: event.target.value })} />
                   </div>
@@ -1148,6 +1200,59 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
                 Add Image Descriptor
               </button>
             </div>
+
+            <h4>Overlay Matching</h4>
+            <p>
+              Use this when a filename segment marks an image as an overlay. Overlay images are rendered
+              on top of the non-overlay image with the same configured hierarchy/identifier values after
+              the overlay specifier is removed.
+            </p>
+            <div className="filename-option-card filename-overlay-card">
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Enable overlay filename matching"
+                  checked={normalizedFileNamingScheme.overlay_indicator.enabled}
+                  onChange={(event) => updateOverlayIndicator({ enabled: event.target.checked })}
+                />
+                Enable overlay filename matching
+              </label>
+              <label htmlFor="overlay-field-key">Overlay metadata key</label>
+              <select
+                id="overlay-field-key"
+                value={normalizedFileNamingScheme.overlay_indicator.field_key}
+                onChange={(event) => updateOverlayIndicator({ field_key: event.target.value })}
+              >
+                {[...normalizedFileNamingScheme.hierarchy_levels, ...normalizedFileNamingScheme.image_descriptors]
+                  .map((entry, index) => getFilenameEntryMetadataKey(entry, `filename_field_${index + 1}`))
+                  .filter(Boolean)
+                  .filter((key, index, keys) => keys.indexOf(key) === index)
+                  .map((key) => <option key={key} value={key}>{key}</option>)}
+                {!([...normalizedFileNamingScheme.hierarchy_levels, ...normalizedFileNamingScheme.image_descriptors]
+                  .map((entry, index) => getFilenameEntryMetadataKey(entry, `filename_field_${index + 1}`))
+                  .includes(normalizedFileNamingScheme.overlay_indicator.field_key)) && (
+                  <option value={normalizedFileNamingScheme.overlay_indicator.field_key}>{normalizedFileNamingScheme.overlay_indicator.field_key}</option>
+                )}
+              </select>
+              <label htmlFor="overlay-values">Overlay values</label>
+              <input
+                id="overlay-values"
+                aria-label="Overlay values"
+                type="text"
+                value={normalizedFileNamingScheme.overlay_indicator.values.join(', ')}
+                onChange={(event) => updateOverlayIndicator({ values: event.target.value.split(',') })}
+              />
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Remove overlay specifier when matching base image"
+                  checked={normalizedFileNamingScheme.overlay_indicator.remove_from_base_filename}
+                  onChange={(event) => updateOverlayIndicator({ remove_from_base_filename: event.target.checked })}
+                />
+                Match the base image by removing the overlay specifier from the filename
+              </label>
+            </div>
+
 
             <h4>Image Modalities</h4>
             <p>Modalities are also filename values, so define their labels and identifiers alongside the filename descriptor they populate.</p>

@@ -323,6 +323,27 @@ describe('ProjectConfigurationPanel', () => {
     expect(screen.getByDisplayValue('W')).toBeInTheDocument();
   });
 
+
+  test('filename configuration exposes arbitrary image identifiers, versions, and overlay matching controls', async () => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Filename Convention' })).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Add Image Descriptor'));
+    fireEvent.change(screen.getByLabelText('Descriptor 3'), { target: { value: 'version' } });
+    expect(screen.getByDisplayValue('v')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Add Image Descriptor'));
+    fireEvent.change(screen.getByLabelText('Descriptor 4'), { target: { value: 'other' } });
+    fireEvent.change(screen.getAllByLabelText('Custom Label').pop(), { target: { value: 'Camera Pose' } });
+    expect(screen.getByText('Metadata key: camera_pose')).toBeInTheDocument();
+
+    expect(screen.getByLabelText('Enable overlay filename matching')).toBeChecked();
+    expect(screen.getByLabelText('Overlay values')).toHaveValue('true, overlay, ov, mask, heatmap');
+    expect(screen.getByLabelText('Remove overlay specifier when matching base image')).toBeChecked();
+  });
+
   test('adds and removes hierarchy and image descriptor rows', async () => {
     const config = makeConfig('PT1', 'basic');
     mockFetch(config, 'PT1');

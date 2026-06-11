@@ -739,6 +739,55 @@ describe('ImageUploader', () => {
       }));
     });
 
+
+
+    test('preserves arbitrary image version fields and links configured overlay images to base filenames', () => {
+      const payload = buildInspectionPartIngestPayload([
+        {
+          image: { id: 'img-base', filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png' },
+          metadata: {
+            design_number: 'D100',
+            lot_number: 'LOT01',
+            set_number: 'SET01',
+            serial_number: 'SN0001',
+            side: 'front',
+            modality: 'visual',
+            version: 'v1',
+            overlay: false,
+          },
+        },
+        {
+          image: { id: 'img-overlay', filename: 'D100_LOT01_SET01_SN0001_front_visual_v1_overlay.png' },
+          metadata: {
+            design_number: 'D100',
+            lot_number: 'LOT01',
+            set_number: 'SET01',
+            serial_number: 'SN0001',
+            side: 'front',
+            modality: 'visual',
+            version: 'v1',
+            overlay: true,
+            overlay_base_filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png',
+          },
+        },
+      ]);
+
+      expect(payload.unassigned_parts[0].metadata.source_images).toEqual(expect.arrayContaining([
+        expect.objectContaining({ filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png', image_id: 'img-base', version: 'v1' }),
+        expect.objectContaining({
+          filename: 'D100_LOT01_SET01_SN0001_front_visual_v1_overlay.png',
+          image_id: 'img-overlay',
+          overlay: true,
+          overlay_base_filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png',
+          version: 'v1',
+        }),
+      ]));
+      expect(payload.unassigned_parts[0].metadata.filename_identifiers).toEqual({ version: 'v1' });
+      expect(payload.unassigned_parts[0].metadata.overlay_images).toEqual({
+        front: { visual: 'D100_LOT01_SET01_SN0001_front_visual_v1_overlay.png' },
+      });
+    });
+
     test('groups PT3 Build-It stack metadata and maps all images to the part', () => {
       const payload = buildInspectionPartIngestPayload([
         {

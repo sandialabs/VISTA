@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import FilenameMetadataExtractor, { buildConfiguredFilenameFields, extractValues, stripConfiguredAbbreviation, stripExtension } from './FilenameMetadataExtractor';
+import FilenameMetadataExtractor, { applyOverlayIndicatorMetadata, buildConfiguredFilenameFields, extractValues, stripConfiguredAbbreviation, stripExtension } from './FilenameMetadataExtractor';
 
 const CONCURRENT_UPLOADS = 6;
 const S3_IMPORT_LIMIT = 100;
@@ -225,6 +225,46 @@ function firstNonEmptyValue(candidate, keys) {
   return '';
 }
 
+
+const RESERVED_INGEST_METADATA_KEYS = new Set([
+  'design_number',
+  'drawing_number',
+  'drawing',
+  'design',
+  'lot_number',
+  'lot',
+  'set_number',
+  'part_number',
+  'part',
+  'part_group',
+  'batch_number',
+  'batch',
+  'serial_number',
+  'serial',
+  'sn',
+  'side',
+  'side_identifier',
+  'view',
+  'view_name',
+  'modality',
+  'image_modality',
+  'overlay',
+  'overlay_base_filename',
+  'base_filename',
+  'overlay_base_image_id',
+  'base_image_id',
+]);
+
+function getAdditionalFilenameMetadata(candidate) {
+  if (!candidate || typeof candidate !== 'object') return {};
+  return Object.entries(candidate).reduce((acc, [key, value]) => {
+    if (!key || RESERVED_INGEST_METADATA_KEYS.has(key)) return acc;
+    if (value === undefined || value === null || value === '') return acc;
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
 function normalizeHierarchyMetadata(candidate) {
   if (!candidate || typeof candidate !== 'object') return null;
   const normalized = {
@@ -237,6 +277,9 @@ function normalizeHierarchyMetadata(candidate) {
     side: String(firstNonEmptyValue(candidate, ['side', 'side_identifier', 'view', 'view_name'])).trim().toLowerCase(),
     modality: String(firstNonEmptyValue(candidate, ['modality', 'image_modality'])).trim().toLowerCase(),
     overlay: normalizeBoolean(candidate.overlay),
+    overlay_base_filename: String(firstNonEmptyValue(candidate, ['overlay_base_filename', 'base_filename'])).trim(),
+    overlay_base_image_id: String(firstNonEmptyValue(candidate, ['overlay_base_image_id', 'base_image_id'])).trim(),
+    additional_filename_metadata: getAdditionalFilenameMetadata(candidate),
   };
   const hasRequiredHierarchy = HIERARCHY_KEYS
     .filter((key) => key !== 'overlay')
@@ -244,6 +287,9 @@ function normalizeHierarchyMetadata(candidate) {
   if (!hasRequiredHierarchy || (!normalized.set_number && !normalized.batch_number)) return null;
   if (!normalized.set_number) delete normalized.set_number;
   if (!normalized.batch_number) delete normalized.batch_number;
+  if (!normalized.overlay_base_filename) delete normalized.overlay_base_filename;
+  if (!normalized.overlay_base_image_id) delete normalized.overlay_base_image_id;
+  if (Object.keys(normalized.additional_filename_metadata).length === 0) delete normalized.additional_filename_metadata;
   return normalized;
 }
 
@@ -280,6 +326,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
         slice_index: typeof recordMetadata.slice_index === 'number' ? recordMetadata.slice_index : null,
         modality: recordMetadata.modality || null,
         overlay: normalizeBoolean(recordMetadata.overlay),
+        overlay_base_filename: recordMetadata.overlay_base_filename || null,
+        overlay_base_image_id: recordMetadata.overlay_base_image_id || null,
       });
       return;
     }
@@ -301,6 +349,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
     const filename = record.image?.filename || record.filename;
     if (!filename) return;
 
+    const additionalFilenameMetadata = metadata.additional_filename_metadata || {};
+
     if (!partsByKey.has(partKey)) {
       partsByKey.set(partKey, {
         batchName,
@@ -318,6 +368,7 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
           view_images: {},
           overlay_images: {},
           source_images: [],
+          ...(Object.keys(additionalFilenameMetadata).length > 0 ? { filename_identifiers: { ...additionalFilenameMetadata } } : {}),
         },
       });
       if (metadata.set_number) {
@@ -343,6 +394,9 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
       modality,
       overlay: metadata.overlay,
       image_id: record.image?.id || null,
+      overlay_base_filename: metadata.overlay_base_filename || null,
+      overlay_base_image_id: metadata.overlay_base_image_id || null,
+      ...additionalFilenameMetadata,
     });
     if (metadata.overlay) {
       part.metadata.overlay_images[side] = {
@@ -418,7 +472,7 @@ function buildSavedFilenameExtractorConfig(projectConfiguration) {
         const field = configuredFields[index];
         obj[key] = mode === 'simple' ? stripConfiguredAbbreviation(values[index], field) : values[index];
       });
-      return obj;
+      return applyOverlayIndicatorMetadata(filename, obj, values, keys, mode, pattern, scheme);
     },
   };
 }
