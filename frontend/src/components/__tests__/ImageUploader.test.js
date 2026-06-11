@@ -1088,6 +1088,7 @@ describe('ImageUploader', () => {
         parser: 'nsipro-key-value',
         parser_id: 'default',
         parser_version: '1.0.0',
+        parser_hash: 'sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df',
         metadata: {
           capture: {
             operator: 'alice',

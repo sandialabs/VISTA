@@ -1833,6 +1833,166 @@ def test_bulk_ingest_supports_progressive_users_with_discrepancy_counters(client
             assert parts[0]["metadata"]["set_number"] == "SET01"
 
 
+
+def test_bulk_ingest_dereferences_associated_nsipro_metadata(client):
+    headers = {"X-User-Id": "nsipro-ingest@example.com", "X-User-Groups": '["nsipro-ingest"]'}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Nsipro ingest project",
+            "description": "backend authoritative associated metadata ingest",
+            "meta_group_id": "nsipro-ingest",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    metadata_key = "associated_upload_metadata:scan.nsipro:testhash"
+    metadata_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": metadata_key,
+            "value": {
+                "kind": "associated_image_upload_metadata",
+                "filename": "scan.nsipro",
+                "file_type": "nsipro",
+                "parser": "nsipro-key-value",
+                "parser_id": "default",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                "source_filename": "scan.nsipro",
+                "content_hash": "testhash",
+                "metadata": {"capture": {"operator": "alice", "exposure": 12}},
+            },
+        },
+        headers=headers,
+    )
+    assert metadata_resp.status_code == 201, metadata_resp.text
+
+    ingest_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "batches": [],
+            "unassigned_parts": [
+                {
+                    "serial_number": "NSIPRO-001",
+                    "display_name": "NSIPRO part",
+                    "metadata": {
+                        "associated_metadata_ref": metadata_key,
+                        "associated_metadata": {
+                            "project_metadata_key": metadata_key,
+                            "file_type": "nsipro",
+                            "parser_id": "default",
+                            "parser_version": "1.0.0",
+                            "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                        },
+                        "source_images": [
+                            {
+                                "filename": "front.png",
+                                "side": "front",
+                                "modality": "visual",
+                                "associated_metadata_ref": metadata_key,
+                                "associated_metadata": {
+                                    "project_metadata_key": metadata_key,
+                                    "file_type": "nsipro",
+                                    "parser_id": "default",
+                                    "parser_version": "1.0.0",
+                                    "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert ingest_resp.status_code == 200, ingest_resp.text
+
+    parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    parts = parts_resp.json()
+    assert len(parts) == 1
+    metadata = parts[0]["metadata"]
+    assert metadata["nsipro_metadata"] == {"capture": {"operator": "alice", "exposure": 12}}
+    assert metadata["nsipro_payload"]["parser_id"] == "default"
+    assert metadata["nsipro_payload"]["parser_hash"] == "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df"
+    assert metadata["source_images"][0]["nsipro_payload"]["metadata"] == metadata["nsipro_metadata"]
+
+
+def test_bulk_ingest_strict_nsipro_parser_contract_rejects_mismatched_payload(client):
+    headers = {"X-User-Id": "nsipro-strict@example.com", "X-User-Groups": '["nsipro-strict"]'}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Strict nsipro ingest project",
+            "description": "strict parser contract",
+            "meta_group_id": "nsipro-strict",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    config_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert config_resp.status_code == 200, config_resp.text
+    config = config_resp.json()["config"]
+    config["metadata_parsers"] = {
+        "nsipro": {
+            "parser_id": "default",
+            "parser_version": "1.0.0",
+            "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+            "strict_version_match": True,
+        }
+    }
+    save_resp = client.put(f"/api/projects/{project_id}/configuration", json={"config": config}, headers=headers)
+    assert save_resp.status_code == 200, save_resp.text
+
+    metadata_key = "associated_upload_metadata:strict.nsipro:testhash"
+    metadata_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": metadata_key,
+            "value": {
+                "filename": "strict.nsipro",
+                "file_type": "nsipro",
+                "parser_id": "default",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                "metadata": {"operator": "alice"},
+            },
+        },
+        headers=headers,
+    )
+    assert metadata_resp.status_code == 201, metadata_resp.text
+
+    ingest_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "unassigned_parts": [
+                {
+                    "serial_number": "NSIPRO-STRICT-001",
+                    "metadata": {
+                        "associated_metadata_ref": metadata_key,
+                        "associated_metadata": {
+                            "project_metadata_key": metadata_key,
+                            "file_type": "nsipro",
+                            "parser_id": "deployment_b",
+                            "parser_version": "1.0.0",
+                            "parser_hash": "sha256:5992e0724aa1667d6069e6943dac78a43c6a2526b070f7f8d78980cead254ba0",
+                        },
+                    },
+                }
+            ]
+        },
+        headers=headers,
+    )
+    assert ingest_resp.status_code == 422
+    assert ".nsipro parser contract mismatch" in ingest_resp.json()["detail"]
+
 def _create_project_for_part_image_tests(client, name="Part Image Project"):
     headers = {"X-User-Id": "parts-images@example.com", "X-User-Groups": '["parts-images"]'}
     response = client.post(

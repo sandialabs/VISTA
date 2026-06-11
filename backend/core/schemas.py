@@ -377,6 +377,9 @@ class InspectionProjectCurrentUserConfig(BaseModel):
 
 class InspectionProjectNsiproParserConfig(BaseModel):
     parser_id: str = Field(default="default", max_length=128)
+    parser_version: Optional[str] = Field(default=None, max_length=128)
+    parser_hash: Optional[str] = Field(default=None, max_length=255)
+    strict_version_match: bool = False
 
 
 class InspectionProjectMetadataParsersConfig(BaseModel):

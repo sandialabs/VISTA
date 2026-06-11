@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
 from backend.analyze_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow
+from backend.metadata.nsipro_parsers import get_nsipro_parser, parse_nsipro_text
 
 
 router = APIRouter(tags=["Inspection Workbench"])
@@ -451,6 +452,23 @@ def _prune_config_to_source_shape(*, persisted_config: dict, source_config: dict
     return pruned
 
 
+
+def _dump_project_configuration_payload(config: schemas.InspectionProjectConfiguration) -> dict:
+    dumped = config.model_dump(exclude_unset=True)
+    metadata_parsers = dumped.get("metadata_parsers")
+    nsipro_dump = metadata_parsers.get("nsipro") if isinstance(metadata_parsers, dict) else None
+    nsipro_config = getattr(getattr(config, "metadata_parsers", None), "nsipro", None)
+    fields_set = getattr(nsipro_config, "model_fields_set", set())
+    if isinstance(nsipro_dump, dict):
+        for optional_key, default_value in (
+            ("parser_version", None),
+            ("parser_hash", None),
+            ("strict_version_match", False),
+        ):
+            if optional_key not in fields_set and nsipro_dump.get(optional_key) == default_value:
+                nsipro_dump.pop(optional_key, None)
+    return dumped
+
 def _strip_optional_default_sections(config: dict) -> dict:
     if not isinstance(config, dict):
         return {}
@@ -476,74 +494,12 @@ def _project_type_interface_layout_metadata_key(project_type: str) -> str:
 
 
 
-def _parse_scalar_metadata_value(raw_value: object):
-    value = str(raw_value or "").strip()
-    if not value:
-        return ""
-    lowered = value.lower()
-    if lowered in {"true", "false"}:
-        return lowered == "true"
-    if lowered == "null":
-        return None
-    try:
-        if any(char in value for char in [".", "e", "E"]):
-            return float(value)
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return json.loads(value)
-    except Exception:
-        return value.strip("'\"")
-
-
-def _parse_nsipro_key_value_text(text: str) -> dict:
-    root: dict = {}
-    current_section = root
-    for raw_line in str(text or "").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith(("#", ";", "//")):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            section_name = line[1:-1].strip()
-            if not section_name:
-                continue
-            section = root.setdefault(section_name, {})
-            if not isinstance(section, dict):
-                section = {}
-                root[section_name] = section
-            current_section = section
-            continue
-        delimiter_indexes = [index for index in (line.find("="), line.find(":")) if index > 0]
-        if not delimiter_indexes:
-            continue
-        delimiter_index = min(delimiter_indexes)
-        key = line[:delimiter_index].strip()
-        if not key:
-            continue
-        current_section[key] = _parse_scalar_metadata_value(line[delimiter_index + 1:])
-    if not root:
-        raise ValueError("No metadata entries were found in the .nsipro file.")
-    return root
-
-
 def _load_nsipro_metadata_fixture(root: Path) -> Optional[dict]:
     nsipro_files = sorted(root.glob("*.nsipro"))
     if not nsipro_files:
         return None
     nsipro_path = nsipro_files[0]
-    text = nsipro_path.read_text(encoding="utf-8")
-    try:
-        parser = "nsipro-json"
-        parsed_metadata = json.loads(text)
-    except json.JSONDecodeError:
-        parser = "nsipro-key-value"
-        parsed_metadata = _parse_nsipro_key_value_text(text)
-    return {
-        "source_filename": nsipro_path.name,
-        "parser": parser,
-        "metadata": parsed_metadata,
-    }
+    return parse_nsipro_text(nsipro_path.read_text(encoding="utf-8"), nsipro_path.name)
 
 def _metadata_from_hierarchy_filename(path: Path) -> Optional[dict]:
     tokens = path.stem.split("_")
@@ -834,13 +790,245 @@ async def _create_test_image_if_missing(
     return image, True
 
 
+
+def _dict_or_empty(candidate: object) -> dict:
+    return candidate if isinstance(candidate, dict) else {}
+
+
+def _resolve_configured_nsipro_parser(project_config: dict):
+    nsipro_config = _dict_or_empty(_dict_or_empty(project_config.get("metadata_parsers")).get("nsipro"))
+    parser = get_nsipro_parser(nsipro_config.get("parser_id"))
+    expected_version = str(nsipro_config.get("parser_version") or parser.version).strip()
+    expected_hash = str(nsipro_config.get("parser_hash") or parser.parser_hash).strip()
+    strict = bool(
+        nsipro_config.get("strict")
+        or nsipro_config.get("strict_mode")
+        or nsipro_config.get("strict_version_match")
+        or nsipro_config.get("strict_parser_match")
+    )
+    return parser, expected_version, expected_hash, strict
+
+
+async def _load_project_configuration_for_ingest(*, db: AsyncSession, project_id: uuid.UUID, project_type: str | None) -> dict:
+    metadata = await crud.get_project_metadata_by_key(
+        db=db,
+        project_id=project_id,
+        key=PROJECT_CONFIGURATION_KEY,
+    )
+    default_config = _default_project_configuration(project_type)
+    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else {}
+    return {**default_config, **raw_config}
+
+
+def _candidate_metadata_reference_keys(metadata: dict) -> list[str]:
+    keys: list[str] = []
+    raw_ref = metadata.get("associated_metadata_ref")
+    if isinstance(raw_ref, str) and raw_ref.strip():
+        keys.append(raw_ref.strip())
+    associated = metadata.get("associated_metadata")
+    if isinstance(associated, dict):
+        for candidate_key in ("project_metadata_key", "key"):
+            value = associated.get(candidate_key)
+            if isinstance(value, str) and value.strip():
+                keys.append(value.strip())
+    return list(dict.fromkeys(keys))
+
+
+def _extract_stored_nsipro_text(bundle: dict) -> str:
+    for key in ("text", "raw_text", "raw", "raw_payload", "raw_content", "file_content", "content"):
+        value = bundle.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def _validate_nsipro_parser_contract(
+    *,
+    bundle: dict,
+    reference: dict,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> None:
+    if not strict:
+        return
+    observed_parser_id = str(
+        reference.get("parser_id")
+        or bundle.get("parser_id")
+        or configured_parser.id
+    ).strip()
+    observed_version = str(
+        reference.get("parser_version")
+        or bundle.get("parser_version")
+        or expected_version
+    ).strip()
+    observed_hash = str(
+        reference.get("parser_hash")
+        or bundle.get("parser_hash")
+        or expected_hash
+    ).strip()
+    mismatches = []
+    if observed_parser_id != configured_parser.id:
+        mismatches.append(f"parser_id expected {configured_parser.id!r} got {observed_parser_id!r}")
+    if observed_version != expected_version:
+        mismatches.append(f"parser_version expected {expected_version!r} got {observed_version!r}")
+    if observed_hash != expected_hash:
+        mismatches.append("parser_hash mismatch")
+    if mismatches:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=".nsipro parser contract mismatch: " + "; ".join(mismatches),
+        )
+
+
+def _normalize_nsipro_bundle_payload(
+    *,
+    bundle: dict,
+    reference: dict,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> dict | None:
+    if str(bundle.get("file_type") or "").strip().lower() not in {"nsipro", ".nsipro"}:
+        return None
+    _validate_nsipro_parser_contract(
+        bundle=bundle,
+        reference=reference,
+        configured_parser=configured_parser,
+        expected_version=expected_version,
+        expected_hash=expected_hash,
+        strict=strict,
+    )
+
+    raw_text = _extract_stored_nsipro_text(bundle)
+    if raw_text:
+        parsed = parse_nsipro_text(raw_text, str(bundle.get("source_filename") or bundle.get("filename") or ""), configured_parser.id)
+    else:
+        metadata = bundle.get("metadata")
+        if not isinstance(metadata, dict):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Associated .nsipro metadata does not contain parsed metadata or raw text.",
+            )
+        parsed = {
+            "parser": bundle.get("parser") or reference.get("parser") or "nsipro-stored-metadata",
+            "parser_id": configured_parser.id,
+            "parser_version": expected_version,
+            "parser_hash": expected_hash,
+            "source_filename": bundle.get("source_filename") or bundle.get("filename") or reference.get("source_filename"),
+            "metadata": metadata,
+            "warnings": list(bundle.get("warnings") or []),
+        }
+    return {
+        "parser": parsed.get("parser"),
+        "parser_id": parsed.get("parser_id") or configured_parser.id,
+        "parser_version": parsed.get("parser_version") or expected_version,
+        "parser_hash": parsed.get("parser_hash") or expected_hash,
+        "source_filename": parsed.get("source_filename") or bundle.get("source_filename") or bundle.get("filename"),
+        "content_hash": bundle.get("content_hash") or reference.get("content_hash"),
+        "metadata": parsed.get("metadata") if isinstance(parsed.get("metadata"), dict) else {},
+        "warnings": list(parsed.get("warnings") or []),
+    }
+
+
+async def _resolve_associated_nsipro_payload(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    metadata: dict,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> dict | None:
+    for metadata_key in _candidate_metadata_reference_keys(metadata):
+        project_metadata = await crud.get_project_metadata_by_key(db=db, project_id=project_id, key=metadata_key)
+        bundle = project_metadata.value if project_metadata and isinstance(project_metadata.value, dict) else None
+        if not bundle:
+            continue
+        payload = _normalize_nsipro_bundle_payload(
+            bundle=bundle,
+            reference=_dict_or_empty(metadata.get("associated_metadata")),
+            configured_parser=configured_parser,
+            expected_version=expected_version,
+            expected_hash=expected_hash,
+            strict=strict,
+        )
+        if payload:
+            return payload
+    return None
+
+
+async def _normalize_ingest_part_metadata(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    metadata: dict | None,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> dict | None:
+    if metadata is None:
+        return None
+    if not isinstance(metadata, dict):
+        return metadata
+
+    normalized = {**metadata}
+    top_level_payload = await _resolve_associated_nsipro_payload(
+        db=db,
+        project_id=project_id,
+        metadata=normalized,
+        configured_parser=configured_parser,
+        expected_version=expected_version,
+        expected_hash=expected_hash,
+        strict=strict,
+    )
+    if top_level_payload:
+        normalized["nsipro_metadata"] = top_level_payload["metadata"]
+        normalized["nsipro_payload"] = top_level_payload
+
+    source_images = normalized.get("source_images")
+    if isinstance(source_images, list):
+        normalized_source_images = []
+        for record in source_images:
+            if not isinstance(record, dict):
+                normalized_source_images.append(record)
+                continue
+            normalized_record = {**record}
+            record_payload = await _resolve_associated_nsipro_payload(
+                db=db,
+                project_id=project_id,
+                metadata=normalized_record,
+                configured_parser=configured_parser,
+                expected_version=expected_version,
+                expected_hash=expected_hash,
+                strict=strict,
+            )
+            if record_payload:
+                normalized_record["nsipro_payload"] = record_payload
+                normalized.setdefault("nsipro_metadata", record_payload["metadata"])
+            normalized_source_images.append(normalized_record)
+        normalized["source_images"] = normalized_source_images
+    return normalized
+
 async def _bulk_ingest_project_parts(
     *,
     project_id: uuid.UUID,
     payload: schemas.InspectionBulkIngestPayload,
     db: AsyncSession,
     current_user: schemas.User,
+    project_type: str | None = None,
 ):
+    project_config = await _load_project_configuration_for_ingest(
+        db=db,
+        project_id=project_id,
+        project_type=project_type,
+    )
+    configured_parser, expected_version, expected_hash, strict_parser_match = _resolve_configured_nsipro_parser(project_config)
+
     existing_batches = await crud.list_inspection_batches(db=db, project_id=project_id)
     batches_by_name = {batch.name: batch for batch in existing_batches}
     existing_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
@@ -894,6 +1082,15 @@ async def _bulk_ingest_project_parts(
                 counters["parts_skipped_existing"] += 1
                 continue
 
+            normalized_metadata = await _normalize_ingest_part_metadata(
+                db=db,
+                project_id=project_id,
+                metadata=ingest_part.metadata_json,
+                configured_parser=configured_parser,
+                expected_version=expected_version,
+                expected_hash=expected_hash,
+                strict=strict_parser_match,
+            )
             created_part = await crud.create_inspection_part(
                 db=db,
                 project_id=project_id,
@@ -901,7 +1098,7 @@ async def _bulk_ingest_project_parts(
                     batch_id=target_batch_id,
                     serial_number=serial_number,
                     display_name=ingest_part.display_name,
-                    metadata=ingest_part.metadata_json,
+                    metadata=normalized_metadata,
                     review_state=ingest_part.review_state,
                 ),
                 created_by=current_user.email,
@@ -1951,6 +2148,7 @@ async def get_project_configuration(
 @router.put(
     "/projects/{project_id}/configuration",
     response_model=schemas.InspectionProjectConfigurationResponse,
+    response_model_exclude_unset=True,
 )
 async def update_project_configuration(
     project_id: uuid.UUID,
@@ -1964,7 +2162,7 @@ async def update_project_configuration(
         metadata=schemas.ProjectMetadataCreate(
             project_id=project_id,
             key=PROJECT_CONFIGURATION_KEY,
-            value=payload.config.model_dump(exclude_unset=True),
+            value=_dump_project_configuration_payload(payload.config),
         ),
         created_by=current_user.email,
     )
@@ -2251,6 +2449,7 @@ async def load_project_test_data(
         payload=ingest_payload,
         db=db,
         current_user=current_user,
+        project_type=project.project_type,
     )
     return {
         "project_id": project_id,
@@ -2271,10 +2470,11 @@ async def bulk_ingest_project_parts(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
     return await _bulk_ingest_project_parts(
         project_id=project_id,
         payload=payload,
         db=db,
         current_user=current_user,
+        project_type=project.project_type,
     )
