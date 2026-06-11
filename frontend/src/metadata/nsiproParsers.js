@@ -1,5 +1,10 @@
 const DEFAULT_NSIPRO_PARSER_ID = 'default';
 const GENERIC_NSIPRO_PARSER_VERSION = '1.0.0';
+const NSIPRO_PARSER_HASHES = {
+  default: 'sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df',
+  deployment_a: 'sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb',
+  deployment_b: 'sha256:5992e0724aa1667d6069e6943dac78a43c6a2526b070f7f8d78980cead254ba0',
+};
 
 function parseScalarMetadataValue(rawValue) {
   const value = String(rawValue || '').trim();
@@ -14,11 +19,12 @@ function parseScalarMetadataValue(rawValue) {
   }
 }
 
-function buildNsiproResult({ parser, parserVersion, metadata, warnings = [], sourceFilename = '' }) {
+function buildNsiproResult({ parser, parserVersion, parserHash = NSIPRO_PARSER_HASHES[DEFAULT_NSIPRO_PARSER_ID], metadata, warnings = [], sourceFilename = '' }) {
   return {
     parser,
     parser_id: DEFAULT_NSIPRO_PARSER_ID,
     parser_version: parserVersion,
+    parser_hash: parserHash,
     metadata,
     warnings,
     source_filename: sourceFilename,
@@ -164,5 +170,6 @@ export function parseNsiproText(text, filename = '', options = {}) {
   return {
     ...result,
     parser_id: parserEntry.id,
+    parser_hash: NSIPRO_PARSER_HASHES[parserEntry.id] || result.parser_hash,
   };
 }

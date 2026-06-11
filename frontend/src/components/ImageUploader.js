@@ -92,6 +92,11 @@ function stableStringHash(value = '') {
   return hash.toString(16).padStart(8, '0');
 }
 
+// Associated .nsipro files are decoded in the frontend before upload ingest so
+// users get immediate validation feedback and the ingest payload can include the
+// parser id/version/hash contract. The backend remains authoritative: ingest
+// dereferences associated_metadata_ref from project metadata, validates parser
+// contract fields in strict mode, and normalizes the persisted .nsipro payload.
 export function parseAssociatedMetadataText(text, filename = '', options = {}) {
   const extension = getFileExtension(filename);
   if (!ASSOCIATED_METADATA_EXTENSIONS.includes(extension)) {
@@ -141,6 +146,7 @@ function buildAssociatedMetadataBundle(file, text, parsedResult) {
       parser_id: parsedResult.parser_id,
       requested_parser_id: parsedResult.requested_parser_id,
       parser_version: parsedResult.parser_version,
+      parser_hash: parsedResult.parser_hash,
       warnings: Array.isArray(parsedResult.warnings) ? parsedResult.warnings : [],
       source_filename: parsedResult.source_filename || file?.name || 'metadata',
       content_hash: contentHash,
@@ -244,6 +250,7 @@ function buildAssociatedMetadataImageReference(bundle) {
     parser_id: bundle.value.parser_id,
     requested_parser_id: bundle.value.requested_parser_id,
     parser_version: bundle.value.parser_version,
+    parser_hash: bundle.value.parser_hash,
     warnings: Array.isArray(bundle.value.warnings) ? bundle.value.warnings : [],
     source_filename: bundle.value.source_filename || bundle.value.filename,
     content_hash: bundle.value.content_hash,
