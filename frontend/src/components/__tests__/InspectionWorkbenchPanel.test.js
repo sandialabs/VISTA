@@ -641,6 +641,7 @@ describe('InspectionWorkbenchPanel', () => {
             nsipro_metadata: {
               source_filename: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
               parser: 'nsipro-key-value',
+              fields: { voltage_kv: 90, exposure_ms: 8.75 },
               metadata: {
                 Application: { application_info: 'NIS-Elements AR 5.30.00 (Build 1688)' },
                 Microscope: { microscope_name: 'Nikon Ti2-E Inverted Microscope', objective_name: 'Plan Apo Lambda 20x' },
@@ -657,7 +658,7 @@ describe('InspectionWorkbenchPanel', () => {
                 side: 'front',
                 modality: 'visual',
                 selected_metadata_file: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
-                nsipro_payload: { voltage_kv: 80 },
+                nsipro_payload: { voltage_kv: 80, voxel_size_um: 1.25 },
               },
             ],
             annotations: [],
@@ -676,6 +677,10 @@ describe('InspectionWorkbenchPanel', () => {
     expect(within(modal).getByRole('tab', { name: '.nsipro' })).toHaveAttribute('aria-selected', 'true');
     expect(within(modal).getByText('metadata.nsipro_metadata.source_filename')).toBeInTheDocument();
     expect(within(modal).getAllByText(/PT3_GEOMETRIC_DUAL_LABEL\.nsipro/).length).toBeGreaterThan(0);
+    expect(within(modal).getByText('metadata.nsipro_metadata.fields.voltage_kv')).toBeInTheDocument();
+    expect(within(modal).getByText('90')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.fields.exposure_ms')).toBeInTheDocument();
+    expect(within(modal).getByText('8.75')).toBeInTheDocument();
     expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Application.application_info')).toBeInTheDocument();
     expect(within(modal).getByText('NIS-Elements AR 5.30.00 (Build 1688)')).toBeInTheDocument();
     expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Microscope.microscope_name')).toBeInTheDocument();
@@ -684,6 +689,8 @@ describe('InspectionWorkbenchPanel', () => {
     expect(within(modal).getByText('12.5')).toBeInTheDocument();
     expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Volume.slices')).toBeInTheDocument();
     expect(within(modal).getByText('metadata.source_images[0].nsipro_payload.voltage_kv')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.source_images[0].nsipro_payload.voxel_size_um')).toBeInTheDocument();
+    expect(within(modal).getByText('1.25')).toBeInTheDocument();
     expect(within(modal).queryByText('metadata.alloy')).not.toBeInTheDocument();
 
     fireEvent.click(within(modal).getByRole('tab', { name: 'Other' }));
@@ -691,6 +698,9 @@ describe('InspectionWorkbenchPanel', () => {
     expect(within(modal).getByText('metadata.alloy')).toBeInTheDocument();
     expect(within(modal).getByText('Ti-6Al-4V')).toBeInTheDocument();
     expect(within(modal).queryByText('metadata.nsipro_metadata.source_filename')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.fields.voltage_kv')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.fields.exposure_ms')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.source_images[0].nsipro_payload.voxel_size_um')).not.toBeInTheDocument();
     expect(within(modal).queryByText('metadata.source_images[0].selected_metadata_file')).not.toBeInTheDocument();
   });
 

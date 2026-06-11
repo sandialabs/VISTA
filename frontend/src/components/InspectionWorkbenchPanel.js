@@ -290,8 +290,21 @@ function collectNsiproMetadataEntries(value, path = 'metadata', inNsiproContext 
   if (isPlainMetadataObject(value)) {
     return Object.entries(value).flatMap(([key, entryValue]) => {
       const nextPath = formatMetadataPath(path, key);
-      const nextInNsiproContext = inNsiproContext || isNsiproMetadataKey(key) || isNsiproMetadataString(entryValue);
-      return collectNsiproMetadataEntries(entryValue, nextPath, nextInNsiproContext);
+      const keyStartsNsiproContext = isNsiproMetadataKey(key);
+      const valueIsNsiproReference = isNsiproMetadataString(entryValue);
+      const shouldFlattenNsiproObject = keyStartsNsiproContext && (
+        isPlainMetadataObject(entryValue) || Array.isArray(entryValue)
+      );
+
+      if (shouldFlattenNsiproObject) {
+        return collectNsiproMetadataEntries(entryValue, nextPath, true);
+      }
+
+      return collectNsiproMetadataEntries(
+        entryValue,
+        nextPath,
+        inNsiproContext || keyStartsNsiproContext || valueIsNsiproReference
+      );
     });
   }
   if (inNsiproContext || isNsiproMetadataString(value)) {
