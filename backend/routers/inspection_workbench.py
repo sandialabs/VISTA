@@ -71,6 +71,11 @@ SLICE_SEGMENTATION_METHOD_IDS = {
     "segmentation.anomalib.placeholder",
     "segmentation.sam.placeholder",
     "segmentation.opencv.placeholder",
+    "segmentation.connected_components",
+    "segmentation.watershed_seeds",
+    "ml.sam.segment_anything",
+    "ml.yolov8.segment",
+    "ml.yolov8.detect",
 }
 
 
@@ -1154,15 +1159,12 @@ async def _resolve_project_type_interface_layout_default(
     project_type: str,
 ) -> Optional[dict]:
     normalized_project_type = _normalize_project_type(project_type)
-    # PT2 intentionally inherits the PT1 inspection interface unless a project-level
-    # default_model is already saved on the PT2 project configuration.
-    default_project_type = "PT1" if normalized_project_type == "PT2" else normalized_project_type
-    metadata_key = _project_type_interface_layout_metadata_key(default_project_type)
+    metadata_key = _project_type_interface_layout_metadata_key(normalized_project_type)
     stmt = (
         select(models.ProjectMetadata.value)
         .join(models.Project, models.Project.id == models.ProjectMetadata.project_id)
         .where(
-            models.Project.project_type == default_project_type,
+            models.Project.project_type == normalized_project_type,
             models.ProjectMetadata.key == metadata_key,
         )
         .order_by(models.ProjectMetadata.updated_at.desc())

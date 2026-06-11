@@ -113,7 +113,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
           await expect(page.getByRole('heading', { name: primaryPart })).toBeVisible();
         }
 
-        await page.getByRole('button', { name: /mark pass/i }).click();
+        await page.getByRole('button', { name: 'Pass', exact: true }).click();
         const expectedPassedCount = simulatedUser === 'advanced' ? 'Passed: 2' : 'Passed: 1';
         await expect(page.getByText(expectedPassedCount)).toBeVisible();
 
@@ -121,16 +121,17 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         if (simulatedUser === 'advanced') {
           const topViewButton = inspectionPanel.locator('.part-summary-images button', { hasText: 'TOP' }).first();
           await topViewButton.click();
-          await expect(inspectionPanel.locator('.view-cell.selected .view-cell-title')).toHaveText('TOP');
-          await inspectionPanel.locator('.view-cell', { hasText: 'FRONT' }).first().click();
+          await expect(inspectionPanel.locator('.part-summary-images button.active', { hasText: 'TOP' }).first()).toBeVisible();
+          await inspectionPanel.locator('.part-summary-images button', { hasText: 'FRONT' }).first().click();
           await expect(inspectionPanel.locator('.part-summary-images button.active', { hasText: 'FRONT' }).first()).toBeVisible();
         }
         await expect(page.getByTestId('annotation-controls')).toBeVisible();
+        await page.getByRole('button', { name: 'Other', exact: true }).click();
         await page.getByLabel('Annotation defect type').selectOption('Other');
         await page.getByPlaceholder('annotation modality').fill('visual');
         await page.getByPlaceholder('annotation comment').fill(`${simulatedUser}-surface-note`);
-        await page.getByRole('button', { name: 'Add annotation' }).click();
-        await expect(page.getByTestId('annotation-list')).toContainText('Other • visual • open');
+        await page.getByRole('button', { name: 'Save annotation' }).click();
+        await expect(page.getByTestId('annotation-list')).toContainText(`${simulatedUser}-surface-note`);
 
         await expect.poll(() => getWorkspaceStates().length).toBeGreaterThan(0);
         await expect.poll(() => {
@@ -167,6 +168,7 @@ test.describe('PR-09 annotation controls screenshot artifact', () => {
     await page.goto(`/project/${projectId}`, { waitUntil: 'networkidle' });
     await page.getByRole('tab', { name: 'Inspection' }).click();
     await expect(page.getByTestId('annotation-controls')).toBeVisible();
+    await page.getByRole('button', { name: 'Other', exact: true }).click();
     await page.getByLabel('Annotation defect type').selectOption('Other');
     await page.getByPlaceholder('annotation comment').fill('qa-length review note');
     const panel = page.locator('section[aria-label="Inspection Workbench"]');

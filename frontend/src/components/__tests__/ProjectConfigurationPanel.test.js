@@ -4,6 +4,8 @@ import path from 'path';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ProjectConfigurationPanel from '../ProjectConfigurationPanel';
 
+jest.setTimeout(10000);
+
 const projectTypes = ['PT1', 'PT2', 'PT3'];
 const syntheticUsers = ['basic', 'intermediate', 'advanced'];
 

@@ -820,7 +820,7 @@ describe('InspectionWorkbenchPanel', () => {
       expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: 'assigned-a.png', to_part_id: null }),
+        body: JSON.stringify({ filename: 'assigned-a.png', image_id: 'img-assigned-a', to_part_id: null }),
       });
     });
     await waitFor(() => expect(parts[0].metadata.source_images).toHaveLength(0));

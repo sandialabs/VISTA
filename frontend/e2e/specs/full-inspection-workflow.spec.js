@@ -36,7 +36,7 @@ test.describe('Full inspection workflow end-to-end', () => {
 
     await page.getByRole('tab', { name: 'Project Data' }).click();
     await expect(page.getByTestId('project-data-summary')).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Load Images' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Load Images', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expectRawImageCount(page, 0);
 
     const uploads = [
@@ -60,7 +60,7 @@ test.describe('Full inspection workflow end-to-end', () => {
     const frontImageButton = workbench.locator('.part-summary-images button', { hasText: 'FRONT' }).first();
     await expect(frontImageButton).toBeVisible();
     await frontImageButton.click();
-    await expect(workbench.locator('.view-cell.selected .view-cell-title')).toHaveText('FRONT');
+    await expect(workbench.locator('.part-summary-images button.active', { hasText: 'FRONT' }).first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Pass' }).click();
     await expect(page.getByText('Passed: 1')).toBeVisible();

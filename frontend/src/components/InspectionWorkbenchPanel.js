@@ -93,6 +93,7 @@ const SEGMENTATION_ML_METHOD_GROUPS = [
     id: 'sam',
     label: 'SAM',
     methods: [
+      { id: 'ml.sam.segment_anything', label: 'Segment Anything (SAM)' },
       { id: 'segmentation.sam.placeholder', label: 'SAM (placeholder)' },
     ],
   },
@@ -107,6 +108,7 @@ const SEGMENTATION_ML_METHOD_GROUPS = [
 const DEFAULT_SEGMENTATION_ML_PARAMETERS = {
   'segmentation.yolo.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
   'segmentation.anomalib.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
+  'ml.sam.segment_anything': { variant: 'sam2.1_hiera_large', prompt_mode: 'automatic', prompt_json: {}, min_mask_region_area: 8, max_foreground_fraction: 0.85 },
   'segmentation.sam.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
   'segmentation.opencv.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
 };
@@ -208,6 +210,12 @@ function SegmentationToolIcon({ icon }) {
   );
 }
 const SEGMENTATION_ML_PARAMETER_FIELDS = {
+  'ml.sam.segment_anything': [
+    { name: 'variant', label: 'Variant', type: 'text' },
+    { name: 'prompt_mode', label: 'Prompt mode', type: 'text' },
+    { name: 'min_mask_region_area', label: 'Min mask area', type: 'number', min: 0, step: 1 },
+    { name: 'max_foreground_fraction', label: 'Max foreground fraction', type: 'number', min: 0, max: 1, step: 0.01 },
+  ],
   'segmentation.yolo.placeholder': [
     { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
     { name: 'function_path', label: 'Function path', type: 'text' },
@@ -6690,8 +6698,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      setFullscreenAnnotationPreview(null);
 	      setFullscreenBoxActive(false);
 	    }
-        setFullscreenBoxActive(false);
-        setFullscreenCropActive(false);
+        if (fullscreenCropActive) setFullscreenCropActive(false);
 	    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
 	  };
 
