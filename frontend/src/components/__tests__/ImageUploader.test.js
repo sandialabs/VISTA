@@ -979,6 +979,7 @@ describe('ImageUploader', () => {
       const { parseAssociatedMetadataText } = await import('../ImageUploader');
       expect(parseAssociatedMetadataText('[capture]\noperator=alice\nexposure: 12\nvalid=true', 'scan.nsipro')).toEqual({
         parser: 'nsipro-key-value',
+        parser_version: '1.0.0',
         metadata: {
           capture: {
             operator: 'alice',
@@ -986,6 +987,8 @@ describe('ImageUploader', () => {
             valid: true,
           },
         },
+        warnings: [],
+        source_filename: 'scan.nsipro',
       });
     });
 

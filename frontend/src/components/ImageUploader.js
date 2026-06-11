@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import FilenameMetadataExtractor, { applyOverlayIndicatorMetadata, buildConfiguredFilenameFields, extractValues, stripConfiguredAbbreviation, stripExtension } from './FilenameMetadataExtractor';
+import { parseNsiproText } from '../metadata/nsiproParsers';
 
 const CONCURRENT_UPLOADS = 6;
 const S3_IMPORT_LIMIT = 100;
@@ -91,49 +92,7 @@ function stableStringHash(value = '') {
   return hash.toString(16).padStart(8, '0');
 }
 
-function parseScalarMetadataValue(rawValue) {
-  const value = String(rawValue || '').trim();
-  if (!value) return '';
-  if (/^(true|false)$/i.test(value)) return value.toLowerCase() === 'true';
-  if (/^null$/i.test(value)) return null;
-  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value);
-  try {
-    return JSON.parse(value);
-  } catch (err) {
-    return value.replace(/^['"]|['"]$/g, '');
-  }
-}
-
-function parseNsiproKeyValueText(text) {
-  const root = {};
-  let currentSection = root;
-  String(text || '').split(/\r?\n/).forEach((rawLine) => {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#') || line.startsWith(';') || line.startsWith('//')) return;
-    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
-    if (sectionMatch) {
-      const sectionName = sectionMatch[1].trim();
-      if (!sectionName) return;
-      if (!root[sectionName] || typeof root[sectionName] !== 'object') root[sectionName] = {};
-      currentSection = root[sectionName];
-      return;
-    }
-    const delimiterIndex = ['=', ':']
-      .map((delimiter) => line.indexOf(delimiter))
-      .filter((index) => index > 0)
-      .sort((left, right) => left - right)[0];
-    if (!delimiterIndex) return;
-    const key = line.slice(0, delimiterIndex).trim();
-    if (!key) return;
-    currentSection[key] = parseScalarMetadataValue(line.slice(delimiterIndex + 1));
-  });
-  if (Object.keys(root).length === 0) {
-    throw new Error('No metadata entries were found in the .nsipro file.');
-  }
-  return root;
-}
-
-export function parseAssociatedMetadataText(text, filename = '') {
+export function parseAssociatedMetadataText(text, filename = '', options = {}) {
   const extension = getFileExtension(filename);
   if (!ASSOCIATED_METADATA_EXTENSIONS.includes(extension)) {
     throw new Error('Unsupported metadata file type. Choose a .json or .nsipro file.');
@@ -152,11 +111,7 @@ export function parseAssociatedMetadataText(text, filename = '') {
     }
   }
 
-  try {
-    return { parser: 'nsipro-json', metadata: JSON.parse(trimmed) };
-  } catch (jsonError) {
-    return { parser: 'nsipro-key-value', metadata: parseNsiproKeyValueText(trimmed) };
-  }
+  return parseNsiproText(trimmed, filename, options);
 }
 
 
@@ -183,6 +138,9 @@ function buildAssociatedMetadataBundle(file, text, parsedResult) {
       filename: file?.name || 'metadata',
       file_type: extension.replace(/^\./, ''),
       parser: parsedResult.parser,
+      parser_version: parsedResult.parser_version,
+      warnings: Array.isArray(parsedResult.warnings) ? parsedResult.warnings : [],
+      source_filename: parsedResult.source_filename || file?.name || 'metadata',
       content_hash: contentHash,
       size_bytes: typeof file?.size === 'number' ? file.size : text.length,
       metadata: parsedResult.metadata,
@@ -198,6 +156,9 @@ function buildAssociatedMetadataImageReference(bundle) {
     filename: bundle.value.filename,
     file_type: bundle.value.file_type,
     parser: bundle.value.parser,
+    parser_version: bundle.value.parser_version,
+    warnings: Array.isArray(bundle.value.warnings) ? bundle.value.warnings : [],
+    source_filename: bundle.value.source_filename || bundle.value.filename,
     content_hash: bundle.value.content_hash,
   };
 }
@@ -572,7 +533,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setAssociatedMetadataParsing(true);
     try {
       const text = await readAssociatedMetadataFileText(file);
-      const parsedResult = parseAssociatedMetadataText(text, file.name);
+      const parsedResult = parseAssociatedMetadataText(text, file.name, { projectConfiguration });
       setAssociatedMetadataBundle(buildAssociatedMetadataBundle(file, text, parsedResult));
     } catch (err) {
       setAssociatedMetadataError(err?.message || 'Unable to parse associated metadata file.');
