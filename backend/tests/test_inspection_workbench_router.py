@@ -1459,9 +1459,31 @@ def test_load_test_data_seeds_project_type_fixtures(client, project_type):
         assert parts[0]["metadata"]["mpr"]["axis_labels"] == ["XY", "XZ", "YZ"]
         assert parts[0]["metadata"]["volume_shape"] == {"axial": 64, "coronal": 96, "sagittal": 128}
         source_images = parts[0]["metadata"]["source_images"]
-        assert len(source_images) == 64
-        assert source_images[16]["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
-        assert source_images[16]["metadata"]["slice_index"] == 16
+        assert len(source_images) == 128
+        base_images = [source_image for source_image in source_images if not source_image["metadata"].get("overlay")]
+        overlay_images = [source_image for source_image in source_images if source_image["metadata"].get("overlay")]
+        assert len(base_images) == 64
+        assert len(overlay_images) == 64
+        slice_16 = next(
+            source_image
+            for source_image in base_images
+            if source_image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
+        )
+        assert slice_16["metadata"]["slice_index"] == 16
+        overlay_16 = next(
+            source_image
+            for source_image in overlay_images
+            if source_image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016_overlay.png"
+        )
+        assert overlay_16["metadata"]["overlay_base_filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
+        assert overlay_16["metadata"]["modality"] == "segmentation"
+        nsipro_metadata = parts[0]["metadata"]["nsipro_metadata"]
+        assert nsipro_metadata["source_filename"] == "PT3_GEOMETRIC_DUAL_LABEL.nsipro"
+        assert nsipro_metadata["parser"] == "nsipro-key-value"
+        assert nsipro_metadata["metadata"]["Application"]["application_info"].startswith("NIS-Elements")
+        assert nsipro_metadata["metadata"]["Microscope"]["microscope_name"] == "Nikon Ti2-E Inverted Microscope"
+        assert nsipro_metadata["metadata"]["Camera"]["exposure_ms"] == 12.5
+        assert nsipro_metadata["metadata"]["Volume"]["slices"] == 64
     elif project_type == "PT1":
         source_images = [
             source_image
@@ -1469,15 +1491,40 @@ def test_load_test_data_seeds_project_type_fixtures(client, project_type):
             for source_image in part["metadata"].get("source_images", [])
         ]
         filenames = {source_image["filename"] for source_image in source_images}
-        assert payload["images_received"] == 16
+        assert payload["images_received"] == 20
         assert "D1001_LOT01_SET01_SN0001_front_visual_false.jpg" in filenames
         assert "D1002_LOT02_SET01_SN0004_back_heatmap_true.jpg" in filenames
+        assert "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt" in filenames
+        assert "D1002_LOT02_SET01_SN0004_back_segmentation_true.txt" in filenames
+        text_overlay = next(
+            source_image
+            for source_image in source_images
+            if source_image["filename"] == "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt"
+        )
+        assert text_overlay["overlay"] is True
+        assert text_overlay["modality"] == "segmentation"
         assert len(parts) == 4
         assert all(part["batch_id"] is None for part in parts)
         assert parts[0]["metadata"]["source"] == "vista-test-data"
         assert parts[0]["metadata"]["design_number"].startswith("D")
         assert parts[0]["metadata"]["set_number"].startswith("SET")
     else:
+        source_images = [
+            source_image
+            for part in parts
+            for source_image in part["metadata"].get("source_images", [])
+        ]
+        filenames = {source_image["filename"] for source_image in source_images}
+        assert payload["images_received"] == 20
+        assert "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt" in filenames
+        assert "D1002_LOT02_SET01_SN0004_back_segmentation_true.txt" in filenames
+        text_overlay = next(
+            source_image
+            for source_image in source_images
+            if source_image["filename"] == "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt"
+        )
+        assert text_overlay["overlay"] is True
+        assert text_overlay["modality"] == "segmentation"
         assert parts[0]["metadata"]["design_number"].startswith("D")
 
 
@@ -1505,23 +1552,26 @@ def test_pt3_load_test_data_survives_fixture_image_upload_failure(client):
     assert load_resp.status_code == 200, load_resp.text
     payload = load_resp.json()
     assert payload["project_type"] == "PT3"
-    assert payload["images_created"] == 64
+    assert payload["images_created"] == 128
     assert payload["ingest"]["counters"]["parts_created"] == 1
 
     images_resp = client.get(f"/api/projects/{project_id}/images?include_deleted=true&limit=2000", headers=headers)
     assert images_resp.status_code == 200, images_resp.text
     images = images_resp.json()
-    assert len(images) == 64
+    assert len(images) == 128
     assert images[0]["metadata"]["storage_status"] == "metadata_only"
-    assert images[16]["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
-    assert images[16]["metadata"]["slice_index"] == 16
+    slice_16 = next(image for image in images if image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png")
+    assert slice_16["metadata"]["slice_index"] == 16
+    overlay_16 = next(image for image in images if image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016_overlay.png")
+    assert overlay_16["metadata"]["overlay"] is True
+    assert overlay_16["metadata"]["overlay_base_filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
 
     parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
     assert parts_resp.status_code == 200, parts_resp.text
     part_metadata = parts_resp.json()[0]["metadata"]
     assert part_metadata["mpr"]["axis_labels"] == ["XY", "XZ", "YZ"]
     assert part_metadata["volume_shape"] == {"axial": 64, "coronal": 96, "sagittal": 128}
-    assert len(part_metadata["source_images"]) == 64
+    assert len(part_metadata["source_images"]) == 128
 
 
 def test_pt3_load_test_data_survives_fixture_image_upload_exception(client):
@@ -1548,13 +1598,13 @@ def test_pt3_load_test_data_survives_fixture_image_upload_exception(client):
     assert load_resp.status_code == 200, load_resp.text
     payload = load_resp.json()
     assert payload["project_type"] == "PT3"
-    assert payload["images_created"] == 64
+    assert payload["images_created"] == 128
     assert payload["ingest"]["counters"]["parts_created"] == 1
 
     images_resp = client.get(f"/api/projects/{project_id}/images?include_deleted=true&limit=2000", headers=headers)
     assert images_resp.status_code == 200, images_resp.text
     images = images_resp.json()
-    assert len(images) == 64
+    assert len(images) == 128
     assert images[0]["metadata"]["storage_status"] == "metadata_only"
 
 

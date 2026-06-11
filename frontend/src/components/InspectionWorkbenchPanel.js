@@ -279,21 +279,25 @@ function formatMetadataPath(parentPath, key) {
   return parentPath ? `${parentPath}.${key}` : String(key);
 }
 
-function collectNsiproMetadataEntries(value, path = 'metadata') {
-  if (!value || typeof value !== 'object') return [];
+function collectNsiproMetadataEntries(value, path = 'metadata', inNsiproContext = false) {
   if (Array.isArray(value)) {
-    return value.flatMap((entry, index) => collectNsiproMetadataEntries(entry, formatMetadataPath(path, index)));
+    return value.flatMap((entry, index) => collectNsiproMetadataEntries(
+      entry,
+      formatMetadataPath(path, index),
+      inNsiproContext
+    ));
   }
-  return Object.entries(value).flatMap(([key, entryValue]) => {
-    const nextPath = formatMetadataPath(path, key);
-    if (isNsiproMetadataKey(key) || isNsiproMetadataString(entryValue)) {
-      return [{ path: nextPath, value: entryValue }];
-    }
-    if (entryValue && typeof entryValue === 'object') {
-      return collectNsiproMetadataEntries(entryValue, nextPath);
-    }
-    return [];
-  });
+  if (isPlainMetadataObject(value)) {
+    return Object.entries(value).flatMap(([key, entryValue]) => {
+      const nextPath = formatMetadataPath(path, key);
+      const nextInNsiproContext = inNsiproContext || isNsiproMetadataKey(key) || isNsiproMetadataString(entryValue);
+      return collectNsiproMetadataEntries(entryValue, nextPath, nextInNsiproContext);
+    });
+  }
+  if (inNsiproContext || isNsiproMetadataString(value)) {
+    return [{ path, value }];
+  }
+  return [];
 }
 
 function omitNsiproMetadata(value, key = '') {

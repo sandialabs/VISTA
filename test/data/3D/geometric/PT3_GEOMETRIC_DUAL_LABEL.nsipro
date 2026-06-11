@@ -1,0 +1,44 @@
+# Synthetic NIS-Elements / NIS-Express metadata sidecar for VISTA PT3 fixture
+[Application]
+application_info=NIS-Elements AR 5.30.00 (Build 1688)
+software_family=NIS-Elements
+metadata_source=.nsipro
+
+[Acquisition]
+acquisition_datetime=2026-02-17T14:22:31Z
+operator=QA Microscopist
+experiment_name=PT3 synthetic MPR orientation verification
+sample_id=PT3_SYNTH_MPR_001
+
+[Microscope]
+microscope_name=Nikon Ti2-E Inverted Microscope
+objective_name=Plan Apo Lambda 20x
+objective_magnification=20
+numerical_aperture=0.75
+
+[Camera]
+camera_name=DS-Qi2 Monochrome Camera
+exposure_ms=12.5
+bit_depth=16
+sensor_mode=mono16
+
+[Calibration]
+pixel_size_um=2.5
+z_step_um=5
+voxel_size_um=[2.5, 2.5, 5.0]
+unit=um
+
+[Volume]
+width_px=128
+height_px=96
+slices=64
+axis_order=Z,Y,X
+
+[Stage]
+stage_x_um=1024.25
+stage_y_um=512.5
+stage_z_um=250.0
+
+[Channels]
+channel_1_name=Brightfield
+channel_1_wavelength_nm=550
