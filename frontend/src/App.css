@@ -8023,6 +8023,8 @@ ul li:hover {
   .project-configuration-panel .filename-convention-heading code {
     text-align: left;
   }
+}
+
 .view-cell-title-crop-child {
   align-items: flex-start;
 }
@@ -8046,4 +8048,14 @@ ul li:hover {
   font-size: 0.72rem;
   font-weight: 500;
   letter-spacing: normal;
+}
+
+.project-configuration-panel .filename-metadata-key {
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.project-configuration-panel .filename-overlay-card {
+  max-width: 760px;
 }

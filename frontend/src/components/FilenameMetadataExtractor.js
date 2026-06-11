@@ -11,7 +11,7 @@ export const VISTA_HIERARCHY_KEYS = [
 ];
 const VISTA_HIERARCHY_DELIMITER = '_';
 
-const CONFIG_ID_TO_METADATA_KEY = {
+export const CONFIG_ID_TO_METADATA_KEY = {
   drawing_number: 'design_number',
   design_number: 'design_number',
   lot_number: 'lot_number',
@@ -19,20 +19,98 @@ const CONFIG_ID_TO_METADATA_KEY = {
   set_number: 'set_number',
   batch_number: 'batch_number',
   batch: 'batch_number',
+  sub_batch: 'sub_batch',
   part_number: 'set_number',
   view: 'side',
   side: 'side',
   modality: 'modality',
   overlay: 'overlay',
+  version: 'version',
+  image_version: 'version',
+  image_identifier: 'image_identifier',
+  image_sequence: 'image_sequence',
+  channel: 'channel',
+  wavelength: 'wavelength',
+  exposure: 'exposure',
+  lighting: 'lighting',
 };
+
+export function metadataKeyFromFilenameEntry(entry, fallback = '') {
+  const id = String(entry?.id || '').trim();
+  const label = String(entry?.label || '').trim();
+  const rawKey = CONFIG_ID_TO_METADATA_KEY[id] || (id && id !== 'other' ? id : label) || fallback;
+  return String(rawKey || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
 
 function normalizeConfigEntry(entry) {
   const id = String(entry?.id || '').trim();
+  const key = metadataKeyFromFilenameEntry(entry);
   return {
     id,
-    key: CONFIG_ID_TO_METADATA_KEY[id] || id,
+    key,
     abbreviation: String(entry?.abbreviation || '').trim(),
   };
+}
+
+
+export function normalizeOverlayIndicatorConfig(source = {}) {
+  const values = Array.isArray(source.values) ? source.values : String(source.values || '').split(',');
+  const normalizedValues = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return {
+    enabled: source.enabled !== false,
+    field_key: String(source.field_key || 'overlay').trim() || 'overlay',
+    values: normalizedValues.length > 0 ? normalizedValues : ['true', 'overlay', 'ov', 'mask', 'heatmap'],
+    remove_from_base_filename: source.remove_from_base_filename !== false,
+  };
+}
+
+function isOverlayIndicatorValue(value, overlayIndicator) {
+  const normalizedValue = String(value ?? '').trim().toLowerCase();
+  if (!normalizedValue) return false;
+  return overlayIndicator.values.some((candidate) => normalizedValue === String(candidate).trim().toLowerCase());
+}
+
+function replaceExtension(filename, stem) {
+  const name = String(filename || '');
+  const idx = name.lastIndexOf('.');
+  return idx > 0 ? `${stem}${name.slice(idx)}` : stem;
+}
+
+export function deriveOverlayBaseFilename(filename, values, keys, mode, pattern, overlayIndex) {
+  if (overlayIndex < 0 || mode !== 'simple' || !pattern) return '';
+  const stem = stripExtension(filename);
+  const segments = Array.isArray(values) && values.length > 0 ? [...values] : stem.split(pattern);
+  if (overlayIndex >= segments.length) return '';
+  segments.splice(overlayIndex, 1);
+  if (segments.length === 0) return '';
+  return replaceExtension(filename, segments.join(pattern));
+}
+
+export function applyOverlayIndicatorMetadata(filename, metadata, values, keys, mode, pattern, fileNamingScheme = null) {
+  if (!fileNamingScheme?.overlay_indicator) return metadata;
+  const overlayIndicator = normalizeOverlayIndicatorConfig(fileNamingScheme.overlay_indicator);
+  if (!overlayIndicator.enabled || !metadata || typeof metadata !== 'object') return metadata;
+  const overlayKey = overlayIndicator.field_key;
+  const overlayIndex = keys.findIndex((key) => key === overlayKey);
+  const overlayRawValue = overlayIndex >= 0 ? values[overlayIndex] : metadata[overlayKey];
+  if (!isOverlayIndicatorValue(overlayRawValue, overlayIndicator)) {
+    if (overlayKey === 'overlay' && metadata.overlay !== undefined) {
+      return { ...metadata, overlay: false };
+    }
+    return metadata;
+  }
+  const nextMetadata = { ...metadata, overlay: true };
+  if (overlayIndicator.remove_from_base_filename) {
+    const baseFilename = deriveOverlayBaseFilename(filename, values, keys, mode, pattern, overlayIndex);
+    if (baseFilename) nextMetadata.overlay_base_filename = baseFilename;
+  }
+  return nextMetadata;
 }
 
 export function buildConfiguredFilenameFields(fileNamingScheme) {
@@ -217,9 +295,9 @@ function FilenameMetadataExtractor({
         const field = configuredFields[i];
         obj[k] = mode === 'simple' ? stripConfiguredAbbreviation(values[i], field) : values[i];
       });
-      return obj;
+      return applyOverlayIndicatorMetadata(filename, obj, values, keys, mode, pattern, fileNamingScheme);
     };
-  }, [mode, pattern, keys, configuredFields]);
+  }, [mode, pattern, keys, configuredFields, fileNamingScheme]);
 
   // Notify the parent of configuration changes.
   useEffect(() => {
