@@ -299,6 +299,11 @@ def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
             "manual_phase_selection_enabled": False,
             "manual_phase": "data_ingestion",
         },
+        "metadata_parsers": {
+            "nsipro": {
+                "parser_id": "default",
+            },
+        },
         "project_owner": {
             "name": "",
             "email": "",
@@ -440,7 +445,7 @@ def _prune_config_to_source_shape(*, persisted_config: dict, source_config: dict
     if not isinstance(source_config, dict):
         return persisted_config
     pruned = dict(persisted_config)
-    for optional_key in ("phase_settings", "project_owner", "current_user", "interface_layout"):
+    for optional_key in ("phase_settings", "metadata_parsers", "project_owner", "current_user", "interface_layout"):
         if optional_key not in source_config:
             pruned.pop(optional_key, None)
     return pruned
@@ -455,6 +460,8 @@ def _strip_optional_default_sections(config: dict) -> dict:
         "manual_phase": "data_ingestion",
     }:
         pruned.pop("phase_settings", None)
+    if pruned.get("metadata_parsers") == {"nsipro": {"parser_id": "default"}}:
+        pruned.pop("metadata_parsers", None)
     if pruned.get("project_owner") == {"name": "", "email": ""}:
         pruned.pop("project_owner", None)
     if pruned.get("current_user") == {"username": "", "sso_authenticated": False}:

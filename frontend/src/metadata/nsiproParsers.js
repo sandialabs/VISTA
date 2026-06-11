@@ -17,6 +17,7 @@ function parseScalarMetadataValue(rawValue) {
 function buildNsiproResult({ parser, parserVersion, metadata, warnings = [], sourceFilename = '' }) {
   return {
     parser,
+    parser_id: DEFAULT_NSIPRO_PARSER_ID,
     parser_version: parserVersion,
     metadata,
     warnings,
@@ -110,8 +111,9 @@ export const NSIPRO_PARSERS = {
   },
 };
 
-function getConfiguredParserIdFromProject(projectConfiguration) {
+export function getConfiguredNsiproParserId(projectConfiguration) {
   const candidates = [
+    projectConfiguration?.metadata_parsers?.nsipro?.parser_id,
     projectConfiguration?.nsipro_parser,
     projectConfiguration?.nsipro_parser_id,
     projectConfiguration?.metadata?.nsipro_parser,
@@ -136,7 +138,7 @@ function normalizeParserId(parserId) {
 export function parseNsiproText(text, filename = '', options = {}) {
   const parserId = normalizeParserId(
     options.parserId
-      || getConfiguredParserIdFromProject(options.projectConfiguration)
+      || getConfiguredNsiproParserId(options.projectConfiguration)
       || getEnvNsiproParserId(),
   );
   const failClosed = Boolean(options.failClosed || options.failOnUnknownParser);
@@ -149,6 +151,8 @@ export function parseNsiproText(text, filename = '', options = {}) {
     const fallbackResult = NSIPRO_PARSERS[DEFAULT_NSIPRO_PARSER_ID].parse(text, filename, options);
     return {
       ...fallbackResult,
+      parser_id: DEFAULT_NSIPRO_PARSER_ID,
+      requested_parser_id: parserId,
       warnings: [
         ...fallbackResult.warnings,
         `Unknown .nsipro parser "${parserId}"; used default parser instead.`,
@@ -156,5 +160,9 @@ export function parseNsiproText(text, filename = '', options = {}) {
     };
   }
 
-  return parserEntry.parse(text, filename, options);
+  const result = parserEntry.parse(text, filename, options);
+  return {
+    ...result,
+    parser_id: parserEntry.id,
+  };
 }

@@ -262,6 +262,11 @@ const EMPTY_CONFIG = {
     manual_phase_selection_enabled: false,
     manual_phase: 'data_ingestion',
   },
+  metadata_parsers: {
+    nsipro: {
+      parser_id: 'default',
+    },
+  },
   project_owner: {
     name: '',
     email: '',
@@ -456,7 +461,22 @@ function normalizeProjectConfiguration(config, projectType) {
     defect_types: defectTypes,
     serial_number_scheme: normalizeSerialNumberScheme(incomingConfig),
     phase_settings: normalizePhaseSettings(incomingConfig),
+    metadata_parsers: normalizeMetadataParsers(incomingConfig),
     file_naming_scheme: normalizeFileNamingScheme(incomingConfig),
+  };
+}
+
+
+function normalizeMetadataParsers(config) {
+  const nsipro = config?.metadata_parsers?.nsipro || {};
+  const parserId = typeof nsipro.parser_id === 'string' && nsipro.parser_id.trim()
+    ? nsipro.parser_id.trim()
+    : EMPTY_CONFIG.metadata_parsers.nsipro.parser_id;
+  return {
+    nsipro: {
+      ...nsipro,
+      parser_id: parserId,
+    },
   };
 }
 

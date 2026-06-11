@@ -374,6 +374,15 @@ class InspectionProjectCurrentUserConfig(BaseModel):
     username: str = Field(default="", max_length=255)
     sso_authenticated: bool = False
 
+
+class InspectionProjectNsiproParserConfig(BaseModel):
+    parser_id: str = Field(default="default", max_length=128)
+
+
+class InspectionProjectMetadataParsersConfig(BaseModel):
+    nsipro: InspectionProjectNsiproParserConfig = Field(default_factory=InspectionProjectNsiproParserConfig)
+
+
 class InspectionProjectConfiguration(BaseModel):
     image_modalities: List[InspectionProjectModalityConfig] = Field(default_factory=list)
     part_views: List[InspectionProjectPartViewConfig] = Field(default_factory=list)
@@ -382,6 +391,7 @@ class InspectionProjectConfiguration(BaseModel):
     display_settings: InspectionProjectDisplaySettingsConfig = Field(default_factory=InspectionProjectDisplaySettingsConfig)
     phase_settings: InspectionProjectPhaseSettingsConfig = Field(default_factory=InspectionProjectPhaseSettingsConfig)
     interface_layout: InspectionProjectInterfaceLayoutConfig = Field(default_factory=InspectionProjectInterfaceLayoutConfig)
+    metadata_parsers: InspectionProjectMetadataParsersConfig = Field(default_factory=InspectionProjectMetadataParsersConfig)
     file_naming_scheme: InspectionProjectFileNamingSchemeConfig = Field(default_factory=InspectionProjectFileNamingSchemeConfig)
     project_owner: InspectionProjectOwnerConfig = Field(default_factory=InspectionProjectOwnerConfig)
     current_user: InspectionProjectCurrentUserConfig = Field(default_factory=InspectionProjectCurrentUserConfig)

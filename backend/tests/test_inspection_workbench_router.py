@@ -1080,6 +1080,51 @@ def test_project_configuration_file_naming_scheme_survives_save_and_reload(clien
     assert reload_resp.json()["config"]["file_naming_scheme"] == payload["file_naming_scheme"]
 
 
+def test_project_configuration_metadata_parsers_survives_save_and_reload(client):
+    headers = {
+        "X-User-Id": "config-metadata-parsers@example.com",
+        "X-User-Groups": '["config-metadata-parsers"]',
+    }
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Metadata parser persistence",
+            "description": "Verify .nsipro parser config persists",
+            "meta_group_id": "config-metadata-parsers",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    initial_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert initial_resp.status_code == 200, initial_resp.text
+    initial_config = initial_resp.json()["config"]
+    assert initial_config["metadata_parsers"]["nsipro"]["parser_id"] == "default"
+
+    payload = {
+        **initial_config,
+        "metadata_parsers": {
+            "nsipro": {
+                "parser_id": "deployment_a",
+            },
+        },
+    }
+
+    save_resp = client.put(
+        f"/api/projects/{project_id}/configuration",
+        json={"config": payload},
+        headers=headers,
+    )
+    assert save_resp.status_code == 200, save_resp.text
+    assert save_resp.json()["config"]["metadata_parsers"] == payload["metadata_parsers"]
+
+    reload_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert reload_resp.status_code == 200, reload_resp.text
+    assert reload_resp.json()["config"]["metadata_parsers"] == payload["metadata_parsers"]
+
+
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
 def test_project_configuration_rejects_invalid_hotkeys(client, project_type):
     headers = {
