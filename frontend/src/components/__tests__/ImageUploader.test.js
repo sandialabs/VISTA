@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import ImageUploader, { buildDuplicateFilenameMap, buildInspectionPartIngestPayload, formatUploadSize, tagDuplicateFilename } from '../ImageUploader';
+import ImageUploader, { buildDuplicateFilenameMap, buildInspectionPartIngestPayload, formatUploadSize, parseAssociatedMetadataText, tagDuplicateFilename } from '../ImageUploader';
 
 const makeFile = (name) => new File(['data'], name, { type: 'image/png' });
 
@@ -1084,9 +1084,9 @@ describe('ImageUploader', () => {
     });
 
     test('parses .nsipro key-value metadata files', async () => {
-      const { parseAssociatedMetadataText } = await import('../ImageUploader');
       expect(parseAssociatedMetadataText('[capture]\noperator=alice\nexposure: 12\nvalid=true', 'scan.nsipro')).toEqual({
         parser: 'nsipro-key-value',
+        parser_id: 'default',
         parser_version: '1.0.0',
         metadata: {
           capture: {
@@ -1098,6 +1098,62 @@ describe('ImageUploader', () => {
         warnings: [],
         source_filename: 'scan.nsipro',
       });
+    });
+
+
+    test('uses project configuration metadata_parsers.nsipro.parser_id for .nsipro association uploads', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-1', filename: 'photo.png' }) });
+
+      renderUploader({
+        projectConfiguration: {
+          metadata_parsers: { nsipro: { parser_id: 'deployment_a' } },
+        },
+      });
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['operator=alice'], 'deployment.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Associated deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.value).toEqual(expect.objectContaining({
+        filename: 'deployment.nsipro',
+        file_type: 'nsipro',
+        parser: 'nsipro-key-value',
+        parser_id: 'deployment_a',
+        metadata: { operator: 'alice' },
+      }));
+      const imageMetadata = JSON.parse(fetchSpy.mock.calls[1][1].body.get('metadata'));
+      expect(imageMetadata.associated_metadata).toEqual(expect.objectContaining({
+        parser: 'nsipro-key-value',
+        parser_id: 'deployment_a',
+      }));
+    });
+
+    test('fails closed with a clear upload error for unknown configured .nsipro parser ids', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+
+      renderUploader({
+        projectConfiguration: {
+          metadata_parsers: { nsipro: { parser_id: 'unknown_deployment' } },
+        },
+      });
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['operator=alice'], 'deployment.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Unknown .nsipro parser configured: unknown_deployment.');
+      expect(screen.getByRole('button', { name: /upload images/i })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     test('blocks upload when associated metadata has an unsupported type', async () => {

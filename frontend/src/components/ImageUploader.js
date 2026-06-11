@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import FilenameMetadataExtractor, { applyOverlayIndicatorMetadata, buildConfiguredFilenameFields, extractValues, stripConfiguredAbbreviation, stripExtension } from './FilenameMetadataExtractor';
-import { parseNsiproText } from '../metadata/nsiproParsers';
+import { getConfiguredNsiproParserId, parseNsiproText } from '../metadata/nsiproParsers';
 
 const CONCURRENT_UPLOADS = 6;
 const S3_IMPORT_LIMIT = 100;
@@ -138,6 +138,8 @@ function buildAssociatedMetadataBundle(file, text, parsedResult) {
       filename: file?.name || 'metadata',
       file_type: extension.replace(/^\./, ''),
       parser: parsedResult.parser,
+      parser_id: parsedResult.parser_id,
+      requested_parser_id: parsedResult.requested_parser_id,
       parser_version: parsedResult.parser_version,
       warnings: Array.isArray(parsedResult.warnings) ? parsedResult.warnings : [],
       source_filename: parsedResult.source_filename || file?.name || 'metadata',
@@ -239,6 +241,8 @@ function buildAssociatedMetadataImageReference(bundle) {
     filename: bundle.value.filename,
     file_type: bundle.value.file_type,
     parser: bundle.value.parser,
+    parser_id: bundle.value.parser_id,
+    requested_parser_id: bundle.value.requested_parser_id,
     parser_version: bundle.value.parser_version,
     warnings: Array.isArray(bundle.value.warnings) ? bundle.value.warnings : [],
     source_filename: bundle.value.source_filename || bundle.value.filename,
@@ -547,6 +551,10 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
   );
   const [legacyExtractorConfig, setLegacyExtractorConfig] = useState(null);
   const extractorConfig = legacyExtractorConfig || savedExtractorConfig;
+  const nsiproParserId = useMemo(
+    () => getConfiguredNsiproParserId(projectConfiguration),
+    [projectConfiguration],
+  );
   const [groupKey, setGroupKey] = useState('');
   const [uploading, setUploading] = useState(false);
   const [loadingTestData, setLoadingTestData] = useState(false);
@@ -628,7 +636,11 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setAssociatedMetadataParsing(true);
     try {
       const text = await readAssociatedMetadataFileText(file);
-      const parsedResult = parseAssociatedMetadataText(text, file.name, { projectConfiguration });
+      const parsedResult = parseAssociatedMetadataText(text, file.name, {
+        parserId: nsiproParserId,
+        projectConfiguration,
+        failClosed: true,
+      });
       setAssociatedMetadataBundle(buildAssociatedMetadataBundle(file, text, parsedResult));
     } catch (err) {
       setAssociatedMetadataError(err?.message || 'Unable to parse associated metadata file.');
