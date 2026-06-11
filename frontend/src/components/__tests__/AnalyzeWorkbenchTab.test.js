@@ -56,13 +56,15 @@ const toolboxPayload = {
       ],
     },
     {
-      id: 'segmentation.watershed_seeds',
-      name: 'Watershed From Seeds',
+      id: 'segmentation.opencv.placeholder',
+      name: 'OpenCV Segmentation Placeholder',
       category: 'Segmentation',
-      description: 'Segment',
-      input_types: ['image', 'mask'],
-      output_types: ['labels'],
-      parameters: [{ name: 'seed_spacing_px', label: 'Seed Spacing (px)', type: 'integer', default: 18 }],
+      description: 'Placeholder segmenter',
+      input_types: ['image'],
+      output_types: ['mask'],
+      parameters: [
+        { name: 'integration_mode', label: 'Integration', type: 'select', default: 'placeholder', options: ['placeholder'] },
+      ],
     },
     {
       id: 'ml.yolov8.detect',
@@ -242,9 +244,9 @@ describe('AnalyzeWorkbenchTab', () => {
 
     const windowInput = screen.getByLabelText('Window');
     expect(windowInput).toHaveAttribute('step', '0.05');
-    const seedNode = screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i });
-    fireEvent.click(seedNode);
-    expect(screen.getByLabelText('Seed Spacing (px)')).toHaveAttribute('step', '1');
+    const placeholderNode = screen.getByRole('button', { name: /Workflow block OpenCV Segmentation Placeholder/i });
+    fireEvent.click(placeholderNode);
+    expect(screen.getByLabelText('Integration')).toHaveValue('placeholder');
   });
 
   test('clicking a toolbox method previews its configuration without adding a workflow block', async () => {
@@ -269,7 +271,7 @@ describe('AnalyzeWorkbenchTab', () => {
     dragMethodToGraph(/^YOLOv8 Object Detection/i, 'ml.yolov8.detect', { clientX: 430, clientY: 120 });
 
     expect(screen.getByRole('button', { name: /Workflow block YOLOv8 Object Detection/i })).toHaveStyle({ left: '520px', top: '84px' });
-    expect(screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i })).toHaveStyle({ left: '744px', top: '84px' });
+    expect(screen.getByRole('button', { name: /Workflow block OpenCV Segmentation Placeholder/i })).toHaveStyle({ left: '744px', top: '84px' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(screen.getByTestId('analyze-run-summary')).toHaveTextContent('completed'));
@@ -279,7 +281,7 @@ describe('AnalyzeWorkbenchTab', () => {
       'source.project_part_images',
       'preprocess.window_level_normalization',
       'ml.yolov8.detect',
-      'segmentation.watershed_seeds',
+      'segmentation.opencv.placeholder',
       'output.versioned_image_artifact',
     ]);
   });
@@ -300,7 +302,7 @@ describe('AnalyzeWorkbenchTab', () => {
     expect(workflow.nodes.map((node) => node.method_id)).toEqual([
       'source.project_part_images',
       'preprocess.window_level_normalization',
-      'segmentation.watershed_seeds',
+      'segmentation.opencv.placeholder',
       'output.versioned_image_artifact',
       'ml.yolov8.detect',
     ]);
@@ -370,11 +372,11 @@ describe('AnalyzeWorkbenchTab', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole('button', { name: /Workflow block OpenCV Segmentation Placeholder/i }), { ctrlKey: true });
     fireEvent.click(screen.getByRole('button', { name: /Remove/ }));
 
     expect(screen.queryByRole('button', { name: /Workflow block Window \/ Level Normalization/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Workflow block Watershed From Seeds/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Workflow block OpenCV Segmentation Placeholder/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => expect(screen.getByTestId('analyze-run-summary')).toHaveTextContent('completed'));
@@ -418,7 +420,7 @@ describe('AnalyzeWorkbenchTab', () => {
       'source.project_part_images',
       'preprocess.window_level_normalization',
       'output.versioned_image_artifact',
-      'segmentation.watershed_seeds',
+      'segmentation.opencv.placeholder',
     ]);
     expect(workflow.edges.map((edge) => [edge.source_node, edge.target_node])).toEqual([
       [workflow.nodes[0].id, workflow.nodes[1].id],
@@ -490,7 +492,7 @@ describe('AnalyzeWorkbenchTab', () => {
                 { id: 'saved-input-1', method_id: 'source.project_part_images', label: 'Loaded Part Images', chain_id: 'chain-1', parameters: {}, x: 72, y: 84 },
                 { id: 'saved-yolo', method_id: 'ml.yolov8.detect', label: 'YOLOv8 Object Detection', chain_id: 'chain-1', parameters: { model: 'yolov8n.pt' }, x: 296, y: 84 },
                 { id: 'saved-input-2', method_id: 'source.project_part_images', label: 'Loaded Part Images 2', chain_id: 'chain-2', parameters: {}, x: 72, y: 236 },
-                { id: 'saved-segment', method_id: 'segmentation.watershed_seeds', label: 'Watershed From Seeds', chain_id: 'chain-2', parameters: { seed_spacing_px: 18 }, x: 296, y: 236 },
+                { id: 'saved-segment', method_id: 'segmentation.opencv.placeholder', label: 'OpenCV Segmentation Placeholder', chain_id: 'chain-2', parameters: { integration_mode: 'placeholder' }, x: 296, y: 236 },
               ],
               process_image_ids: ['img-2'],
               example_image_id: 'img-2',
@@ -540,12 +542,12 @@ describe('AnalyzeWorkbenchTab', () => {
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Loaded Part Images 2/i }));
     dragMethodToGraph(/^YOLOv8 Object Detection/i, 'ml.yolov8.detect', { clientX: 380, clientY: 260 });
 
-    const watershedNode = screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i });
-    fireEvent.mouseDown(watershedNode, { button: 0, clientX: 600, clientY: 100 });
-    fireEvent.mouseMove(watershedNode, { clientX: 180, clientY: 225 });
-    fireEvent.mouseUp(watershedNode, { clientX: 180, clientY: 225 });
+    const placeholderNode = screen.getByRole('button', { name: /Workflow block OpenCV Segmentation Placeholder/i });
+    fireEvent.mouseDown(placeholderNode, { button: 0, clientX: 600, clientY: 100 });
+    fireEvent.mouseMove(placeholderNode, { clientX: 180, clientY: 225 });
+    fireEvent.mouseUp(placeholderNode, { clientX: 180, clientY: 225 });
 
-    await waitFor(() => expect(watershedNode).toHaveStyle({ left: '296px', top: '236px' }));
+    await waitFor(() => expect(placeholderNode).toHaveStyle({ left: '296px', top: '236px' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
@@ -561,7 +563,7 @@ describe('AnalyzeWorkbenchTab', () => {
     ]);
     expect(chain2.map((node) => node.method_id)).toEqual([
       'source.project_part_images',
-      'segmentation.watershed_seeds',
+      'segmentation.opencv.placeholder',
       'ml.yolov8.detect',
     ]);
     expect(workflow.edges.map((edge) => [edge.source_node, edge.target_node])).toEqual(expect.arrayContaining([

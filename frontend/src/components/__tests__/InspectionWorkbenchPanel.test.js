@@ -504,7 +504,7 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
           part_id: mutableParts[0]?.id || 'part',
           axis: payload.axis || 'axial',
           slice_index: payload.slice_index || 0,
-          method_id: payload.method_id || 'segmentation.connected_components',
+          method_id: payload.method_id || 'segmentation.opencv.placeholder',
           status: 'completed',
           cached: false,
           regions: [
@@ -820,7 +820,7 @@ describe('InspectionWorkbenchPanel', () => {
       expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: 'assigned-a.png', to_part_id: null }),
+        body: JSON.stringify({ filename: 'assigned-a.png', image_id: 'img-assigned-a', to_part_id: null }),
       });
     });
     await waitFor(() => expect(parts[0].metadata.source_images).toHaveLength(0));
@@ -1801,9 +1801,11 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 7.50 mm'));
     expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Height 4.00 mm');
     expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('Width 7.50 mm');
-    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
+    expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active');
     expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
 
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
     fireEvent.mouseDown(fullscreenImage, { clientX: 260, clientY: 130, button: 0 });
     fireEvent.mouseMove(fullscreenImage, { clientX: 320, clientY: 170 });
     await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 3.00 mm'));
@@ -1821,7 +1823,7 @@ describe('InspectionWorkbenchPanel', () => {
     });
     expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
 
-    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active'));
   });
 
 
@@ -2464,8 +2466,8 @@ describe('InspectionWorkbenchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /ML Helper/i }));
     expect(screen.getByLabelText('ML helper options')).toHaveTextContent('OpenCV');
     fireEvent.change(screen.getByLabelText('Method family'), { target: { value: 'sam' } });
-    expect(screen.getByLabelText('Segment function')).toHaveValue('ml.sam.segment_anything');
-    fireEvent.change(screen.getByLabelText('Variant'), { target: { value: 'sam_vit_b' } });
+    expect(screen.getByLabelText('Segment function')).toHaveValue('segmentation.sam.placeholder');
+    fireEvent.change(screen.getByLabelText('Integration'), { target: { value: 'placeholder' } });
     const beforeMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
     fireEvent.mouseDown(stage, { clientX: 220, clientY: 110, button: 0 });
     await waitFor(() => expect(screen.getByText(/Selected ML region 2/i)).toBeInTheDocument());
@@ -2474,8 +2476,8 @@ describe('InspectionWorkbenchPanel', () => {
     const afterFirstMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
     expect(afterFirstMlCalls).toBe(beforeMlCalls + 1);
     const mlPayload = JSON.parse(global.fetch.mock.calls.find((call) => call[0].includes('/slice-segmentation'))[1].body);
-    expect(mlPayload.method_id).toBe('ml.sam.segment_anything');
-    expect(mlPayload.parameters.variant).toBe('sam_vit_b');
+    expect(mlPayload.method_id).toBe('segmentation.sam.placeholder');
+    expect(mlPayload.parameters.integration_mode).toBe('placeholder');
 
     fireEvent.mouseDown(stage, { clientX: 221, clientY: 111, button: 0 });
     expect(global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length).toBe(afterFirstMlCalls);

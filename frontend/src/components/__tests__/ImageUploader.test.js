@@ -975,6 +975,33 @@ describe('ImageUploader', () => {
       expect(imageMetadata.associated_metadata.metadata).toBeUndefined();
     });
 
+    test('treats a .nsipro selected with image files as associated metadata instead of an upload image', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-nsipro-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-1', filename: 'photo.png' }) });
+
+      renderUploader();
+      const metadataFile = new File(['[capture]\noperator=alice\nexposure=12'], 'scan.nsipro', { type: 'text/plain' });
+      selectFiles([makeFile('photo.png'), metadataFile]);
+
+      expect(await screen.findByText(/Associated scan\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(screen.getByText(/1 file selected/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.value).toEqual(expect.objectContaining({
+        filename: 'scan.nsipro',
+        file_type: 'nsipro',
+        metadata: { capture: { operator: 'alice', exposure: 12 } },
+      }));
+      const uploadBody = fetchSpy.mock.calls[1][1].body;
+      expect(uploadBody.get('file').name).toBe('photo.png');
+      const imageMetadata = JSON.parse(uploadBody.get('metadata'));
+      expect(imageMetadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(imageMetadata.nsipro_metadata.capture).toEqual({ operator: 'alice', exposure: 12 });
+    });
+
 
     test('uses a deployment-specific .nsipro fixture to normalize custom fields for ingest', async () => {
       const deploymentNsiproFixture = [

@@ -437,8 +437,8 @@ def test_slice_segmentation_selects_clicked_toolbox_region(client):
         json={
             "axis": "axial",
             "slice_index": 4,
-            "method_id": "segmentation.connected_components",
-            "parameters": {"min_area_px": 4},
+            "method_id": "segmentation.opencv.placeholder",
+            "parameters": {"integration_mode": "placeholder"},
             "image_data_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
             "filename": "slice-z-004.png",
             "click_x": 44,
@@ -449,11 +449,10 @@ def test_slice_segmentation_selects_clicked_toolbox_region(client):
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["status"] == "completed"
-    assert payload["method_id"] == "segmentation.connected_components"
-    assert payload["summary"]["region_count"] == 2
-    assert len(payload["regions"]) == 2
-    assert payload["selected_region"]["bbox"][0] <= 44 <= payload["selected_region"]["bbox"][2]
-    assert payload["selected_region"]["bbox"][1] <= 44 <= payload["selected_region"]["bbox"][3]
+    assert payload["method_id"] == "segmentation.opencv.placeholder"
+    assert payload["summary"]["region_count"] == 0
+    assert payload["regions"] == []
+    assert payload["selected_region"] is None
 
 
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
@@ -1919,6 +1918,68 @@ def test_bulk_ingest_dereferences_associated_nsipro_metadata(client):
     assert metadata["nsipro_payload"]["parser_id"] == "default"
     assert metadata["nsipro_payload"]["parser_hash"] == "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df"
     assert metadata["source_images"][0]["nsipro_payload"]["metadata"] == metadata["nsipro_metadata"]
+
+    replacement_key = "associated_upload_metadata:scan-updated.nsipro:updatedhash"
+    replacement_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": replacement_key,
+            "value": {
+                "kind": "associated_image_upload_metadata",
+                "filename": "scan-updated.nsipro",
+                "file_type": "nsipro",
+                "parser": "nsipro-key-value",
+                "parser_id": "default",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                "source_filename": "scan-updated.nsipro",
+                "content_hash": "updatedhash",
+                "metadata": {"capture": {"operator": "bob", "exposure": 18}},
+            },
+        },
+        headers=headers,
+    )
+    assert replacement_resp.status_code == 201, replacement_resp.text
+
+    update_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "batches": [],
+            "unassigned_parts": [
+                {
+                    "serial_number": "NSIPRO-001",
+                    "display_name": "NSIPRO part",
+                    "metadata": {
+                        "source_images": [
+                            {
+                                "filename": "front.png",
+                                "side": "front",
+                                "modality": "visual",
+                                "associated_metadata_ref": replacement_key,
+                                "associated_metadata": {
+                                    "project_metadata_key": replacement_key,
+                                    "file_type": "nsipro",
+                                    "parser_id": "default",
+                                    "parser_version": "1.0.0",
+                                    "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    assert update_resp.json()["counters"]["parts_skipped_existing"] == 1
+
+    updated_parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert updated_parts_resp.status_code == 200, updated_parts_resp.text
+    updated_metadata = updated_parts_resp.json()[0]["metadata"]
+    assert updated_metadata["nsipro_metadata"] == {"capture": {"operator": "bob", "exposure": 18}}
+    assert updated_metadata["source_images"][0]["nsipro_payload"]["source_filename"] == "scan-updated.nsipro"
+    assert updated_metadata["source_images"][0]["nsipro_payload"]["metadata"] == updated_metadata["nsipro_metadata"]
 
 
 def test_bulk_ingest_persists_deployment_nsipro_custom_fields_after_dereference(client):

@@ -359,7 +359,8 @@ function getDisplayTokenForFilenameEntry(entry, fallback, { hierarchy = false } 
   const key = getFilenameEntryMetadataKey(entry, fallback);
   if (key === 'overlay') return prefix ? `${prefix}overlay` : 'overlay';
   if (key === 'version') return `${prefix || 'v'}1`;
-  return `${prefix}${normalizeFilenameToken(getFilenameEntryName(entry, fallback), fallback)}`;
+  if (!hierarchy && (key === 'view' || key === 'side')) return 'side';
+  return normalizeFilenameToken(getFilenameEntryName(entry, fallback), fallback);
 }
 
 function buildExpectedFilenameExample(fileNamingScheme) {

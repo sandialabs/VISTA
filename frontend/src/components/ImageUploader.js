@@ -120,6 +120,10 @@ export function parseAssociatedMetadataText(text, filename = '', options = {}) {
 }
 
 
+function isAssociatedMetadataFile(file) {
+  return ASSOCIATED_METADATA_EXTENSIONS.includes(getFileExtension(file?.name));
+}
+
 function readAssociatedMetadataFileText(file) {
   if (file && typeof file.text === 'function') {
     return file.text();
@@ -629,13 +633,16 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
   }, [extractorConfig.keys, groupKey]);
 
   const handleAssociatedMetadataFileChange = async (e) => {
-    const file = e.target.files && e.target.files[0];
+    await applyAssociatedMetadataFile(e.target.files && e.target.files[0]);
+  };
+
+  const applyAssociatedMetadataFile = useCallback(async (file) => {
     setAssociatedMetadataFile(file || null);
     setAssociatedMetadataBundle(null);
     setAssociatedMetadataError(null);
     if (!file) return;
 
-    if (!ASSOCIATED_METADATA_EXTENSIONS.includes(getFileExtension(file.name))) {
+    if (!isAssociatedMetadataFile(file)) {
       setAssociatedMetadataError('Unsupported metadata file type. Choose a .json or .nsipro file.');
       return;
     }
@@ -654,7 +661,17 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     } finally {
       setAssociatedMetadataParsing(false);
     }
-  };
+  }, [nsiproParserId, projectConfiguration]);
+
+  const applySelectedUploadFiles = useCallback(async (files) => {
+    const fileList = Array.from(files || []);
+    const metadataFile = fileList.find(isAssociatedMetadataFile) || null;
+    const uploadFiles = fileList.filter((file) => file !== metadataFile);
+    setSelectedFiles(uploadFiles);
+    if (metadataFile) {
+      await applyAssociatedMetadataFile(metadataFile);
+    }
+  }, [applyAssociatedMetadataFile]);
 
   const saveAssociatedMetadataBundle = useCallback(async () => {
     if (!associatedMetadataFile) return null;
@@ -687,9 +704,9 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
   }, [associatedMetadataBundle, associatedMetadataError, associatedMetadataFile, associatedMetadataParsing, projectId]);
 
   // Handle file input change
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     if (e.target.files) {
-      setSelectedFiles(Array.from(e.target.files));
+      await applySelectedUploadFiles(e.target.files);
     }
   };
 
@@ -704,11 +721,11 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setIsDragOver(false);
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files) {
-      setSelectedFiles(Array.from(e.dataTransfer.files));
+      await applySelectedUploadFiles(e.dataTransfer.files);
     }
   };
 
@@ -1152,7 +1169,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
                 Drag and drop images/voxel data here, or click to select files
               </div>
               <div className="upload-area-subtext">
-                Supports image files and 3D voxel arrays (.npy, .npz, .inspiro)
+                Supports image files, 3D voxel arrays (.npy, .npz, .inspiro), and one associated .nsipro/.json metadata file
               </div>
               <div className={`upload-area-status ${selectedFiles.length > 0 ? 'has-files' : 'no-files'}`}>
                 {selectedFiles.length > 0
@@ -1163,7 +1180,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
             <input
               type="file"
               id="file-input"
-              accept="image/*,image/tiff,.tiff,.tif,.npy,.npz,.inspiro"
+              accept="image/*,image/tiff,.tiff,.tif,.npy,.npz,.inspiro,.json,.nsipro,application/json"
               multiple
               style={{ display: 'none' }}
               onChange={handleFileChange}
