@@ -64,4 +64,34 @@ describe('nsiproParsers', () => {
       metadata: { operator: 'alice' },
     }));
   });
+
+  test('deployment_a normalizes deployment-specific custom fields', () => {
+    const fixture = [
+      '[Deployment]',
+      'Deployment ID = DEP-42',
+      'Line ID = LINE-7',
+      'Build Number = 118',
+      '[Custom Fields]',
+      'Inspection Lot = LOT-ALPHA',
+      'Operator Badge = QA-17',
+    ].join('\n');
+
+    expect(parseNsiproText(fixture, 'deployment-a.nsipro', { parserId: 'deployment_a' })).toEqual(expect.objectContaining({
+      parser: 'nsipro-key-value',
+      parser_id: 'deployment_a',
+      parser_hash: 'sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb',
+      metadata: {
+        deployment: {
+          deployment_id: 'DEP-42',
+          line_id: 'LINE-7',
+          build_number: 118,
+        },
+        custom_fields: {
+          inspection_lot: 'LOT-ALPHA',
+          operator_badge: 'QA-17',
+        },
+      },
+    }));
+  });
+
 });

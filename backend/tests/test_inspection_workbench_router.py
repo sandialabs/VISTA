@@ -1833,7 +1833,6 @@ def test_bulk_ingest_supports_progressive_users_with_discrepancy_counters(client
             assert parts[0]["metadata"]["set_number"] == "SET01"
 
 
-
 def test_bulk_ingest_dereferences_associated_nsipro_metadata(client):
     headers = {"X-User-Id": "nsipro-ingest@example.com", "X-User-Groups": '["nsipro-ingest"]'}
     project_resp = client.post(
@@ -1921,6 +1920,132 @@ def test_bulk_ingest_dereferences_associated_nsipro_metadata(client):
     assert metadata["nsipro_payload"]["parser_hash"] == "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df"
     assert metadata["source_images"][0]["nsipro_payload"]["metadata"] == metadata["nsipro_metadata"]
 
+
+def test_bulk_ingest_persists_deployment_nsipro_custom_fields_after_dereference(client):
+    headers = {"X-User-Id": "nsipro-deployment@example.com", "X-User-Groups": '["nsipro-deployment"]'}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Deployment nsipro ingest project",
+            "description": "backend authoritative deployment .nsipro ingest",
+            "meta_group_id": "nsipro-deployment",
+            "project_type": "PT3",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    config_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert config_resp.status_code == 200, config_resp.text
+    config = config_resp.json()["config"]
+    config["metadata_parsers"] = {"nsipro": {"parser_id": "deployment_a"}}
+    save_config_resp = client.put(
+        f"/api/projects/{project_id}/configuration",
+        json={"config": config},
+        headers=headers,
+    )
+    assert save_config_resp.status_code == 200, save_config_resp.text
+
+    metadata_key = "associated_upload_metadata:deployment-a.nsipro:deploymenthash"
+    metadata_text = "\n".join(
+        [
+            "[Deployment]",
+            "Deployment ID = DEP-42",
+            "Line ID = LINE-7",
+            "Build Number = 118",
+            "[Custom Fields]",
+            "Inspection Lot = LOT-ALPHA",
+            "Operator Badge = QA-17",
+            "Scan Mode = micro CT",
+        ]
+    )
+    metadata_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": metadata_key,
+            "value": {
+                "kind": "associated_image_upload_metadata",
+                "filename": "deployment-a.nsipro",
+                "file_type": "nsipro",
+                "parser": "nsipro-key-value",
+                "parser_id": "deployment_a",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb",
+                "source_filename": "deployment-a.nsipro",
+                "content_hash": "deploymenthash",
+                "raw_text": metadata_text,
+            },
+        },
+        headers=headers,
+    )
+    assert metadata_resp.status_code == 201, metadata_resp.text
+
+    ingest_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "batches": [
+                {
+                    "name": "PT3_DEPLOYMENT_STACK",
+                    "description": "PT3 deployment stack",
+                    "parts": [
+                        {
+                            "serial_number": "DEP-PT3-001",
+                            "display_name": "Deployment PT3 part",
+                            "metadata": {
+                                "project_type": "PT3",
+                                "volume_stack_id": "stack-deployment-a",
+                                "associated_metadata_ref": metadata_key,
+                                "associated_metadata": {
+                                    "project_metadata_key": metadata_key,
+                                    "file_type": "nsipro",
+                                    "parser_id": "deployment_a",
+                                    "parser_version": "1.0.0",
+                                    "parser_hash": "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb",
+                                },
+                                "source_images": [
+                                    {
+                                        "filename": "slice-001.png",
+                                        "image_id": "slice-001",
+                                        "slice_axis": "z",
+                                        "slice_index": 1,
+                                        "associated_metadata_ref": metadata_key,
+                                        "associated_metadata": {
+                                            "project_metadata_key": metadata_key,
+                                            "file_type": "nsipro",
+                                            "parser_id": "deployment_a",
+                                            "parser_version": "1.0.0",
+                                            "parser_hash": "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb",
+                                        },
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ],
+            "unassigned_parts": [],
+        },
+        headers=headers,
+    )
+    assert ingest_resp.status_code == 200, ingest_resp.text
+
+    parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    parts = parts_resp.json()
+    assert len(parts) == 1
+    metadata = parts[0]["metadata"]
+    assert metadata["nsipro_metadata"] == {
+        "deployment": {"deployment_id": "DEP-42", "line_id": "LINE-7", "build_number": 118},
+        "custom_fields": {
+            "inspection_lot": "LOT-ALPHA",
+            "operator_badge": "QA-17",
+            "scan_mode": "micro CT",
+        },
+    }
+    assert metadata["nsipro_payload"]["parser_id"] == "deployment_a"
+    assert metadata["source_images"][0]["nsipro_payload"]["metadata"] == metadata["nsipro_metadata"]
+    assert metadata["source_images"][0]["nsipro_payload"]["parser_hash"] == "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb"
 
 def test_bulk_ingest_strict_nsipro_parser_contract_rejects_mismatched_payload(client):
     headers = {"X-User-Id": "nsipro-strict@example.com", "X-User-Groups": '["nsipro-strict"]'}

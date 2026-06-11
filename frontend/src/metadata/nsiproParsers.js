@@ -81,6 +81,51 @@ export function parseGenericNsiproKeyValueText(text, filename = '') {
   });
 }
 
+
+function normalizeDeploymentMetadataKey(key) {
+  return String(key || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
+function normalizeDeploymentSection(section) {
+  if (!section || typeof section !== 'object' || Array.isArray(section)) return {};
+  return Object.entries(section).reduce((acc, [key, value]) => {
+    const normalizedKey = normalizeDeploymentMetadataKey(key);
+    if (normalizedKey) acc[normalizedKey] = value;
+    return acc;
+  }, {});
+}
+
+function firstDeploymentSection(metadata, candidateNames) {
+  const normalizedCandidates = new Set(candidateNames.map(normalizeDeploymentMetadataKey));
+  return Object.entries(metadata || {}).find(([key, value]) => (
+    normalizedCandidates.has(normalizeDeploymentMetadataKey(key))
+    && value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+  ))?.[1] || null;
+}
+
+function parseDeploymentANsiproText(text, filename = '') {
+  const result = parseDefaultNsiproText(text, filename);
+  const deploymentSection = firstDeploymentSection(result.metadata, ['deployment', 'deployment metadata', 'capture deployment']);
+  const customFieldSection = firstDeploymentSection(result.metadata, ['custom fields', 'custom_fields', 'deployment custom fields']);
+
+  if (!deploymentSection && !customFieldSection) return result;
+
+  return {
+    ...result,
+    metadata: {
+      ...(deploymentSection ? { deployment: normalizeDeploymentSection(deploymentSection) } : {}),
+      ...(customFieldSection ? { custom_fields: normalizeDeploymentSection(customFieldSection) } : {}),
+    },
+  };
+}
+
 function parseNsiproJsonText(text, filename = '') {
   return buildNsiproResult({
     parser: 'nsipro-json',
@@ -108,7 +153,7 @@ export const NSIPRO_PARSERS = {
   deployment_a: {
     id: 'deployment_a',
     version: GENERIC_NSIPRO_PARSER_VERSION,
-    parse: parseDefaultNsiproText,
+    parse: parseDeploymentANsiproText,
   },
   deployment_b: {
     id: 'deployment_b',
