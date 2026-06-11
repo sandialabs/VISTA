@@ -642,6 +642,8 @@ describe('InspectionWorkbenchPanel', () => {
               source_filename: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
               parser: 'nsipro-key-value',
               fields: { voltage_kv: 90, exposure_ms: 8.75 },
+              deployment: { deployment_id: 'DEP-42', line_id: 'LINE-7' },
+              custom_fields: { inspection_lot: 'LOT-ALPHA', operator_badge: 'QA-17', scan_mode: 'micro CT' },
               metadata: {
                 Application: { application_info: 'NIS-Elements AR 5.30.00 (Build 1688)' },
                 Microscope: { microscope_name: 'Nikon Ti2-E Inverted Microscope', objective_name: 'Plan Apo Lambda 20x' },
@@ -681,6 +683,14 @@ describe('InspectionWorkbenchPanel', () => {
     expect(within(modal).getByText('90')).toBeInTheDocument();
     expect(within(modal).getByText('metadata.nsipro_metadata.fields.exposure_ms')).toBeInTheDocument();
     expect(within(modal).getByText('8.75')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.custom_fields.inspection_lot')).toBeInTheDocument();
+    expect(within(modal).getByText('LOT-ALPHA')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.custom_fields.operator_badge')).toBeInTheDocument();
+    expect(within(modal).getByText('QA-17')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.custom_fields.scan_mode')).toBeInTheDocument();
+    expect(within(modal).getByText('micro CT')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.deployment.deployment_id')).toBeInTheDocument();
+    expect(within(modal).getByText('DEP-42')).toBeInTheDocument();
     expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Application.application_info')).toBeInTheDocument();
     expect(within(modal).getByText('NIS-Elements AR 5.30.00 (Build 1688)')).toBeInTheDocument();
     expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Microscope.microscope_name')).toBeInTheDocument();
@@ -700,6 +710,10 @@ describe('InspectionWorkbenchPanel', () => {
     expect(within(modal).queryByText('metadata.nsipro_metadata.source_filename')).not.toBeInTheDocument();
     expect(within(modal).queryByText('metadata.nsipro_metadata.fields.voltage_kv')).not.toBeInTheDocument();
     expect(within(modal).queryByText('metadata.nsipro_metadata.fields.exposure_ms')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.custom_fields.inspection_lot')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.custom_fields.operator_badge')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.custom_fields.scan_mode')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.deployment.deployment_id')).not.toBeInTheDocument();
     expect(within(modal).queryByText('metadata.source_images[0].nsipro_payload.voxel_size_um')).not.toBeInTheDocument();
     expect(within(modal).queryByText('metadata.source_images[0].selected_metadata_file')).not.toBeInTheDocument();
   });

@@ -975,6 +975,86 @@ describe('ImageUploader', () => {
       expect(imageMetadata.associated_metadata.metadata).toBeUndefined();
     });
 
+
+    test('uses a deployment-specific .nsipro fixture to normalize custom fields for ingest', async () => {
+      const deploymentNsiproFixture = [
+        '[Deployment]',
+        'Deployment ID = DEP-42',
+        'Line ID = LINE-7',
+        'Build Number = 118',
+        '[Custom Fields]',
+        'Inspection Lot = LOT-ALPHA',
+        'Operator Badge = QA-17',
+        'Scan Mode = micro CT',
+      ].join('\n');
+
+      expect(parseAssociatedMetadataText(deploymentNsiproFixture, 'deployment-a.nsipro', {
+        projectConfiguration: { metadata_parsers: { nsipro: { parser_id: 'deployment_a' } } },
+      })).toEqual(expect.objectContaining({
+        parser: 'nsipro-key-value',
+        parser_id: 'deployment_a',
+        parser_hash: 'sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb',
+        metadata: {
+          deployment: {
+            deployment_id: 'DEP-42',
+            line_id: 'LINE-7',
+            build_number: 118,
+          },
+          custom_fields: {
+            inspection_lot: 'LOT-ALPHA',
+            operator_badge: 'QA-17',
+            scan_mode: 'micro CT',
+          },
+        },
+      }));
+
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-deployment-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-front', filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }) });
+
+      renderUploader({
+        projectConfiguration: { metadata_parsers: { nsipro: { parser_id: 'deployment_a' } } },
+      });
+      selectFiles([makeFile('D1001_LOT01_SET01_SN0001_front_visual_false.jpg')]);
+      fireEvent.change(screen.getByLabelText('Delimiter'), { target: { value: '_' } });
+      fireEvent.change(screen.getByLabelText('Keys (comma-separated)'), {
+        target: { value: 'design_number, lot_number, set_number, serial_number, side, modality, overlay' },
+      });
+      const metadataFile = new File([deploymentNsiproFixture], 'deployment-a.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Associated deployment-a\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      const storedMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(storedMetadataPayload.value).toEqual(expect.objectContaining({
+        filename: 'deployment-a.nsipro',
+        file_type: 'nsipro',
+        parser_id: 'deployment_a',
+        metadata: expect.objectContaining({
+          custom_fields: expect.objectContaining({ operator_badge: 'QA-17' }),
+        }),
+      }));
+
+      const imageMetadata = JSON.parse(fetchSpy.mock.calls[1][1].body.get('metadata'));
+      expect(imageMetadata.nsipro_metadata).toEqual(expect.objectContaining({
+        deployment: expect.objectContaining({ deployment_id: 'DEP-42', build_number: 118 }),
+        custom_fields: expect.objectContaining({ inspection_lot: 'LOT-ALPHA', scan_mode: 'micro CT' }),
+      }));
+
+      const ingestPayload = JSON.parse(fetchSpy.mock.calls[2][1].body);
+      const sourceImage = ingestPayload.unassigned_parts[0].metadata.source_images[0];
+      expect(ingestPayload.unassigned_parts[0].metadata.nsipro_metadata.custom_fields.operator_badge).toBe('QA-17');
+      expect(sourceImage.nsipro_metadata).toEqual(expect.objectContaining({
+        deployment: expect.objectContaining({ line_id: 'LINE-7' }),
+        custom_fields: expect.objectContaining({ operator_badge: 'QA-17' }),
+      }));
+    });
+
     test('adds decoded .nsipro deployment fields to hierarchy ingest payload while preserving lightweight references', async () => {
       const fetchSpy = jest.spyOn(global, 'fetch')
         .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-metadata' }) })

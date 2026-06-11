@@ -82,6 +82,56 @@ def _parse_default_nsipro_text(text: str) -> tuple[str, dict[str, Any]]:
         return "nsipro-key-value", parse_generic_nsipro_key_value_text(text)
 
 
+def normalize_deployment_metadata_key(key: Any) -> str:
+    value = str(key or "").strip()
+    chars: list[str] = []
+    previous_is_lower_or_digit = False
+    for char in value:
+        if char.isupper() and previous_is_lower_or_digit:
+            chars.append("_")
+        if char.isalnum():
+            chars.append(char.lower())
+            previous_is_lower_or_digit = char.islower() or char.isdigit()
+        else:
+            if chars and chars[-1] != "_":
+                chars.append("_")
+            previous_is_lower_or_digit = False
+    return "".join(chars).strip("_")
+
+
+def normalize_deployment_section(section: Any) -> dict[str, Any]:
+    if not isinstance(section, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for key, value in section.items():
+        normalized_key = normalize_deployment_metadata_key(key)
+        if normalized_key:
+            normalized[normalized_key] = value
+    return normalized
+
+
+def first_deployment_section(metadata: dict[str, Any], candidate_names: list[str]) -> dict[str, Any] | None:
+    normalized_candidates = {normalize_deployment_metadata_key(name) for name in candidate_names}
+    for key, value in metadata.items():
+        if normalize_deployment_metadata_key(key) in normalized_candidates and isinstance(value, dict):
+            return value
+    return None
+
+
+def _parse_deployment_a_nsipro_text(text: str) -> tuple[str, dict[str, Any]]:
+    parser_name, metadata = _parse_default_nsipro_text(text)
+    deployment_section = first_deployment_section(metadata, ["deployment", "deployment metadata", "capture deployment"])
+    custom_field_section = first_deployment_section(metadata, ["custom fields", "custom_fields", "deployment custom fields"])
+    if not deployment_section and not custom_field_section:
+        return parser_name, metadata
+    normalized: dict[str, Any] = {}
+    if deployment_section:
+        normalized["deployment"] = normalize_deployment_section(deployment_section)
+    if custom_field_section:
+        normalized["custom_fields"] = normalize_deployment_section(custom_field_section)
+    return parser_name, normalized
+
+
 @dataclass(frozen=True)
 class NsiproParser:
     id: str
@@ -105,6 +155,13 @@ NSIPRO_PARSERS[DEFAULT_NSIPRO_PARSER_ID] = NsiproParser(
     version=GENERIC_NSIPRO_PARSER_VERSION,
     parser_hash=GENERIC_NSIPRO_PARSER_HASH,
     parse=_parse_default_nsipro_text,
+)
+
+NSIPRO_PARSERS["deployment_a"] = NsiproParser(
+    id="deployment_a",
+    version=GENERIC_NSIPRO_PARSER_VERSION,
+    parser_hash=stable_parser_hash("deployment_a", GENERIC_NSIPRO_PARSER_VERSION),
+    parse=_parse_deployment_a_nsipro_text,
 )
 
 
