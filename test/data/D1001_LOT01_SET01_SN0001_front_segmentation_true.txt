@@ -1,0 +1,6 @@
+Synthetic text segmentation overlay fixture
+part=SN0001
+side=front
+modality=segmentation
+overlay=true
+mask_summary=front surface pore candidates

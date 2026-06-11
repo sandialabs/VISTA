@@ -468,6 +468,76 @@ def _project_type_interface_layout_metadata_key(project_type: str) -> str:
     return f"{PROJECT_TYPE_INTERFACE_LAYOUT_KEY_PREFIX}:{project_type}"
 
 
+
+def _parse_scalar_metadata_value(raw_value: object):
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+    lowered = value.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered == "null":
+        return None
+    try:
+        if any(char in value for char in [".", "e", "E"]):
+            return float(value)
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return json.loads(value)
+    except Exception:
+        return value.strip("'\"")
+
+
+def _parse_nsipro_key_value_text(text: str) -> dict:
+    root: dict = {}
+    current_section = root
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";", "//")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section_name = line[1:-1].strip()
+            if not section_name:
+                continue
+            section = root.setdefault(section_name, {})
+            if not isinstance(section, dict):
+                section = {}
+                root[section_name] = section
+            current_section = section
+            continue
+        delimiter_indexes = [index for index in (line.find("="), line.find(":")) if index > 0]
+        if not delimiter_indexes:
+            continue
+        delimiter_index = min(delimiter_indexes)
+        key = line[:delimiter_index].strip()
+        if not key:
+            continue
+        current_section[key] = _parse_scalar_metadata_value(line[delimiter_index + 1:])
+    if not root:
+        raise ValueError("No metadata entries were found in the .nsipro file.")
+    return root
+
+
+def _load_nsipro_metadata_fixture(root: Path) -> Optional[dict]:
+    nsipro_files = sorted(root.glob("*.nsipro"))
+    if not nsipro_files:
+        return None
+    nsipro_path = nsipro_files[0]
+    text = nsipro_path.read_text(encoding="utf-8")
+    try:
+        parser = "nsipro-json"
+        parsed_metadata = json.loads(text)
+    except json.JSONDecodeError:
+        parser = "nsipro-key-value"
+        parsed_metadata = _parse_nsipro_key_value_text(text)
+    return {
+        "source_filename": nsipro_path.name,
+        "parser": parser,
+        "metadata": parsed_metadata,
+    }
+
 def _metadata_from_hierarchy_filename(path: Path) -> Optional[dict]:
     tokens = path.stem.split("_")
     if len(tokens) != 7:
@@ -2048,6 +2118,7 @@ async def load_project_test_data(
         if not PT3_TEST_STACK_ROOT.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PT3 test stack not found")
         volume_info = load_slice_stack(PT3_TEST_STACK_ROOT)
+        nsipro_metadata = _load_nsipro_metadata_fixture(PT3_TEST_STACK_ROOT)
         for index, file_path in enumerate(sorted(PT3_TEST_STACK_ROOT.glob("*.png"))):
             metadata = {
                 "source": "vista-test-data",
@@ -2056,7 +2127,11 @@ async def load_project_test_data(
                 "slice_index": index,
                 "slice_axis": "Z",
                 "axis_labels": ["XY", "XZ", "YZ"],
+                "overlay": False,
+                "modality": "volume-slice",
             }
+            if nsipro_metadata:
+                metadata["selected_metadata_file"] = nsipro_metadata["source_filename"]
             image, created = await _create_test_image_if_missing(
                 project_id=project_id,
                 file_path=file_path,
@@ -2066,8 +2141,65 @@ async def load_project_test_data(
                 allow_metadata_only=True,
             )
             images_created += 1 if created else 0
-            uploaded_records.append({"filename": file_path.name, "image_id": str(image.id), "metadata": metadata})
+            uploaded_records.append({
+                "filename": file_path.name,
+                "image_id": str(image.id),
+                "metadata": metadata,
+                **metadata,
+            })
 
+            overlay_path = PT3_TEST_STACK_ROOT / "overlays" / f"{file_path.stem}_overlay.png"
+            if overlay_path.exists():
+                overlay_metadata = {
+                    "source": "vista-test-data",
+                    "project_type": "PT3",
+                    "volume_stack_id": "PT3_SYNTH_MPR_001",
+                    "slice_index": index,
+                    "slice_axis": "Z",
+                    "axis_labels": ["XY", "XZ", "YZ"],
+                    "overlay": True,
+                    "modality": "segmentation",
+                    "overlay_base_filename": file_path.name,
+                    "overlay_base_image_id": str(image.id),
+                }
+                if nsipro_metadata:
+                    overlay_metadata["selected_metadata_file"] = nsipro_metadata["source_filename"]
+                overlay_image, overlay_created = await _create_test_image_if_missing(
+                    project_id=project_id,
+                    file_path=overlay_path,
+                    metadata=overlay_metadata,
+                    db=db,
+                    current_user=current_user,
+                    allow_metadata_only=True,
+                )
+                images_created += 1 if overlay_created else 0
+                uploaded_records.append({
+                    "filename": overlay_path.name,
+                    "image_id": str(overlay_image.id),
+                    "metadata": overlay_metadata,
+                    **overlay_metadata,
+                })
+
+        part_metadata = {
+            "source": "vista-test-data",
+            "volume_stack_id": "PT3_SYNTH_MPR_001",
+            "volume_shape": {
+                "axial": volume_info.shape[0],
+                "coronal": volume_info.shape[1],
+                "sagittal": volume_info.shape[2],
+            },
+            "mpr": {
+                "volume_shape": {
+                    "axial": volume_info.shape[0],
+                    "coronal": volume_info.shape[1],
+                    "sagittal": volume_info.shape[2],
+                },
+                "axis_labels": ["XY", "XZ", "YZ"],
+            },
+            "source_images": uploaded_records,
+        }
+        if nsipro_metadata:
+            part_metadata["nsipro_metadata"] = nsipro_metadata
         ingest_payload = schemas.InspectionBulkIngestPayload(
             batches=[
                 schemas.InspectionIngestBatchRecord(
@@ -2077,24 +2209,7 @@ async def load_project_test_data(
                         schemas.InspectionIngestPartRecord(
                             serial_number="SN3D0001",
                             display_name="PT3 synthetic MPR stack",
-                            metadata={
-                                "source": "vista-test-data",
-                                "volume_stack_id": "PT3_SYNTH_MPR_001",
-                                "volume_shape": {
-                                    "axial": volume_info.shape[0],
-                                    "coronal": volume_info.shape[1],
-                                    "sagittal": volume_info.shape[2],
-                                },
-                                "mpr": {
-                                    "volume_shape": {
-                                        "axial": volume_info.shape[0],
-                                        "coronal": volume_info.shape[1],
-                                        "sagittal": volume_info.shape[2],
-                                    },
-                                    "axis_labels": ["XY", "XZ", "YZ"],
-                                },
-                                "source_images": uploaded_records,
-                            },
+                            metadata=part_metadata,
                         )
                     ],
                 )
@@ -2104,7 +2219,7 @@ async def load_project_test_data(
         fixture_paths = sorted(
             path
             for path in TEST_DATA_ROOT.iterdir()
-            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".txt"}
         )
         if not fixture_paths:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PT1/PT2 test data not found")

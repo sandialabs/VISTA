@@ -639,9 +639,15 @@ describe('InspectionWorkbenchPanel', () => {
           review_state: 'unreviewed',
           metadata: {
             nsipro_metadata: {
-              source_filename: 'scan-settings.nsipro',
-              exposure_ms: 12,
-              operator: 'QA Technician',
+              source_filename: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
+              parser: 'nsipro-key-value',
+              metadata: {
+                Application: { application_info: 'NIS-Elements AR 5.30.00 (Build 1688)' },
+                Microscope: { microscope_name: 'Nikon Ti2-E Inverted Microscope', objective_name: 'Plan Apo Lambda 20x' },
+                Camera: { camera_name: 'DS-Qi2 Monochrome Camera', exposure_ms: 12.5, bit_depth: 16 },
+                Calibration: { pixel_size_um: 2.5, z_step_um: 5 },
+                Volume: { width_px: 128, height_px: 96, slices: 64 },
+              },
             },
             alloy: 'Ti-6Al-4V',
             source_images: [
@@ -650,7 +656,7 @@ describe('InspectionWorkbenchPanel', () => {
                 image_id: 'img-slice-001',
                 side: 'front',
                 modality: 'visual',
-                selected_metadata_file: 'scan-settings.nsipro',
+                selected_metadata_file: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
                 nsipro_payload: { voltage_kv: 80 },
               },
             ],
@@ -668,16 +674,23 @@ describe('InspectionWorkbenchPanel', () => {
     expect(modal).toBeInTheDocument();
     expect(within(modal).getByText('Metadata Rich Part')).toBeInTheDocument();
     expect(within(modal).getByRole('tab', { name: '.nsipro' })).toHaveAttribute('aria-selected', 'true');
-    expect(within(modal).getByText('metadata.nsipro_metadata')).toBeInTheDocument();
-    expect(within(modal).getAllByText(/scan-settings\.nsipro/).length).toBeGreaterThan(0);
-    expect(within(modal).getByText('metadata.source_images[0].nsipro_payload')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.source_filename')).toBeInTheDocument();
+    expect(within(modal).getAllByText(/PT3_GEOMETRIC_DUAL_LABEL\.nsipro/).length).toBeGreaterThan(0);
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Application.application_info')).toBeInTheDocument();
+    expect(within(modal).getByText('NIS-Elements AR 5.30.00 (Build 1688)')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Microscope.microscope_name')).toBeInTheDocument();
+    expect(within(modal).getByText('Nikon Ti2-E Inverted Microscope')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Camera.exposure_ms')).toBeInTheDocument();
+    expect(within(modal).getByText('12.5')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Volume.slices')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.source_images[0].nsipro_payload.voltage_kv')).toBeInTheDocument();
     expect(within(modal).queryByText('metadata.alloy')).not.toBeInTheDocument();
 
     fireEvent.click(within(modal).getByRole('tab', { name: 'Other' }));
     expect(within(modal).getByRole('tab', { name: 'Other' })).toHaveAttribute('aria-selected', 'true');
     expect(within(modal).getByText('metadata.alloy')).toBeInTheDocument();
     expect(within(modal).getByText('Ti-6Al-4V')).toBeInTheDocument();
-    expect(within(modal).queryByText('metadata.nsipro_metadata')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.source_filename')).not.toBeInTheDocument();
     expect(within(modal).queryByText('metadata.source_images[0].selected_metadata_file')).not.toBeInTheDocument();
   });
 
