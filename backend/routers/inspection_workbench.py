@@ -961,6 +961,22 @@ async def _resolve_associated_nsipro_payload(
     return None
 
 
+def _combine_metadata_source_values(source_payloads: list[dict]) -> dict:
+    combined: dict = {}
+    collisions: dict = {}
+    for source in source_payloads:
+        source_key = str(source.get("key") or "").strip()
+        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+        for key, value in metadata.items():
+            if key in combined and combined[key] != value:
+                collisions.setdefault(key, []).append({"source_key": source_key, "value": value})
+                continue
+            combined[key] = value
+    if collisions:
+        combined["metadata_source_collisions"] = collisions
+    return combined
+
+
 async def _normalize_ingest_part_metadata(
     *,
     db: AsyncSession,
@@ -1376,6 +1392,86 @@ async def list_inspection_parts(
         review_state=review_state,
     )
     return [_serialize_inspection_part(part) for part in parts]
+
+
+@router.put("/projects/{project_id}/parts/{part_id}/metadata-sources", response_model=schemas.InspectionPart)
+async def update_inspection_part_metadata_sources(
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    payload: schemas.InspectionPartMetadataSourcesUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+
+    parser, expected_version, expected_hash, strict_parser_match = _resolve_configured_nsipro_parser(
+        await _load_project_configuration_for_ingest(db=db, project_id=project_id, project_type=project.project_type)
+    )
+    source_refs: list[dict] = []
+    source_payloads: list[dict] = []
+    nsipro_sources: list[dict] = []
+    for key in payload.metadata_source_keys:
+        project_metadata = await crud.get_project_metadata_by_key(db=db, project_id=project_id, key=key)
+        if project_metadata is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metadata source '{key}' not found")
+        value = project_metadata.value if isinstance(project_metadata.value, dict) else {"value": project_metadata.value}
+        reference = {"project_metadata_key": key, "key": key}
+        nsipro_payload = _normalize_nsipro_bundle_payload(
+            bundle=value,
+            reference=reference,
+            configured_parser=parser,
+            expected_version=expected_version,
+            expected_hash=expected_hash,
+            strict=strict_parser_match,
+        )
+        source_refs.append({
+            "project_metadata_key": key,
+            "filename": value.get("filename") or value.get("source_filename"),
+            "file_type": value.get("file_type"),
+            "parser": value.get("parser"),
+            "parser_id": value.get("parser_id"),
+        })
+        source_payloads.append({
+            "key": key,
+            "metadata": (
+                nsipro_payload.get("metadata")
+                if nsipro_payload
+                else value.get("metadata") if isinstance(value.get("metadata"), dict)
+                else value
+            ),
+        })
+        if nsipro_payload:
+            nsipro_sources.append({"key": key, **nsipro_payload})
+
+    current_metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+    metadata_patch = {
+        "associated_metadata_refs": payload.metadata_source_keys,
+        "associated_metadata_sources": source_refs,
+        "project_metadata_source_values": source_payloads,
+        "project_metadata_combined": _combine_metadata_source_values(source_payloads) if source_payloads else {},
+        "nsipro_metadata_sources": nsipro_sources,
+        "nsipro_metadata": _combine_metadata_source_values(nsipro_sources) if nsipro_sources else {},
+    }
+    if payload.metadata_source_keys:
+        metadata_patch["associated_metadata_ref"] = payload.metadata_source_keys[0]
+        metadata_patch["associated_metadata"] = source_refs[0] if source_refs else {}
+    elif "associated_metadata_ref" in current_metadata or "associated_metadata" in current_metadata:
+        metadata_patch["associated_metadata_ref"] = None
+        metadata_patch["associated_metadata"] = None
+
+    updated = await crud.update_inspection_part_metadata(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        metadata_patch=metadata_patch,
+        updated_by=current_user.email,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    return _serialize_inspection_part(updated)
 
 
 @router.patch("/projects/{project_id}/parts/{part_id}", response_model=schemas.InspectionPart)

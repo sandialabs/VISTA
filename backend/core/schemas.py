@@ -152,6 +152,25 @@ class InspectionPartManualFlagUpdateRequest(BaseModel):
     manual_flagged: bool = False
 
 
+class InspectionPartMetadataSourcesUpdateRequest(BaseModel):
+    metadata_source_keys: List[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("metadata_source_keys")
+    @classmethod
+    def normalize_metadata_source_keys(cls, v: List[str]) -> List[str]:
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for key in v or []:
+            safe_key = str(key or "").strip()
+            if not safe_key or safe_key in seen:
+                continue
+            if len(safe_key) > 255:
+                raise ValueError("metadata source keys must be 255 characters or fewer")
+            seen.add(safe_key)
+            normalized.append(safe_key)
+        return normalized
+
+
 class InspectionPartSourceImageUpdateRequest(BaseModel):
     crop_subtitle: Optional[str] = Field(default=None, max_length=255)
 
