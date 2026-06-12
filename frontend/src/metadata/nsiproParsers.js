@@ -66,6 +66,102 @@ function xmlElementToMetadata(element) {
   if (directText) result['#text'] = parseScalarMetadataValue(directText);
   return result;
 }
+function leadingWhitespaceWidth(value) {
+  let width = 0;
+  for (const char of String(value || '')) {
+    if (char === ' ') {
+      width += 1;
+    } else if (char === '\t') {
+      width += 4;
+    } else {
+      break;
+    }
+  }
+  return width;
+}
+
+function decodeXmlPredefinedEntities(value) {
+  return String(value || '')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hexValue) => String.fromCodePoint(parseInt(hexValue, 16)))
+    .replace(/&#(\d+);/g, (_, numericValue) => String.fromCodePoint(parseInt(numericValue, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function parseLenientXmlLikeTagLine(line) {
+  const stripped = String(line || '').trim();
+  if (
+    !stripped.startsWith('<')
+    || stripped.startsWith('</')
+    || stripped.startsWith('<?')
+    || stripped.startsWith('<!')
+  ) {
+    return null;
+  }
+
+  const tagEnd = stripped.indexOf('>');
+  if (tagEnd <= 1) return null;
+  const tagName = stripped.slice(1, tagEnd).replace(/\/$/, '').trim();
+  if (!tagName) return null;
+  const inlineClosingTag = `</${tagName}>`;
+  let rawValue = stripped.slice(tagEnd + 1).trim();
+  if (rawValue.endsWith(inlineClosingTag)) {
+    rawValue = rawValue.slice(0, -inlineClosingTag.length).trim();
+  }
+  return { tagName, rawValue };
+}
+
+function parseLenientNsiproXmlLikeText(text) {
+  const root = {};
+  const stack = [{ tag: null, indent: -1, data: root }];
+
+  String(text || '').split(/\r?\n/).forEach((rawLine) => {
+    const stripped = rawLine.trim();
+    if (!stripped) return;
+    const indent = leadingWhitespaceWidth(rawLine);
+
+    if (stripped.startsWith('<?') || stripped.startsWith('<!--')) return;
+
+    if (stripped.startsWith('</')) {
+      const closingName = stripped.includes('>')
+        ? stripped.slice(2, stripped.indexOf('>')).trim()
+        : stripped.slice(2).trim();
+      while (stack.length > 1) {
+        const frame = stack.pop();
+        if (frame.tag === closingName) break;
+      }
+      return;
+    }
+
+    const parsed = parseLenientXmlLikeTagLine(rawLine);
+    if (!parsed) return;
+
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+      stack.pop();
+    }
+
+    const parent = stack[stack.length - 1].data;
+    if (!parent || typeof parent !== 'object' || Array.isArray(parent)) return;
+
+    if (parsed.rawValue) {
+      appendXmlChild(parent, parsed.tagName, parseScalarMetadataValue(decodeXmlPredefinedEntities(parsed.rawValue)));
+    } else {
+      const child = {};
+      appendXmlChild(parent, parsed.tagName, child);
+      stack.push({ tag: parsed.tagName, indent, data: child });
+    }
+  });
+
+  if (Object.keys(root).length === 0) {
+    throw new Error('No XML-like metadata entries were found in the .nsipro file.');
+  }
+
+  return root;
+}
+
 
 export function parseNsiproXmlText(text, filename = '') {
   const trimmed = String(text || '').trim();
@@ -80,7 +176,13 @@ export function parseNsiproXmlText(text, filename = '') {
   const document = parser.parseFromString(trimmed, 'application/xml');
   const parserError = document.querySelector('parsererror');
   if (parserError || !document.documentElement) {
-    throw new Error('Invalid XML .nsipro metadata file.');
+    return buildNsiproResult({
+      parser: 'nsipro-xml',
+      parserVersion: GENERIC_NSIPRO_PARSER_VERSION,
+      metadata: parseLenientNsiproXmlLikeText(trimmed),
+      warnings: [],
+      sourceFilename: filename,
+    });
   }
 
   const root = document.documentElement;
