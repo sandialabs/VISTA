@@ -120,7 +120,7 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
   };
 
   const openPartModal = (part) => {
-    setActiveImageModal({ title: part.displayName, subtitle: `Serial: ${part.serialNumber || 'Unspecified'}`, images: part.images, mode: 'part' });
+    setActiveImageModal({ title: part.displayName, images: part.images, mode: 'part' });
   };
 
   const handleCreatePart = async () => {
@@ -333,7 +333,6 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
                   <h3><button type="button" className="part-heading-button" onClick={() => openPartModal(part)}>{part.displayName}</button></h3>
                   <button type="button" className="part-delete-button" onClick={() => handleDeletePart(part)} aria-label={`Delete part ${part.displayName}`} title="Delete part">×</button>
                 </div>
-                <p className="muted">Serial: {part.serialNumber}</p>
                 <div className="image-part-chip-list">{part.images.length === 0 ? <p className="muted">No mapped images.</p> : part.images.map((img) => renderImageChip(img, false))}</div>
               </div>
             ))}
