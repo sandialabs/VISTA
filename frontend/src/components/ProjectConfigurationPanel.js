@@ -1105,10 +1105,6 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
             <div className="filename-convention-heading">
               <div>
                 <h3>Filename Convention</h3>
-                <p>
-                  Build the filename from left to right. Colors link each filename segment to the
-                  hierarchy, descriptor, modality, and decoding controls that define it.
-                </p>
               </div>
               <code data-testid="expected-filename-preview">{expectedFilenameExample}</code>
             </div>
