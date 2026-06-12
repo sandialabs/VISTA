@@ -16,6 +16,7 @@ import ImagesToPartsTab from './components/ImagesToPartsTab';
 import BatchesTab from './components/BatchesTab';
 import RemoveImagesTab from './components/RemoveImagesTab';
 import OverlaysTab from './components/OverlaysTab';
+import ProjectDataMetadataTab from './components/ProjectDataMetadataTab';
 import { resolveCurrentProjectPhase } from './utils/projectPhases';
 import { DEFAULT_INTERFACE_HIERARCHY, loadInterfaceHierarchy } from './utils/interfaceHierarchy';
 
@@ -30,6 +31,7 @@ const PROJECT_DATA_TABS = {
   load_images: { label: 'Load Images' },
   images_to_parts: { label: 'Images to Parts' },
   overlays: { label: 'Overlays' },
+  metadata: { label: 'Metadata' },
   batches: { label: 'Batches' },
   remove_images: { label: 'Unload Images' },
   recently_deleted: { label: 'Recently Deleted' },
@@ -451,6 +453,19 @@ function Project({ currentUserGroups = [] }) {
         />
       )}
 
+      {activeProjectDataTab === 'metadata' && (
+        <ProjectDataMetadataTab
+          projectId={id}
+          metadata={metadata}
+          parts={projectParts}
+          onAssociationsChanged={async () => {
+            await refreshProjectCounts();
+            await refreshProjectMetadata();
+          }}
+          setError={setError}
+        />
+      )}
+
       {activeProjectDataTab === 'remove_images' && (
         <RemoveImagesTab
           projectId={id}
@@ -529,6 +544,7 @@ function Project({ currentUserGroups = [] }) {
     recentlyDeletedOverlays,
     handleUploadComplete,
     ingestResult,
+    metadata,
     project?.is_archived,
     project?.name,
     project?.project_type,
