@@ -386,6 +386,39 @@ describe('ImageUploader', () => {
     });
   });
 
+  describe('Project-level metadata loading', () => {
+    test('loads a selected metadata file without uploading images', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ key: 'saved' }),
+      });
+      const onProjectMetadataLoaded = jest.fn();
+      renderUploader({ onProjectMetadataLoaded });
+
+      const metadataInput = screen.getByLabelText(/metadata file/i);
+      const metadataFile = new File([JSON.stringify({ operator: 'qa', lot: 42 })], 'project.json', {
+        type: 'application/json',
+      });
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/parsed project\.json/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /load metadata/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      expect(fetchSpy.mock.calls[0][0]).toBe('/api/projects/proj-1/metadata');
+      expect(fetchSpy.mock.calls[0][1].method).toBe('POST');
+      const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(payload.key).toMatch(/^associated_upload_metadata:project\.json:/);
+      expect(payload.value.metadata).toEqual({ operator: 'qa', lot: 42 });
+      expect(await screen.findByText(/Loaded project\.json as project metadata/i)).toBeInTheDocument();
+      expect(onProjectMetadataLoaded).toHaveBeenCalledWith(expect.objectContaining({
+        filename: 'project.json',
+        reference_type: 'project_metadata',
+      }));
+    });
+  });
+
   describe('Upload with manual metadata only', () => {
     test('sends manual JSON metadata in FormData', async () => {
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -946,7 +979,7 @@ describe('ImageUploader', () => {
       Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
       fireEvent.change(metadataInput);
 
-      expect(await screen.findByText(/Associated capture\.json as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Parsed capture\.json as associated_upload_metadata:/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
 
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
@@ -984,7 +1017,7 @@ describe('ImageUploader', () => {
       const metadataFile = new File(['[capture]\noperator=alice\nexposure=12'], 'scan.nsipro', { type: 'text/plain' });
       selectFiles([makeFile('photo.png'), metadataFile]);
 
-      expect(await screen.findByText(/Associated scan\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Parsed scan\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
       expect(screen.getByText(/1 file selected/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
 
@@ -1053,7 +1086,7 @@ describe('ImageUploader', () => {
       Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
       fireEvent.change(metadataInput);
 
-      expect(await screen.findByText(/Associated deployment-a\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Parsed deployment-a\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
 
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
@@ -1102,7 +1135,7 @@ describe('ImageUploader', () => {
       Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
       fireEvent.change(metadataInput);
 
-      expect(await screen.findByText(/Associated deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Parsed deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
 
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
@@ -1168,7 +1201,7 @@ describe('ImageUploader', () => {
       Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
       fireEvent.change(metadataInput);
 
-      expect(await screen.findByText(/Associated stack\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Parsed stack\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
 
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
@@ -1225,7 +1258,7 @@ describe('ImageUploader', () => {
       Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
       fireEvent.change(metadataInput);
 
-      expect(await screen.findByText(/Associated deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Parsed deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
 
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
