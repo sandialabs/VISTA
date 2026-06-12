@@ -77,6 +77,84 @@ describe('nsiproParsers', () => {
     expect(parseNsiproText(xml, 'scan.nsipro')).toEqual(expect.objectContaining({ parser: 'nsipro-xml' }));
   });
 
+  test('parseNsiproText accepts NSI XML-like fields without scalar end tags', () => {
+    const xmlLike = [
+      '<NSI Reconstruction Project>',
+      '  <version>2.0',
+      '  <Project Name>Plastic Part 6-5-2024',
+      '  <Object Radiograph>',
+      '    <file>Radiographs-Plastic Part 6-5-2024\\Plastic Part 6-5-2024-radio*.tif',
+      '    <number>1200',
+      '  </Object Radiograph>',
+      '  <CT Project Configuration>',
+      '    <Technique Configuration>',
+      '      <System Info>',
+      '        <Company Name>North Star Imaging, Inc.',
+      '      </System Info>',
+      '      <Setup>',
+      '        <units>[mm]',
+      '        <fixturing>',
+      '        <phys filter>0.040&quot; Cu',
+      '        <inline scalar>closed value</inline scalar>',
+      '      </Setup>',
+      '      <Ug>',
+      '        <Formula>',
+      '          <idx>0',
+      '          <Description>IQI Hole (mm)',
+      '          <Value>0.51',
+      '        </Formula>',
+      '        <Formula>',
+      '          <idx>1',
+      '          <Description>X Srb-Pixels (Hole)',
+      '          <Value>3',
+      '        </Formula>',
+      '      </Ug>',
+      '    </Technique Configuration>',
+      '  </CT Project Configuration>',
+      '</NSI Reconstruction Project>',
+    ].join('\n');
+
+    const result = parseNsiproText(xmlLike, 'Plastic Part 6-5-2024.nsipro');
+
+    expect(result).toEqual(expect.objectContaining({
+      parser: 'nsipro-xml',
+      parser_id: 'default',
+      source_filename: 'Plastic Part 6-5-2024.nsipro',
+    }));
+    const metadata = result.metadata['NSI Reconstruction Project'];
+    expect(metadata.version).toBe(2.0);
+    expect(metadata['Project Name']).toBe('Plastic Part 6-5-2024');
+    expect(metadata['Object Radiograph'].number).toBe(1200);
+    const technique = metadata['CT Project Configuration']['Technique Configuration'];
+    expect(technique['System Info']['Company Name']).toBe('North Star Imaging, Inc.');
+    expect(technique.Setup.fixturing).toEqual({});
+    expect(technique.Setup['phys filter']).toBe('0.040" Cu');
+    expect(technique.Setup['inline scalar']).toBe('closed value');
+    expect(technique.Ug.Formula).toEqual([
+      { idx: 0, Description: 'IQI Hole (mm)', Value: 0.51 },
+      { idx: 1, Description: 'X Srb-Pixels (Hole)', Value: 3 },
+    ]);
+  });
+
+  test('parseNsiproText reads the ReadTheDocs Plastic Part example fixture', () => {
+    const fixturePath = path.resolve(__dirname, '../../../../test/data/nsipro/Plastic Part 6-5-2024.nsipro');
+    const result = parseNsiproText(fs.readFileSync(fixturePath, 'utf8'), 'Plastic Part 6-5-2024.nsipro');
+
+    expect(result).toEqual(expect.objectContaining({
+      parser: 'nsipro-xml',
+      parser_id: 'default',
+      source_filename: 'Plastic Part 6-5-2024.nsipro',
+    }));
+    const metadata = result.metadata['NSI Reconstruction Project'];
+    expect(metadata['Project Name']).toBe('Plastic Part 6-5-2024');
+    expect(metadata['Object Radiograph'].number).toBe(1200);
+    expect(metadata.Volume.resolution).toBe('605 1189 572');
+    const technique = metadata['CT Project Configuration']['Technique Configuration'];
+    expect(technique['System Info']['Company Name']).toBe('North Star Imaging, Inc.');
+    expect(technique.Detector['integration time ms']).toBe(35.6608);
+    expect(technique.Ug.Formula[4].Description).toBe('Im Unsharpness');
+  });
+
   test('parseNsiproXmlText rejects unsafe XML entity declarations', () => {
     const xml = '<!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>';
     expect(() => parseNsiproXmlText(xml, 'unsafe.nsipro'))

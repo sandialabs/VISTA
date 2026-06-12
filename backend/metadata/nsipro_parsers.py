@@ -8,6 +8,7 @@ re-read during ingest and normalized before being persisted on inspection parts.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -76,6 +77,97 @@ def xml_element_to_metadata(element: ET.Element) -> Any:
         result["#text"] = parse_scalar_metadata_value(direct_text)
     return result
 
+def leading_whitespace_width(value: str) -> int:
+    """Return indentation width while treating tabs as four spaces."""
+
+    width = 0
+    for char in value:
+        if char == " ":
+            width += 1
+        elif char == "\t":
+            width += 4
+        else:
+            break
+    return width
+
+def _parse_lenient_xml_like_tag_line(line: str) -> tuple[str, str] | None:
+    """Parse one NSI XML-like opening tag line.
+
+    Some NSI .nsipro files use an XML-like format rather than XML: tag names
+    may contain spaces and scalar values are stored as ``<Tag Name>value``
+    without corresponding closing tags. This helper intentionally accepts only a
+    single leading tag and leaves the rest of the line as the raw scalar value.
+    """
+
+    stripped = line.strip()
+    if not stripped.startswith("<") or stripped.startswith(("</", "<?", "<!")):
+        return None
+    tag_end = stripped.find(">")
+    if tag_end <= 1:
+        return None
+    tag_name = stripped[1:tag_end].strip()
+    if not tag_name or tag_name.endswith("/"):
+        tag_name = tag_name.rstrip("/").strip()
+    if not tag_name:
+        return None
+    raw_value = stripped[tag_end + 1 :].strip()
+    inline_closing_tag = f"</{tag_name}>"
+    if raw_value.endswith(inline_closing_tag):
+        raw_value = raw_value[: -len(inline_closing_tag)].strip()
+    return tag_name, raw_value
+
+def parse_lenient_nsipro_xml_like_text(text: str) -> dict[str, Any]:
+    """Parse NSI XML-like .nsipro text that is not well-formed XML.
+
+    The parser is line-oriented by design because NSI pseudo-XML scalar fields
+    are represented as ``<field>value`` lines. Empty opening tags become
+    containers only when followed by deeper indentation or an explicit closing
+    tag; otherwise they remain empty scalar fields.
+    """
+
+    root: dict[str, Any] = {}
+    stack: list[dict[str, Any]] = [{"tag": None, "indent": -1, "data": root}]
+
+    for raw_line in str(text or "").splitlines():
+        if not raw_line.strip():
+            continue
+        stripped = raw_line.strip()
+        indent = leading_whitespace_width(raw_line)
+
+        if stripped.startswith("<?") or stripped.startswith("<!--"):
+            continue
+
+        if stripped.startswith("</"):
+            closing_name = stripped[2 : stripped.find(">")].strip() if ">" in stripped else stripped[2:].strip()
+            while len(stack) > 1:
+                frame = stack.pop()
+                if frame["tag"] == closing_name:
+                    break
+            continue
+
+        parsed = _parse_lenient_xml_like_tag_line(raw_line)
+        if not parsed:
+            continue
+
+        tag_name, raw_value = parsed
+        while len(stack) > 1 and indent <= int(stack[-1]["indent"]):
+            stack.pop()
+
+        parent = stack[-1]["data"]
+        if not isinstance(parent, dict):
+            continue
+
+        if raw_value:
+            append_xml_child(parent, tag_name, parse_scalar_metadata_value(html.unescape(raw_value)))
+        else:
+            child: dict[str, Any] = {}
+            append_xml_child(parent, tag_name, child)
+            stack.append({"tag": tag_name, "indent": indent, "data": child})
+
+    if not root:
+        raise ValueError("No XML-like metadata entries were found in the .nsipro file.")
+    return root
+
 def parse_nsipro_xml_text(text: str) -> dict[str, Any]:
     trimmed = str(text or "").strip()
     if not trimmed.startswith("<"):
@@ -85,8 +177,8 @@ def parse_nsipro_xml_text(text: str) -> dict[str, Any]:
         raise ValueError("XML .nsipro metadata with DOCTYPE or entity declarations is not supported.")
     try:
         root = ET.fromstring(trimmed)
-    except ET.ParseError as exc:
-        raise ValueError("Invalid XML .nsipro metadata file.") from exc
+    except ET.ParseError:
+        return parse_lenient_nsipro_xml_like_text(trimmed)
     return {xml_local_name(root.tag): xml_element_to_metadata(root)}
 
 def parse_generic_nsipro_key_value_text(text: str) -> dict[str, Any]:
