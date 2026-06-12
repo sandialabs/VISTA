@@ -279,6 +279,20 @@ function formatMetadataPath(parentPath, key) {
   return parentPath ? `${parentPath}.${key}` : String(key);
 }
 
+
+function collectMetadataLeafEntries(value, path = 'metadata') {
+  if (Array.isArray(value)) {
+    if (!value.length) return [{ path, value }];
+    return value.flatMap((entry, index) => collectMetadataLeafEntries(entry, formatMetadataPath(path, index)));
+  }
+  if (isPlainMetadataObject(value)) {
+    const entries = Object.entries(value);
+    if (!entries.length) return [{ path, value }];
+    return entries.flatMap(([key, entryValue]) => collectMetadataLeafEntries(entryValue, formatMetadataPath(path, key)));
+  }
+  return [{ path, value }];
+}
+
 function collectNsiproMetadataEntries(value, path = 'metadata', inNsiproContext = false) {
   if (Array.isArray(value)) {
     return value.flatMap((entry, index) => collectNsiproMetadataEntries(
@@ -5937,7 +5951,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const renderMetadataModalBody = () => {
     if (!selectedPart) return <p className="metadata-modal-empty">Select a part to view metadata.</p>;
     const { nsiproEntries, otherMetadata } = getPartMetadataBreakout(selectedPart);
-    const otherRows = Object.entries(otherMetadata).map(([key, value]) => ({ path: `metadata.${key}`, value }));
+    const otherRows = collectMetadataLeafEntries(otherMetadata);
     return (
       <div className="part-metadata-modal-body">
         <div className="metadata-modal-part-summary">

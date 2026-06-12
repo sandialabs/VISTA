@@ -2889,7 +2889,6 @@ ul li:hover {
   color: var(--gray-700);
 }
 
-
 /* CompactImageClassifications in Sidebar */
 .image-view-sidebar .compact-classifications {
   margin-bottom: var(--space-3);
@@ -3222,6 +3221,17 @@ ul li:hover {
   font-size: 0.875rem;
   color: var(--gray-800);
   word-break: break-word;
+}
+
+.custom-metadata-scroll {
+  max-height: min(520px, 55vh);
+  overflow: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+}
+
+.custom-metadata-scroll .custom-metadata-table {
+  margin: 0;
 }
 
 .custom-metadata-table .metadata-value-content {
@@ -3784,7 +3794,8 @@ ul li:hover {
   margin: var(--space-2) 0 0 0;
   font-family: var(--font-family-mono);
   font-size: 0.8rem;
-  overflow-x: auto;
+  max-height: min(420px, 45vh);
+  overflow: auto;
 }
 
 /* Print Styles */
@@ -6253,6 +6264,7 @@ ul li:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
 
 .metadata-modal-part-summary {
@@ -6276,6 +6288,7 @@ ul li:hover {
   border: 1px solid #dbe2ea;
   border-radius: 8px;
   background: #fff;
+  max-height: min(620px, 58vh);
   overflow: auto;
 }
 
@@ -6566,7 +6579,6 @@ ul li:hover {
   min-height: 560px;
   gap: 4px;
 }
-
 
 .mpr-grid-single {
   grid-template-columns: 1fr;
@@ -7506,7 +7518,6 @@ ul li:hover {
   color: #475569;
 }
 
-
 .project-configuration-panel .filename-convention-preview {
   display: grid;
   gap: 8px;
@@ -7565,7 +7576,6 @@ ul li:hover {
     justify-self: stretch;
   }
 }
-
 
 .volume-slice-voxel {
   image-rendering: pixelated;

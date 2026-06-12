@@ -31,6 +31,68 @@ function buildNsiproResult({ parser, parserVersion, parserHash = NSIPRO_PARSER_H
   };
 }
 
+function appendXmlChild(parent, key, value) {
+  if (Object.prototype.hasOwnProperty.call(parent, key)) {
+    if (!Array.isArray(parent[key])) parent[key] = [parent[key]];
+    parent[key].push(value);
+  } else {
+    parent[key] = value;
+  }
+}
+
+function xmlElementToMetadata(element) {
+  const attributes = Array.from(element.attributes || {}).reduce((acc, attribute) => {
+    acc[attribute.localName || attribute.name] = parseScalarMetadataValue(attribute.value);
+    return acc;
+  }, {});
+  const childElements = Array.from(element.children || []);
+  const directText = Array.from(element.childNodes || [])
+    .filter((node) => node.nodeType === Node.TEXT_NODE || node.nodeType === Node.CDATA_SECTION_NODE)
+    .map((node) => node.textContent || '')
+    .join('')
+    .trim();
+
+  if (!childElements.length && Object.keys(attributes).length === 0) {
+    return parseScalarMetadataValue(directText);
+  }
+
+  const result = {};
+  if (Object.keys(attributes).length > 0) result['@attributes'] = attributes;
+
+  childElements.forEach((child) => {
+    appendXmlChild(result, child.localName || child.tagName, xmlElementToMetadata(child));
+  });
+
+  if (directText) result['#text'] = parseScalarMetadataValue(directText);
+  return result;
+}
+
+export function parseNsiproXmlText(text, filename = '') {
+  const trimmed = String(text || '').trim();
+  if (!trimmed.startsWith('<')) {
+    throw new Error('Not an XML .nsipro document.');
+  }
+  if (/<!DOCTYPE|<!ENTITY/i.test(trimmed)) {
+    throw new Error('XML .nsipro metadata with DOCTYPE or entity declarations is not supported.');
+  }
+
+  const parser = new DOMParser();
+  const document = parser.parseFromString(trimmed, 'application/xml');
+  const parserError = document.querySelector('parsererror');
+  if (parserError || !document.documentElement) {
+    throw new Error('Invalid XML .nsipro metadata file.');
+  }
+
+  const root = document.documentElement;
+  return buildNsiproResult({
+    parser: 'nsipro-xml',
+    parserVersion: GENERIC_NSIPRO_PARSER_VERSION,
+    metadata: { [root.localName || root.tagName]: xmlElementToMetadata(root) },
+    warnings: [],
+    sourceFilename: filename,
+  });
+}
+
 export function parseGenericNsiproKeyValueText(text, filename = '') {
   const root = {};
   const warnings = [];
@@ -80,7 +142,6 @@ export function parseGenericNsiproKeyValueText(text, filename = '') {
     sourceFilename: filename,
   });
 }
-
 
 function normalizeDeploymentMetadataKey(key) {
   return String(key || '')
@@ -140,6 +201,9 @@ function parseDefaultNsiproText(text, filename = '') {
   try {
     return parseNsiproJsonText(text, filename);
   } catch (jsonError) {
+    if (String(text || '').trim().startsWith('<')) {
+      return parseNsiproXmlText(text, filename);
+    }
     return parseGenericNsiproKeyValueText(text, filename);
   }
 }
