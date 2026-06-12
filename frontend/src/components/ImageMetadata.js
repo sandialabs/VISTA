@@ -230,42 +230,44 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
             </div>
 
             {hasCustomMetadata ? (
-              <table className="metadata-table custom-metadata-table">
-                <tbody>
-                  {Object.entries(customMetadata).map(([key, value]) => (
-                    <tr key={key}>
-                      <td className="metadata-label">{key}</td>
-                      <td className="metadata-value">
-                        <div className="metadata-value-content">
-                          {value === null ? (
-                            <span className="metadata-null">null</span>
-                          ) : typeof value === 'object' ? (
-                            <pre>{JSON.stringify(value, null, 2)}</pre>
-                          ) : (
-                            value.toString()
-                          )}
-                        </div>
-                        <div className="metadata-actions">
-                          <button
-                            className="btn btn-small"
-                            onClick={() => handleOpenEditDialog(key, value)}
-                            disabled={loading}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-small btn-danger"
-                            onClick={() => handleDeleteMetadata(key)}
-                            disabled={loading}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="custom-metadata-scroll" tabIndex="0" aria-label="Custom metadata fields">
+                <table className="metadata-table custom-metadata-table">
+                  <tbody>
+                    {Object.entries(customMetadata).map(([key, value]) => (
+                      <tr key={key}>
+                        <td className="metadata-label">{key}</td>
+                        <td className="metadata-value">
+                          <div className="metadata-value-content">
+                            {value === null ? (
+                              <span className="metadata-null">null</span>
+                            ) : typeof value === 'object' ? (
+                              <pre>{JSON.stringify(value, null, 2)}</pre>
+                            ) : (
+                              value.toString()
+                            )}
+                          </div>
+                          <div className="metadata-actions">
+                            <button
+                              className="btn btn-small"
+                              onClick={() => handleOpenEditDialog(key, value)}
+                              disabled={loading}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-small btn-danger"
+                              onClick={() => handleDeleteMetadata(key)}
+                              disabled={loading}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <p className="no-metadata-message">No custom metadata available</p>
             )}

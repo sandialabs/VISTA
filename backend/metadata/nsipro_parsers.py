@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -16,13 +17,11 @@ DEFAULT_NSIPRO_PARSER_ID = "default"
 GENERIC_NSIPRO_PARSER_VERSION = "1.0.0"
 GENERIC_NSIPRO_PARSER_HASH = "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df"
 
-
 def stable_parser_hash(parser_id: str, parser_version: str) -> str:
     """Return the stable parser hash used in frontend/backend payload contracts."""
 
     digest = hashlib.sha256(f"nsipro:{parser_id}:{parser_version}".encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
-
 
 def parse_scalar_metadata_value(raw_value: Any) -> Any:
     value = str(raw_value or "").strip()
@@ -44,6 +43,51 @@ def parse_scalar_metadata_value(raw_value: Any) -> Any:
     except Exception:
         return value.strip("'\"")
 
+def xml_local_name(name: str) -> str:
+    return name.rsplit("}", 1)[-1] if "}" in name else name
+
+def append_xml_child(parent: dict[str, Any], key: str, value: Any) -> None:
+    if key in parent:
+        if not isinstance(parent[key], list):
+            parent[key] = [parent[key]]
+        parent[key].append(value)
+    else:
+        parent[key] = value
+
+def xml_element_to_metadata(element: ET.Element) -> Any:
+    attributes = {xml_local_name(key): parse_scalar_metadata_value(value) for key, value in element.attrib.items()}
+    child_elements = list(element)
+    direct_text = (element.text or "").strip()
+
+    if not child_elements and not attributes:
+        return parse_scalar_metadata_value(direct_text)
+
+    result: dict[str, Any] = {}
+    if attributes:
+        result["@attributes"] = attributes
+
+    for child in child_elements:
+        append_xml_child(result, xml_local_name(child.tag), xml_element_to_metadata(child))
+        if child.tail and child.tail.strip():
+            existing_text = str(result.get("#text", ""))
+            result["#text"] = " ".join(part for part in [existing_text, child.tail.strip()] if part)
+
+    if direct_text:
+        result["#text"] = parse_scalar_metadata_value(direct_text)
+    return result
+
+def parse_nsipro_xml_text(text: str) -> dict[str, Any]:
+    trimmed = str(text or "").strip()
+    if not trimmed.startswith("<"):
+        raise ValueError("Not an XML .nsipro document.")
+    lowered = trimmed.lower()
+    if "<!doctype" in lowered or "<!entity" in lowered:
+        raise ValueError("XML .nsipro metadata with DOCTYPE or entity declarations is not supported.")
+    try:
+        root = ET.fromstring(trimmed)
+    except ET.ParseError as exc:
+        raise ValueError("Invalid XML .nsipro metadata file.") from exc
+    return {xml_local_name(root.tag): xml_element_to_metadata(root)}
 
 def parse_generic_nsipro_key_value_text(text: str) -> dict[str, Any]:
     root: dict[str, Any] = {}
@@ -74,13 +118,13 @@ def parse_generic_nsipro_key_value_text(text: str) -> dict[str, Any]:
         raise ValueError("No metadata entries were found in the .nsipro file.")
     return root
 
-
 def _parse_default_nsipro_text(text: str) -> tuple[str, dict[str, Any]]:
     try:
         return "nsipro-json", json.loads(str(text or "").strip())
     except json.JSONDecodeError:
+        if str(text or "").strip().startswith("<"):
+            return "nsipro-xml", parse_nsipro_xml_text(text)
         return "nsipro-key-value", parse_generic_nsipro_key_value_text(text)
-
 
 def normalize_deployment_metadata_key(key: Any) -> str:
     value = str(key or "").strip()
@@ -98,7 +142,6 @@ def normalize_deployment_metadata_key(key: Any) -> str:
             previous_is_lower_or_digit = False
     return "".join(chars).strip("_")
 
-
 def normalize_deployment_section(section: Any) -> dict[str, Any]:
     if not isinstance(section, dict):
         return {}
@@ -109,14 +152,12 @@ def normalize_deployment_section(section: Any) -> dict[str, Any]:
             normalized[normalized_key] = value
     return normalized
 
-
 def first_deployment_section(metadata: dict[str, Any], candidate_names: list[str]) -> dict[str, Any] | None:
     normalized_candidates = {normalize_deployment_metadata_key(name) for name in candidate_names}
     for key, value in metadata.items():
         if normalize_deployment_metadata_key(key) in normalized_candidates and isinstance(value, dict):
             return value
     return None
-
 
 def _parse_deployment_a_nsipro_text(text: str) -> tuple[str, dict[str, Any]]:
     parser_name, metadata = _parse_default_nsipro_text(text)
@@ -131,14 +172,12 @@ def _parse_deployment_a_nsipro_text(text: str) -> tuple[str, dict[str, Any]]:
         normalized["custom_fields"] = normalize_deployment_section(custom_field_section)
     return parser_name, normalized
 
-
 @dataclass(frozen=True)
 class NsiproParser:
     id: str
     version: str
     parser_hash: str
     parse: Callable[[str], tuple[str, dict[str, Any]]]
-
 
 NSIPRO_PARSERS: dict[str, NsiproParser] = {
     parser_id: NsiproParser(
@@ -164,14 +203,12 @@ NSIPRO_PARSERS["deployment_a"] = NsiproParser(
     parse=_parse_deployment_a_nsipro_text,
 )
 
-
 def get_nsipro_parser(parser_id: str | None) -> NsiproParser:
     normalized_parser_id = str(parser_id or "").strip() or DEFAULT_NSIPRO_PARSER_ID
     parser = NSIPRO_PARSERS.get(normalized_parser_id)
     if not parser:
         raise ValueError(f"Unknown .nsipro parser configured: {normalized_parser_id}.")
     return parser
-
 
 def parse_nsipro_text(text: str, filename: str = "", parser_id: str | None = None) -> dict[str, Any]:
     parser = get_nsipro_parser(parser_id)

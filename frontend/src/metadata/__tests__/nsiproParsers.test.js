@@ -1,4 +1,6 @@
-import { NSIPRO_PARSERS, getConfiguredNsiproParserId, parseGenericNsiproKeyValueText, parseNsiproText } from '../nsiproParsers';
+import fs from 'fs';
+import path from 'path';
+import { NSIPRO_PARSERS, getConfiguredNsiproParserId, parseGenericNsiproKeyValueText, parseNsiproText, parseNsiproXmlText } from '../nsiproParsers';
 
 describe('nsiproParsers', () => {
   test('exports a registry with deployment parser identifiers', () => {
@@ -33,6 +35,71 @@ describe('nsiproParsers', () => {
       warnings: [],
       source_filename: 'scan.nsipro',
     });
+  });
+
+  test('parseNsiproText decodes arbitrary XML .nsipro fields, attributes, text, and repeated elements', () => {
+    const xml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<NSIProMetadata schema="pt3" version="2">',
+      '  <Acquisition operator="alice" valid="true">',
+      '    <Exposure unit="ms">12.5</Exposure>',
+      '    <Mode>brightfield</Mode>',
+      '  </Acquisition>',
+      '  <Channel index="1"><Name>Brightfield</Name><Wavelength>550</Wavelength></Channel>',
+      '  <Channel index="2"><Name>DAPI</Name><Wavelength>405</Wavelength></Channel>',
+      '  <Notes><![CDATA[ready for review]]></Notes>',
+      '</NSIProMetadata>',
+    ].join('\n');
+
+    expect(parseNsiproXmlText(xml, 'scan.nsipro')).toEqual({
+      parser: 'nsipro-xml',
+      parser_id: 'default',
+      parser_version: '1.0.0',
+      parser_hash: 'sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df',
+      source_filename: 'scan.nsipro',
+      warnings: [],
+      metadata: {
+        NSIProMetadata: {
+          '@attributes': { schema: 'pt3', version: 2 },
+          Acquisition: {
+            '@attributes': { operator: 'alice', valid: true },
+            Exposure: { '@attributes': { unit: 'ms' }, '#text': 12.5 },
+            Mode: 'brightfield',
+          },
+          Channel: [
+            { '@attributes': { index: 1 }, Name: 'Brightfield', Wavelength: 550 },
+            { '@attributes': { index: 2 }, Name: 'DAPI', Wavelength: 405 },
+          ],
+          Notes: 'ready for review',
+        },
+      },
+    });
+    expect(parseNsiproText(xml, 'scan.nsipro')).toEqual(expect.objectContaining({ parser: 'nsipro-xml' }));
+  });
+
+  test('parseNsiproXmlText rejects unsafe XML entity declarations', () => {
+    const xml = '<!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>';
+    expect(() => parseNsiproXmlText(xml, 'unsafe.nsipro'))
+      .toThrow('XML .nsipro metadata with DOCTYPE or entity declarations is not supported.');
+  });
+
+  test('parseNsiproText extracts fields from the PT3 sample .nsipro fixture', () => {
+    const fixturePath = path.resolve(__dirname, '../../../../test/data/3D/geometric/PT3_GEOMETRIC_DUAL_LABEL.nsipro');
+    const result = parseNsiproText(fs.readFileSync(fixturePath, 'utf8'), 'PT3_GEOMETRIC_DUAL_LABEL.nsipro');
+
+    expect(result).toEqual(expect.objectContaining({
+      parser: 'nsipro-key-value',
+      parser_id: 'default',
+      source_filename: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
+    }));
+    expect(result.metadata.Application.application_info).toBe('NIS-Elements AR 5.30.00 (Build 1688)');
+    expect(result.metadata.Acquisition.acquisition_datetime).toBe('2026-02-17T14:22:31Z');
+    expect(result.metadata.Microscope.objective_magnification).toBe(20);
+    expect(result.metadata.Camera.exposure_ms).toBe(12.5);
+    expect(result.metadata.Calibration.voxel_size_um).toEqual([2.5, 2.5, 5.0]);
+    expect(result.metadata.Volume.slices).toBe(64);
+    expect(result.metadata.Stage.stage_x_um).toBe(1024.25);
+    expect(result.metadata.Channels.channel_1_name).toBe('Brightfield');
   });
 
   test('parseNsiproText uses parserId from options and falls back on unknown parser', () => {
