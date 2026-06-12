@@ -181,7 +181,7 @@ function createMockData(scenario = 'advanced') {
   return scenarioByUser[scenario] || scenarioByUser.advanced;
 }
 
-async function mockInspectionWorkbenchRoutes(page, { type = 'PT1', scenario = 'advanced' } = {}) {
+async function mockInspectionWorkbenchRoutes(page, { type = 'PT1', scenario = 'advanced', images = [], mockParts = null, mockBatches = null } = {}) {
   const { batches, parts, workspaceState } = createMockData(scenario);
   const metadataNormalizationByScenario = {
     basic: {},
@@ -230,7 +230,8 @@ async function mockInspectionWorkbenchRoutes(page, { type = 'PT1', scenario = 'a
       },
     },
   };
-  let mutableParts = [...parts];
+  let mutableParts = Array.isArray(mockParts) ? [...mockParts] : [...parts];
+  const responseBatches = Array.isArray(mockBatches) ? mockBatches : batches;
   let mutableAnnotations = {};
   const savedWorkspaceStates = [];
   const exportBundleArchiveRequests = [];
@@ -301,11 +302,11 @@ async function mockInspectionWorkbenchRoutes(page, { type = 'PT1', scenario = 'a
       return;
     }
     if (url.includes(`/api/projects/${projectId}/images`)) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(images) });
       return;
     }
     if (url.endsWith(`/api/projects/${projectId}/batches`)) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(batches) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(responseBatches) });
       return;
     }
     if (url.endsWith(`/api/projects/${projectId}/workspace-state`) && method === 'GET') {

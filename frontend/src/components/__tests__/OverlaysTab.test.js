@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import OverlaysTab, { buildOverlayBuckets } from '../OverlaysTab';
+import OverlaysTab, { buildOverlayBuckets, deriveBaseFilenameFromOverlaySuffix, findAutoassignments } from '../OverlaysTab';
 
 describe('OverlaysTab', () => {
   beforeEach(() => {
@@ -89,6 +89,75 @@ describe('OverlaysTab', () => {
     expect(buckets.baseBuckets).toHaveLength(1);
     expect(buckets.baseBuckets[0].overlays.map((image) => image.filename)).toEqual(['overlay.png']);
     expect(buckets.unassignedOverlays.map((image) => image.filename)).toEqual(['loose.png']);
+  });
+
+  test('findAutoassignments matches exact duplicate filenames and _overlay suffix filenames', () => {
+    const buckets = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        display_name: 'Part 1',
+        metadata: { source_images: [
+          { filename: 'scan.npy', image_id: 'scan-base-id', overlay: false },
+          { filename: 'camera.png', image_id: 'camera-base-id', overlay: false },
+        ] },
+      }],
+      images: [
+        { id: 'scan-base-id', filename: 'scan.npy' },
+        { id: 'scan-overlay-id', filename: 'scan.npy' },
+        { id: 'camera-base-id', filename: 'camera.png' },
+        { id: 'camera-overlay-id', filename: 'camera_overlay.png' },
+        { id: 'loose-id', filename: 'loose_overlay.png' },
+      ],
+    });
+
+    expect(deriveBaseFilenameFromOverlaySuffix('camera_overlay.png')).toBe('camera.png');
+    expect(findAutoassignments(buckets).map(({ overlayImage, baseImage }) => [overlayImage.id, baseImage.id])).toEqual([
+      ['camera-overlay-id', 'camera-base-id'],
+      ['scan-overlay-id', 'scan-base-id'],
+    ]);
+  });
+
+  test('autoassign button posts filename matches once and refreshes assignments', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+    const onAssignmentsChanged = jest.fn().mockResolvedValue();
+
+    render(
+      <OverlaysTab
+        projectId="proj-auto"
+        parts={[{
+          id: 'part-1',
+          display_name: 'Autoassign Part',
+          metadata: { source_images: [
+            { filename: 'scan.npy', image_id: 'scan-base-id', overlay: false },
+            { filename: 'camera.png', image_id: 'camera-base-id', overlay: false },
+          ] },
+        }]}
+        images={[
+          { id: 'scan-base-id', filename: 'scan.npy' },
+          { id: 'scan-overlay-id', filename: 'scan.npy' },
+          { id: 'camera-base-id', filename: 'camera.png' },
+          { id: 'camera-overlay-id', filename: 'camera_overlay.png' },
+        ]}
+        onAssignmentsChanged={onAssignmentsChanged}
+        setError={jest.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Autoassign' }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, '/api/projects/proj-auto/parts/overlay-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ overlay_filename: 'camera_overlay.png', overlay_image_id: 'camera-overlay-id', base_filename: 'camera.png', base_image_id: 'camera-base-id' }),
+    });
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, '/api/projects/proj-auto/parts/overlay-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ overlay_filename: 'scan.npy', overlay_image_id: 'scan-overlay-id', base_filename: 'scan.npy', base_image_id: 'scan-base-id' }),
+    });
+    await waitFor(() => expect(onAssignmentsChanged).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('status')).toHaveTextContent('Autoassigned 2 overlays.');
   });
 
   test('assigns one duplicate stack as the overlay for the same-name base stack', async () => {
