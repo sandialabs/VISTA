@@ -548,12 +548,14 @@ function buildSavedFilenameExtractorConfig(projectConfiguration) {
   };
 }
 
-function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = null, onUploadComplete, setError }) {
+function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = null, onUploadComplete, onProjectMetadataLoaded, setError }) {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadMetadata, setUploadMetadata] = useState('');
   const [associatedMetadataFile, setAssociatedMetadataFile] = useState(null);
   const [associatedMetadataBundle, setAssociatedMetadataBundle] = useState(null);
   const [associatedMetadataParsing, setAssociatedMetadataParsing] = useState(false);
+  const [associatedMetadataSaving, setAssociatedMetadataSaving] = useState(false);
+  const [associatedMetadataSaved, setAssociatedMetadataSaved] = useState(null);
   const [associatedMetadataError, setAssociatedMetadataError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const savedExtractorConfig = useMemo(
@@ -640,6 +642,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     setAssociatedMetadataFile(file || null);
     setAssociatedMetadataBundle(null);
     setAssociatedMetadataError(null);
+    setAssociatedMetadataSaved(null);
     if (!file) return;
 
     if (!isAssociatedMetadataFile(file)) {
@@ -702,6 +705,29 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
     }
     return buildAssociatedMetadataImageReference(associatedMetadataBundle);
   }, [associatedMetadataBundle, associatedMetadataError, associatedMetadataFile, associatedMetadataParsing, projectId]);
+
+
+  const handleLoadAssociatedMetadata = async () => {
+    if (!associatedMetadataFile) {
+      setAssociatedMetadataError('Choose a metadata file before loading metadata.');
+      return;
+    }
+    setAssociatedMetadataSaving(true);
+    setAssociatedMetadataSaved(null);
+    try {
+      const reference = await saveAssociatedMetadataBundle();
+      setAssociatedMetadataSaved(reference);
+      setError(null);
+      if (onProjectMetadataLoaded) {
+        await onProjectMetadataLoaded(reference);
+      }
+    } catch (err) {
+      const detail = err?.message ? ` ${err.message}` : '';
+      setError(`Unable to load metadata file.${detail}`);
+    } finally {
+      setAssociatedMetadataSaving(false);
+    }
+  };
 
   // Handle file input change
   const handleFileChange = async (e) => {
@@ -1302,21 +1328,40 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
             <fieldset className="metadata-association-section" style={{ border: '1px solid #e9ecef', borderRadius: '4px', padding: '12px' }}>
               <legend style={{ fontSize: '1rem', fontWeight: 600, padding: '0 4px' }}>Associate Metadata</legend>
               <label htmlFor="associated-metadata-input">Metadata File (Optional)</label>
-              <input
-                id="associated-metadata-input"
-                type="file"
-                accept=".json,.nsipro,application/json"
-                onChange={handleAssociatedMetadataFileChange}
-              />
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  id="associated-metadata-input"
+                  type="file"
+                  accept=".json,.nsipro,application/json"
+                  onChange={handleAssociatedMetadataFileChange}
+                  disabled={associatedMetadataSaving}
+                />
+                <span className="form-text" aria-live="polite">
+                  {associatedMetadataFile ? associatedMetadataFile.name : 'No metadata file chosen'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleLoadAssociatedMetadata}
+                  disabled={associatedMetadataSaving || associatedMetadataParsing || !associatedMetadataBundle || Boolean(associatedMetadataError)}
+                >
+                  {associatedMetadataSaving ? 'Loading Metadata...' : 'Load Metadata'}
+                </button>
+              </div>
               <small className="form-text">
-                Choose one .json or .nsipro file after selecting images. VISTA stores the parsed file once as project metadata and adds a reference to every uploaded image.
+                Choose one .json or .nsipro file after selecting images to reference it from uploaded images, or choose a metadata file by itself and click Load Metadata to associate it with the whole project.
               </small>
               {associatedMetadataParsing && (
                 <div className="form-text" role="status">Parsing associated metadata…</div>
               )}
               {associatedMetadataBundle && !associatedMetadataError && (
                 <div className="form-text" role="status">
-                  Associated {associatedMetadataBundle.value.filename} as {associatedMetadataBundle.key}.
+                  Parsed {associatedMetadataBundle.value.filename} as {associatedMetadataBundle.key}.
+                </div>
+              )}
+              {associatedMetadataSaved && (
+                <div className="alert alert-success" role="status">
+                  Loaded {associatedMetadataSaved.filename} as project metadata. It will display with every image or slice in this project.
                 </div>
               )}
               {associatedMetadataError && (
@@ -1340,7 +1385,7 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
             <button
               type="submit"
               className="btn btn-success"
-              disabled={uploading || loadingTestData || !extractorConfig.isValid || associatedMetadataParsing || Boolean(associatedMetadataError)}
+              disabled={uploading || loadingTestData || associatedMetadataSaving || !extractorConfig.isValid || associatedMetadataParsing || Boolean(associatedMetadataError)}
             >
               {uploading ? 'Uploading...' : 'Upload Images'}
             </button>

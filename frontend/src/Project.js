@@ -223,9 +223,18 @@ function Project({ currentUserGroups = [] }) {
     };
   }, []);
 
+  const refreshProjectMetadata = useCallback(async () => {
+    const metadataResponse = await fetch(`/api/projects/${id}/metadata-dict`);
+    if (metadataResponse.ok) {
+      const metadataData = await metadataResponse.json();
+      setMetadata(metadataData);
+    }
+  }, [id]);
+
   const handleUploadComplete = useCallback(async () => {
     await refreshProjectCounts();
-  }, [refreshProjectCounts]);
+    await refreshProjectMetadata();
+  }, [refreshProjectCounts, refreshProjectMetadata]);
 
   const handleMainTabChange = useCallback(async (nextTabKey) => {
     if (nextTabKey === activeMainTab) return;
@@ -358,6 +367,7 @@ function Project({ currentUserGroups = [] }) {
                   projectType={project?.project_type}
                   projectConfiguration={projectConfiguration}
                   onUploadComplete={handleUploadComplete}
+                  onProjectMetadataLoaded={refreshProjectMetadata}
                   setError={setError}
                 />
               </div>
@@ -524,6 +534,7 @@ function Project({ currentUserGroups = [] }) {
     project?.project_type,
     projectConfiguration,
     refreshProjectCounts,
+    refreshProjectMetadata,
     refreshRecentlyDeletedOverlays,
     requestIngestValidation,
     restoreRecentlyDeletedOverlay,
