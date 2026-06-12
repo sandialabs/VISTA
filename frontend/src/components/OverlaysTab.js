@@ -57,6 +57,37 @@ function getImageKey(image) {
   return image?.id ? `id:${image.id}` : `filename:${image?.filename || ''}`;
 }
 
+function deriveBaseFilenameFromOverlaySuffix(filename = '') {
+  const safeFilename = String(filename || '').trim();
+  if (!safeFilename) return '';
+  const dotIndex = safeFilename.lastIndexOf('.');
+  const stem = dotIndex > 0 ? safeFilename.slice(0, dotIndex) : safeFilename;
+  const extension = dotIndex > 0 ? safeFilename.slice(dotIndex) : '';
+  if (!stem.toLowerCase().endsWith('_overlay')) return '';
+  return `${stem.slice(0, -'_overlay'.length)}${extension}`;
+}
+
+function findAutoassignments(buckets) {
+  const baseBuckets = Array.isArray(buckets?.baseBuckets) ? buckets.baseBuckets : [];
+  const unassignedOverlays = Array.isArray(buckets?.unassignedOverlays) ? buckets.unassignedOverlays : [];
+  const assignments = [];
+
+  unassignedOverlays.forEach((overlay) => {
+    const overlayKey = getImageKey(overlay);
+    const exactCandidates = baseBuckets.filter((bucket) => bucket?.image?.filename === overlay.filename && getImageKey(bucket.image) !== overlayKey);
+    const suffixBaseFilename = deriveBaseFilenameFromOverlaySuffix(overlay.filename);
+    const suffixCandidates = suffixBaseFilename
+      ? baseBuckets.filter((bucket) => bucket?.image?.filename === suffixBaseFilename && getImageKey(bucket.image) !== overlayKey)
+      : [];
+    const candidates = exactCandidates.length > 0 ? exactCandidates : suffixCandidates;
+    const target = candidates.find((bucket) => !(bucket.overlays || []).some((assigned) => getImageKey(assigned) === overlayKey));
+    if (!target) return;
+    assignments.push({ overlayImage: overlay, baseImage: target.image });
+  });
+
+  return assignments;
+}
+
 function buildOverlayBuckets({ parts, images }) {
   const imageIndexes = buildImageIndexes(images);
   const overlayKeys = new Set();
@@ -113,13 +144,15 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
   const initialBuckets = useMemo(() => buildOverlayBuckets({ parts, images }), [parts, images]);
   const [localBuckets, setLocalBuckets] = useState(initialBuckets);
   const [movingImage, setMovingImage] = useState(null);
+  const [autoassigning, setAutoassigning] = useState(false);
+  const [autoassignMessage, setAutoassignMessage] = useState('');
 
   React.useEffect(() => {
     setLocalBuckets(initialBuckets);
   }, [initialBuckets]);
 
-  const assignOverlay = async (overlayImage, baseImage = null) => {
-    if (!overlayImage?.filename) return;
+  const assignOverlay = async (overlayImage, baseImage = null, options = {}) => {
+    if (!overlayImage?.filename) return false;
     const overlayKey = getImageKey(overlayImage);
     const baseKey = baseImage ? getImageKey(baseImage) : '';
     try {
@@ -150,10 +183,39 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
         };
       });
       setMovingImage(null);
-      if (onAssignmentsChanged) await onAssignmentsChanged();
+      if (onAssignmentsChanged && options.refresh !== false) await onAssignmentsChanged();
       if (setError) setError(null);
+      return true;
     } catch (err) {
       if (setError) setError(err.message || 'Failed to move overlay');
+      return false;
+    }
+  };
+
+  const handleAutoassign = async () => {
+    const assignments = findAutoassignments(localBuckets);
+    if (assignments.length === 0) {
+      setAutoassignMessage('No filename matches found.');
+      return;
+    }
+
+    setAutoassigning(true);
+    setAutoassignMessage('');
+    let assignedCount = 0;
+    try {
+      for (const assignment of assignments) {
+        // Keep assignment requests sequential so the backend always sees the latest part metadata.
+        // eslint-disable-next-line no-await-in-loop
+        const assigned = await assignOverlay(assignment.overlayImage, assignment.baseImage, { refresh: false });
+        if (assigned) assignedCount += 1;
+      }
+      if (onAssignmentsChanged && assignedCount > 0) await onAssignmentsChanged();
+      setAutoassignMessage(assignedCount > 0 ? `Autoassigned ${assignedCount} overlay${assignedCount === 1 ? '' : 's'}.` : 'No overlays were autoassigned.');
+    } catch (err) {
+      if (setError) setError(err.message || 'Failed to autoassign overlays');
+      setAutoassignMessage('Autoassign did not finish.');
+    } finally {
+      setAutoassigning(false);
     }
   };
 
@@ -186,7 +248,16 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
           <div>
             <h2>Overlays</h2>
             <p>Drag loaded images onto base images to map them as overlays. Multiple overlays can be assigned to each base image.</p>
+            {autoassignMessage ? <p className="muted" role="status">{autoassignMessage}</p> : null}
           </div>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleAutoassign}
+            disabled={autoassigning || localBuckets.unassignedOverlays.length === 0 || localBuckets.baseBuckets.length === 0}
+          >
+            {autoassigning ? 'Autoassigning…' : 'Autoassign'}
+          </button>
         </header>
         <div className="images-to-parts-grid overlays-grid">
           <div className="images-to-parts-column" onDragOver={(event) => event.preventDefault()} onDrop={() => assignOverlay(movingImage, null)} data-testid="overlays-unassigned-target">
@@ -222,4 +293,4 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
 }
 
 export default OverlaysTab;
-export { buildOverlayBuckets };
+export { buildOverlayBuckets, deriveBaseFilenameFromOverlaySuffix, findAutoassignments };
