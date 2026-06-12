@@ -29,6 +29,7 @@ describe('ImagesToPartsTab', () => {
     expect(screen.getByText('Images to Parts')).toBeInTheDocument();
     expect(screen.getByText('assigned-a.png')).toBeInTheDocument();
     expect(screen.getByText('unassigned-z.png')).toBeInTheDocument();
+    expect(screen.queryByText('Serial: SN-001')).not.toBeInTheDocument();
   });
 
   test('moves an unassigned image into a part and calls backend assignment API', async () => {
@@ -87,6 +88,7 @@ describe('ImagesToPartsTab', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'assigned-a.png' });
     expect(dialog).toBeInTheDocument();
+    expect(screen.queryByText('Serial: SN-001')).not.toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'assigned-a.png' })).toHaveAttribute(
       'src',
       '/api/images/img-assigned-a/content'
@@ -121,6 +123,7 @@ describe('ImagesToPartsTab', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Part 1' });
     expect(dialog).toBeInTheDocument();
+    expect(screen.queryByText('Serial: SN-001')).not.toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'assigned-a.png' })).toHaveAttribute(
       'src',
       '/api/images/img-assigned-a/content'
@@ -200,7 +203,7 @@ describe('ImagesToPartsTab', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'New Part Name' })).toBeInTheDocument();
     });
-    expect(screen.getByText('Serial: SN-NEW-001')).toBeInTheDocument();
+    expect(screen.queryByText('Serial: SN-NEW-001')).not.toBeInTheDocument();
     expect(screen.getAllByText('No mapped images.')[0]).toBeInTheDocument();
 
     const partHeadings = Array.from(container.querySelectorAll('.parts-column .part-heading-button')).map((node) =>
