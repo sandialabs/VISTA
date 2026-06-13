@@ -84,10 +84,19 @@ Use this section first. It assumes the deployed model function can be imported a
 
 1. **Put the deployed function on the backend Python path.**
    - Install its package into the VISTA backend environment, or mount/copy the module into an importable location.
+   - VISTA also includes repo-local starter adapters you can copy or replace in `backend/utils/segmentation_integrations/`:
+
+     | Placeholder | File to edit | Local Function Path to enter |
+     | --- | --- | --- |
+     | YOLO | `backend/utils/segmentation_integrations/yolo_backend.py` | `utils.segmentation_integrations.yolo_backend.run` |
+     | Anomalib | `backend/utils/segmentation_integrations/anomalib_backend.py` | `utils.segmentation_integrations.anomalib_backend.run` |
+     | SAM | `backend/utils/segmentation_integrations/sam_backend.py` | `utils.segmentation_integrations.sam_backend.run` |
+     | OpenCV | `backend/utils/segmentation_integrations/opencv_backend.py` | `utils.segmentation_integrations.opencv_backend.run` |
+
    - Confirm this command works inside the backend environment:
 
      ```bash
-     python -c "from my_company.segmentation.yolo_backend import run; print(run)"
+     python -c "from utils.segmentation_integrations.yolo_backend import run; print(run)"
      ```
 
 2. **Expose one callable.**
@@ -136,7 +145,7 @@ Use this section first. It assumes the deployed model function can be imported a
 
 4. **Configure the Pipeline Studio block.**
    - `Integration Mode`: `local_import`
-   - `Local Function Path`: dotted callable path, for example `my_company.segmentation.yolo_backend.run`
+   - `Local Function Path`: dotted callable path, for example `utils.segmentation_integrations.yolo_backend.run`
    - `Mode`: backend-specific mode string, or `default`
    - `Prompts JSON`: prompt data, or `{}`
    - `Options JSON`: backend-specific values, for example `{"confidence": 0.4, "model": "your-model-name"}`
