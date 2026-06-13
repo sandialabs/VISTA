@@ -167,28 +167,38 @@ describe('AnalyzeWorkbenchTab', () => {
     jest.resetAllMocks();
   });
 
-  test('loads toolbox methods, renders graph, edits window level, and runs workflow', async () => {
+  test('loads toolbox methods and renders the default graph', async () => {
     mockFetch();
     render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
     expect(await screen.findByRole('heading', { name: 'Pipeline Studio' })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId('analyze-source-summary')).toHaveTextContent('1 parts'));
+    expect(await screen.findByTestId('analyze-source-summary')).toHaveTextContent('1 parts');
     expect(screen.getByLabelText('Analyze Workbench')).not.toBeEmptyDOMElement();
     expect(screen.getByLabelText('Analyze toolbox')).toHaveTextContent('Input');
     expect(screen.getByTestId('analyze-graph')).toHaveTextContent('Loaded Part Images');
     expect(screen.getByLabelText('Workflow block settings')).toHaveTextContent('Status');
     expect(screen.getByTestId('analyze-source-summary')).toHaveTextContent('2 images');
     expect(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i })).toBeInTheDocument();
+  });
 
-    dragMethodToGraph(/Min-Max Normalization/i, 'preprocess.minmax_normalization');
-    expect(screen.getByRole('button', { name: /Workflow block Min-Max Normalization/i })).toBeInTheDocument();
+  test('shows output artifact options without exposing internal policy fields', async () => {
+    mockFetch();
+    render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
+    await screen.findByRole('button', { name: /Workflow block Recipe \/ Artifact Output/i });
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Recipe \/ Artifact Output/i }));
+
     expect(screen.getByLabelText('Output Mode')).toBeInTheDocument();
     expect(screen.getByLabelText('Export Policy')).toBeInTheDocument();
     expect(screen.queryByLabelText('Version Strategy')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Cache Policy')).not.toBeInTheDocument();
+  });
 
+  test('edits window level and runs workflow', async () => {
+    mockFetch();
+    render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
+
+    await screen.findByRole('button', { name: /Workflow block Window \/ Level Normalization/i });
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i }));
     fireEvent.change(screen.getByLabelText('Window'), { target: { value: '250' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
@@ -219,7 +229,7 @@ describe('AnalyzeWorkbenchTab', () => {
     }));
     expect(workflow.source.kind).toBe('project_parts');
     expect(executeCall[1].body).toContain('"window":250');
-  });
+  }, 10000);
 
   test('steps float parameters by arrows and adaptive wheel increments', async () => {
     mockFetch();

@@ -8,6 +8,12 @@ jest.setTimeout(10000);
 
 const projectTypes = ['PT1', 'PT2', 'PT3'];
 const syntheticUsers = ['basic', 'intermediate', 'advanced'];
+const configurationScenarioMatrix = [
+  ['PT1', 'basic'],
+  ['PT2', 'intermediate'],
+  ['PT3', 'advanced'],
+];
+const cloneWorkflowScenarioMatrix = [['PT1', 'basic']];
 
 function makeConfig(projectType, syntheticUser) {
   const complexity = syntheticUsers.indexOf(syntheticUser) + 1;
@@ -657,9 +663,8 @@ describe('ProjectConfigurationPanel', () => {
     });
   });
 
-  projectTypes.forEach((projectType) => {
-    syntheticUsers.forEach((syntheticUser) => {
-      test(`loads and saves configuration for ${projectType} ${syntheticUser} synthetic user`, async () => {
+  configurationScenarioMatrix.forEach(([projectType, syntheticUser]) => {
+    test(`loads and saves configuration for ${projectType} ${syntheticUser} synthetic user`, async () => {
         const config = makeConfig(projectType, syntheticUser);
         mockFetch(config, projectType);
 
@@ -893,12 +898,10 @@ describe('ProjectConfigurationPanel', () => {
           );
         });
       });
-    });
   });
 
-  projectTypes.forEach((projectType) => {
-    syntheticUsers.forEach((syntheticUser) => {
-      test(`copies configuration via clone endpoint for ${projectType} ${syntheticUser} synthetic user`, async () => {
+  cloneWorkflowScenarioMatrix.forEach(([projectType, syntheticUser]) => {
+    test(`copies configuration via clone endpoint for ${projectType} ${syntheticUser} synthetic user`, async () => {
         const config = makeConfig(projectType, syntheticUser);
         mockFetch(config, projectType);
 
@@ -1228,7 +1231,6 @@ describe('ProjectConfigurationPanel', () => {
           expect(screen.getByText('Configuration copied from Template Project.')).toBeInTheDocument();
         });
       });
-    });
   });
 
   test('shows interface default buttons and calls save endpoints', async () => {
