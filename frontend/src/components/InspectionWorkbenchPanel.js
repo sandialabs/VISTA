@@ -1191,6 +1191,13 @@ function getShellImageLayers(part, projectImageLookup = {}) {
     .filter(Boolean);
 }
 
+function getAssignedOverlayDisplayLabel(record) {
+  if (record?.analysis_output || record?.analysis_source_image_id) return '';
+  const baseName = String(record?.overlay_base_filename || record?.overlay_base_image_id || '').trim();
+  if (!baseName) return '';
+  return `overlay for ${safeDecodeFilename(baseName)}`;
+}
+
 function getAnalyzeOverlayDisplayLabel(label) {
   const parts = String(label || 'Analyze Overlay')
     .split('::')
@@ -1252,7 +1259,7 @@ function getPartImageRefs(part) {
     const label = cropChild
       ? String(record.crop_title || record.filename || `CROP ${index + 1}`)
       : overlay
-        ? getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay')
+        ? (getAssignedOverlayDisplayLabel(record) || getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay'))
         : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
     refs.push({
       id: `${part.id}-${overlay ? 'analysis' : 'source'}-${index}`,
@@ -2864,6 +2871,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       const category = entry.overlay ? 'overlay' : 'source';
       if (!renderCategories.includes(category)) return false;
       if (hidden.has(String(entry.viewName || '').toLowerCase())) return false;
+      if (entry.overlay && (entry.overlayBaseImageId || entry.overlayBaseFilename)) return true;
       const modality = String(entry.modality || '').toLowerCase();
       return !modality || modality === 'analyze-overlay' || enabled.has(modality);
     });
@@ -4551,7 +4559,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       setSelectedPartId(part.id);
-                                      toggleModalityVisibility(normalizedModality);
+                                      if (!(matchingImage?.overlay && (matchingImage.overlayBaseImageId || matchingImage.overlayBaseFilename))) {
+                                        toggleModalityVisibility(normalizedModality);
+                                      }
                                       if (matchingImage) {
                                         setSelectedViewName(String(matchingImage.viewName || '').toLowerCase());
                                         setSelectedImageRef(String(matchingImage.imageRef || matchingImage.imageId || ''));

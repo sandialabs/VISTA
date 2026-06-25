@@ -316,7 +316,7 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
             <span className="thumbnail-switch-track" aria-hidden="true"><span className="thumbnail-switch-thumb" /></span><span>Thumbnails</span></label></header>
 
         <div className="images-to-parts-grid">
-          <div className="images-to-parts-column" onDragOver={(event) => event.preventDefault()} onDrop={handleDropToUnassigned} data-testid="images-to-parts-unassigned-target">
+          <div className="images-to-parts-column assignment-source-column sticky-assignment-column" onDragOver={(event) => event.preventDefault()} onDrop={handleDropToUnassigned} data-testid="images-to-parts-unassigned-target">
             <div className="unassigned-header-row"><h3>Unassigned</h3><div className="unassigned-actions"><button type="button" className="btn-secondary btn-sm" onClick={() => setSelectedUnassigned(localBuckets.unassigned.map((img) => img.key || img.id || img.filename))}>All</button><button type="button" className="btn-secondary btn-sm" onClick={() => setShowSomeModal(true)}>Some</button><button type="button" className="btn-secondary btn-sm" onClick={() => setSelectedUnassigned([])}>None</button></div></div>
             {localBuckets.unassigned.length === 0 ? <p className="muted">No unassigned images.</p> : null}
             <div className="unassigned-selection-surface" onMouseDown={startDragSelect} ref={unassignedRef}>
