@@ -1294,15 +1294,19 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
           )}
 
 
-          {process.env.NODE_ENV === 'test' && (
-            <div style={{ display: 'none' }} data-testid="legacy-project-data-filename-extractor">
-              <FilenameMetadataExtractor
-                files={extractorPreviewFiles}
-                onConfigChange={handleExtractorChange}
-                fileNamingScheme={projectConfiguration?.file_naming_scheme}
-              />
-            </div>
-          )}
+          <div className="filename-decoder-utility">
+            <FilenameMetadataExtractor
+              files={extractorPreviewFiles}
+              onConfigChange={handleExtractorChange}
+              fileNamingScheme={projectConfiguration?.file_naming_scheme}
+              initialConfig={projectConfiguration?.file_naming_scheme?.metadata_extractor || {
+                mode: 'simple',
+                pattern: projectConfiguration?.file_naming_scheme?.delimiter || '_',
+                keys: [],
+              }}
+              title="Filename Regex & Delimiter Decoder"
+            />
+          </div>
 
           {extractorConfig.keys && extractorConfig.keys.length > 0 && (
             <div className="form-group">

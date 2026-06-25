@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { PROJECT_PHASE_LABELS, PROJECT_PHASE_SEQUENCE } from '../utils/projectPhases';
 import { buildErrorWithServiceDiagnostics } from '../utils/serviceDiagnostics';
-import FilenameMetadataExtractor, { metadataKeyFromFilenameEntry } from './FilenameMetadataExtractor';
+import { metadataKeyFromFilenameEntry } from './FilenameMetadataExtractor';
 
 
 function isSingleAlphanumeric(value) {
@@ -531,7 +531,6 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
   const loadCompleteRef = useRef(false);
   const lastSavedSignatureRef = useRef(getConfigurationSignature(EMPTY_CONFIG));
   const saveLoopPromiseRef = useRef(null);
-  const filenameExtractorInitializedRef = useRef(false);
   const autosaveRequestedDuringSaveRef = useRef(false);
 
   useEffect(() => {
@@ -974,33 +973,6 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
   };
 
 
-  const handleFilenameExtractorConfigChange = useCallback((extractorState) => {
-    if (!filenameExtractorInitializedRef.current) {
-      filenameExtractorInitializedRef.current = true;
-      return;
-    }
-    const nextMetadataExtractor = {
-      mode: extractorState.mode,
-      pattern: extractorState.pattern,
-      keys: extractorState.keys,
-    };
-    setConfig((previous) => {
-      const currentScheme = normalizeFileNamingScheme(previous);
-      const nextScheme = {
-        ...currentScheme,
-        delimiter: extractorState.mode === 'simple' ? extractorState.pattern : currentScheme.delimiter,
-        metadata_extractor: nextMetadataExtractor,
-      };
-      if (JSON.stringify(currentScheme.metadata_extractor || null) === JSON.stringify(nextScheme.metadata_extractor)
-        && currentScheme.delimiter === nextScheme.delimiter) {
-        return previous;
-      }
-      return {
-        ...previous,
-        file_naming_scheme: nextScheme,
-      };
-    });
-  }, []);
 
   const copyConfiguration = async () => {
     if (!copySourceProjectId || copyingConfiguration) return;
@@ -1338,16 +1310,6 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
                 ))}
               </div>
             )}
-
-            <div className="filename-decoder-utility">
-              <FilenameMetadataExtractor
-                fileNamingScheme={normalizedFileNamingScheme}
-                initialConfig={normalizedFileNamingScheme.metadata_extractor || { mode: 'simple', pattern: normalizedFileNamingScheme.delimiter, keys: [] }}
-                previewFilename={expectedFilenameExample}
-                title="Filename Regex & Delimiter Decoder"
-                onConfigChange={handleFilenameExtractorConfigChange}
-              />
-            </div>
           </section>
           <section className="part-detail-panel" aria-label="Process settings">
             <h3>Process Settings</h3>
