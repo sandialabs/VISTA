@@ -33,6 +33,8 @@ test.describe('Project Data load images layout', () => {
     ).toBeTruthy();
 
     await expect(page.getByRole('heading', { name: 'Upload Images' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Filename Regex & Delimiter Decoder' })).toBeVisible();
+    await expect(page.getByLabel('Advanced (Regex)')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Export Data' })).toBeVisible();
     const uploadCardBox = await page.locator('.project-data-upload-first .upload-section').boundingBox();
     const exportCardBox = await page.locator('.project-data-upload-first .export-section').boundingBox();
