@@ -21,6 +21,7 @@ function buildImageIndexes(images) {
       const occurrence = filenameCounts.get(filename) || 0;
       filenameCounts.set(filename, occurrence + 1);
       const id = image?.id ? String(image.id) : '';
+      if (id && byId.has(id)) return;
       const ref = {
         key: id || `filename:${filename}:${index}`,
         filename,
@@ -44,7 +45,7 @@ function makeImageRef(sourceRecord, imageIndexes) {
   if (!matched && !filename) return null;
   return {
     ...(matched || {}),
-    key: matched?.key || imageId || filename,
+    key: imageId || matched?.key || filename,
     filename: filename || matched?.filename || '',
     displayName: matched?.displayName || filename,
     id: imageId || matched?.id || '',
@@ -96,12 +97,16 @@ function buildOverlayBuckets({ parts, images }) {
 
   (Array.isArray(parts) ? parts : []).forEach((part) => {
     const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
+    const seenBaseKeys = new Set();
     const bases = sourceImages
       .filter((record) => record && !record.overlay && record.filename)
       .map((record) => {
         const image = makeImageRef(record, imageIndexes);
         if (!image?.id && !imageIndexes.byFilename.has(record.filename)) return null;
-        assignedBaseKeys.add(getImageKey(image));
+        const imageKey = getImageKey(image);
+        if (seenBaseKeys.has(imageKey)) return null;
+        seenBaseKeys.add(imageKey);
+        assignedBaseKeys.add(imageKey);
         return {
           partId: part.id,
           partName: part.display_name || part.serial_number || 'Unassigned part',
@@ -127,7 +132,9 @@ function buildOverlayBuckets({ parts, images }) {
           target = bases.find((bucket) => String(bucket.image.side || '').toLowerCase() === fallbackSide) || null;
         }
         if (!target && bases.length === 1) target = bases[0];
-        if (target) target.overlays.push(overlayRef);
+        if (target && !target.overlays.some((assigned) => getImageKey(assigned) === getImageKey(overlayRef))) {
+          target.overlays.push(overlayRef);
+        }
       });
     baseBuckets.push(...bases);
   });
@@ -260,7 +267,7 @@ function OverlaysTab({ projectId, parts = [], images = [], onAssignmentsChanged,
           </button>
         </header>
         <div className="images-to-parts-grid overlays-grid">
-          <div className="images-to-parts-column" onDragOver={(event) => event.preventDefault()} onDrop={() => assignOverlay(movingImage, null)} data-testid="overlays-unassigned-target">
+          <div className="images-to-parts-column assignment-source-column sticky-assignment-column" onDragOver={(event) => event.preventDefault()} onDrop={() => assignOverlay(movingImage, null)} data-testid="overlays-unassigned-target">
             <h3>Available overlay images</h3>
             <div className="image-part-chip-list">
               {localBuckets.unassignedOverlays.length === 0 ? <p className="muted">No available overlay images.</p> : localBuckets.unassignedOverlays.map((image) => renderChip(image))}

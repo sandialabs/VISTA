@@ -7222,6 +7222,15 @@ ul li:hover {
   padding: 12px;
 }
 
+.sticky-assignment-column {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  z-index: 2;
+}
+
 .parts-column-header {
   display: flex;
   align-items: center;

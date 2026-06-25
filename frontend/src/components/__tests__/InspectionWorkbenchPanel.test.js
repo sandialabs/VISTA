@@ -2113,6 +2113,92 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
+  test('assigned overlays render with source images by default and hide only from inspection checkboxes', async () => {
+    const views = ['front', 'back'];
+    const parts = [1, 2, 3].map((partNumber) => {
+      const sourceImages = views.flatMap((view) => {
+        const baseFilename = `part-${partNumber}-${view}.png`;
+        const baseImageId = `part-${partNumber}-${view}-source`;
+        return [
+          {
+            filename: baseFilename,
+            image_id: baseImageId,
+            side: view,
+            modality: 'visual',
+            overlay: false,
+          },
+          {
+            filename: `part-${partNumber}-${view}-overlay.png`,
+            image_id: `part-${partNumber}-${view}-overlay`,
+            side: view,
+            modality: 'overlay',
+            overlay: true,
+            overlay_base_image_id: baseImageId,
+            overlay_base_filename: baseFilename,
+          },
+        ];
+      });
+      return {
+        id: `part-overlay-${partNumber}`,
+        batch_id: 'batch-overlay',
+        serial_number: `SN-OVERLAY-${partNumber}`,
+        display_name: `Overlay Part ${partNumber}`,
+        review_state: 'in_review',
+        metadata: {
+          configured_views: views,
+          modalities: ['visual', 'overlay'],
+          view_images: {
+            front: `part-${partNumber}-front.png`,
+            back: `part-${partNumber}-back.png`,
+          },
+          source_images: sourceImages,
+        },
+      };
+    });
+
+    mockWorkbenchFetch({
+      user: 'assigned-overlays',
+      batches: [{ id: 'batch-overlay', name: 'Batch Overlay' }],
+      parts,
+      workspaceState: {
+        selected_batch_id: 'batch-overlay',
+        selected_part_id: 'part-overlay-1',
+        inspector: { image_enabled: true, modalities: ['visual'], view_name: 'front' },
+      },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getAllByText('Overlay Part 1').length).toBeGreaterThan(0));
+    expect(screen.getByText('Overlay Part 2')).toBeInTheDocument();
+    expect(screen.getByText('Overlay Part 3')).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getAllByTestId('inspection-overlay-composite')).toHaveLength(2));
+    expect(screen.getAllByAltText('front source')).toHaveLength(1);
+    expect(screen.getAllByAltText('front overlay')).toHaveLength(1);
+    expect(screen.getByText('overlay for part-1-front.png')).toBeInTheDocument();
+    expect(screen.getByText('overlay for part-1-back.png')).toBeInTheDocument();
+    expect(screen.getAllByAltText('back source')).toHaveLength(1);
+    expect(screen.getAllByAltText('back overlay')).toHaveLength(1);
+    expect(screen.queryByAltText('front view')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Overlays'));
+    await waitFor(() => expect(screen.queryByTestId('inspection-overlay-composite')).not.toBeInTheDocument());
+    expect(screen.getAllByAltText('front view')).toHaveLength(1);
+    expect(screen.getAllByAltText('back view')).toHaveLength(1);
+    expect(screen.getByLabelText('Source images')).toBeChecked();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'OVERLAY' })[0]);
+    expect(screen.queryByTestId('inspection-overlay-composite')).not.toBeInTheDocument();
+    expect(screen.getAllByAltText('front view')).toHaveLength(1);
+    expect(screen.getAllByAltText('back view')).toHaveLength(1);
+    expect(screen.getByLabelText('Overlays')).not.toBeChecked();
+
+    fireEvent.click(screen.getByLabelText('Overlays'));
+    await waitFor(() => expect(screen.getAllByTestId('inspection-overlay-composite')).toHaveLength(2));
+  });
+
   test('part summary modality buttons toggle matching images in the view window', async () => {
     mockWorkbenchFetch({
       user: 'modality-toggle',

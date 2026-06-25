@@ -39,6 +39,50 @@ describe('OverlaysTab', () => {
     expect(screen.getByText('available.png')).toBeInTheDocument();
   });
 
+
+  test('keeps available overlays sticky and deduplicates assigned overlay records', () => {
+    const buckets = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        display_name: 'Part 1',
+        metadata: { source_images: [
+          { filename: 'base.png', image_id: 'base-id', overlay: false },
+          { filename: 'base.png', image_id: 'base-id', overlay: false },
+          { filename: 'overlay.png', image_id: 'overlay-id', overlay: true, overlay_base_image_id: 'base-id', overlay_base_filename: 'base.png' },
+          { filename: 'overlay.png', image_id: 'overlay-id', overlay: true, overlay_base_image_id: 'base-id', overlay_base_filename: 'base.png' },
+        ] },
+      }],
+      images: [
+        { id: 'base-id', filename: 'base.png' },
+        { id: 'base-id', filename: 'base.png' },
+        { id: 'overlay-id', filename: 'overlay.png' },
+        { id: 'overlay-id', filename: 'overlay.png' },
+        { id: 'available-id', filename: 'available.png' },
+      ],
+    });
+
+    expect(buckets.baseBuckets).toHaveLength(1);
+    expect(buckets.baseBuckets[0].overlays.map((image) => image.id)).toEqual(['overlay-id']);
+    expect(buckets.unassignedOverlays.map((image) => image.id)).toEqual(['available-id']);
+
+    render(
+      <OverlaysTab
+        projectId="proj-1"
+        parts={Array.from({ length: 12 }, (_, index) => ({
+          id: `part-${index + 1}`,
+          display_name: `Part ${index + 1}`,
+          metadata: { source_images: [{ filename: `base-${index + 1}.png`, image_id: `base-${index + 1}`, overlay: false }] },
+        }))}
+        images={[
+          ...Array.from({ length: 12 }, (_, index) => ({ id: `base-${index + 1}`, filename: `base-${index + 1}.png` })),
+          { id: 'available-overlay-id', filename: 'available-overlay.png' },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId('overlays-unassigned-target')).toHaveClass('sticky-assignment-column');
+  });
+
   test('assigns a dragged overlay image to a base image', async () => {
     const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
     const onAssignmentsChanged = jest.fn().mockResolvedValue();

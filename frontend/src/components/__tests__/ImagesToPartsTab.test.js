@@ -32,6 +32,24 @@ describe('ImagesToPartsTab', () => {
     expect(screen.queryByText('Serial: SN-001')).not.toBeInTheDocument();
   });
 
+
+  test('keeps the unassigned assignment source column sticky while parts scroll', () => {
+    render(
+      <ImagesToPartsTab
+        projectId="proj-1"
+        parts={Array.from({ length: 12 }, (_, index) => ({
+          id: `part-${index + 1}`,
+          serial_number: `SN-${index + 1}`,
+          display_name: `Part ${index + 1}`,
+          metadata: { source_images: [] },
+        }))}
+        images={[{ id: 'unassigned-1', filename: 'unassigned-1.png' }]}
+      />
+    );
+
+    expect(screen.getByTestId('images-to-parts-unassigned-target')).toHaveClass('sticky-assignment-column');
+  });
+
   test('moves an unassigned image into a part and calls backend assignment API', async () => {
     const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
     const onAssignmentsChanged = jest.fn().mockResolvedValue();
