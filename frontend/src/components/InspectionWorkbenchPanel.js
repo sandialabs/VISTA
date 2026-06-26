@@ -2443,6 +2443,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [fullscreenCropActive, setFullscreenCropActive] = useState(false);
   const [fullscreenMeasurements, setFullscreenMeasurements] = useState([]);
   const [fullscreenCalibrationPromptVisible, setFullscreenCalibrationPromptVisible] = useState(false);
+  const [tileCalibrationPromptImageId, setTileCalibrationPromptImageId] = useState(null);
   const [fullscreenEditingEndpoint, setFullscreenEditingEndpoint] = useState(null);
   const [fullscreenEditingBoxCorner, setFullscreenEditingBoxCorner] = useState(null);
   const [fullscreenImageZoom, setFullscreenImageZoom] = useState({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
@@ -2705,18 +2706,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     );
   }, [projectConfiguration, projectImageLookup, projectMetadata, sessionCalibrationByImageId]);
 
-  const handleFullscreenCalibrationChange = useCallback((calibration) => {
-    if (!fullscreenImageModal?.imageId || !isValidCalibration(calibration)) return;
-    const imageId = String(fullscreenImageModal.imageId);
-    setSessionCalibrationByImageId((prev) => ({ ...prev, [imageId]: calibration }));
-    setProjectMetadata((prev) => ({
-      ...(prev && typeof prev === 'object' ? prev : {}),
-      calibration_default: prev?.calibration_default || calibration,
-    }));
-    setFullscreenCalibrationPromptVisible(false);
-    setFullscreenMeasureActive(true);
-  }, [fullscreenImageModal?.imageId]);
-
 
   async function saveInspectionColumnWidths(columnWidths) {
     const nextConfig = {
@@ -2923,6 +2912,42 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     const key = String(imageId || '');
     return annotationSourceImageIdLookup[key] || key;
   }, [annotationSourceImageIdLookup]);
+  const applySessionCalibration = useCallback((imageId, calibration) => {
+    if (!imageId || !isValidCalibration(calibration)) return false;
+    const key = String(imageId);
+    setSessionCalibrationByImageId((prev) => ({ ...prev, [key]: calibration }));
+    setProjectMetadata((prev) => ({
+      ...(prev && typeof prev === 'object' ? prev : {}),
+      calibration_default: prev?.calibration_default || calibration,
+    }));
+    return true;
+  }, []);
+
+  const handleFullscreenCalibrationChange = useCallback((calibration) => {
+    if (!applySessionCalibration(fullscreenImageModal?.imageId, calibration)) return;
+    setFullscreenCalibrationPromptVisible(false);
+    setFullscreenMeasureActive(true);
+  }, [applySessionCalibration, fullscreenImageModal?.imageId]);
+
+  const handleTileCalibrationChange = useCallback((calibration) => {
+    if (!applySessionCalibration(tileCalibrationPromptImageId, calibration)) return;
+    setTileCalibrationPromptImageId(null);
+  }, [applySessionCalibration, tileCalibrationPromptImageId]);
+
+  const requireCalibrationForAnnotation = useCallback((imageId, { surface = 'tile', toolMode = annotationToolMode } = {}) => {
+    if (toolMode === 'crop') return true;
+    const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
+    if (getCalibrationForImage(annotationImageId)) return true;
+    if (surface === 'fullscreen') {
+      setFullscreenCalibrationPromptVisible(true);
+      setFullscreenMeasureActive(false);
+      setFullscreenBoxActive(false);
+    } else {
+      setTileCalibrationPromptImageId(annotationImageId ? String(annotationImageId) : null);
+    }
+    return false;
+  }, [annotationToolMode, getAnnotationSourceImageIdForImage, getCalibrationForImage]);
+
   const selectedImageRecord = useMemo(() => {
     if (!selectedImageRef) return null;
     return projectImageLookup[selectedImageRef] || null;
@@ -3933,6 +3958,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     setAnnotationToolMode((prev) => (prev === mode ? '' : mode));
     setTileAnnotationDraft(null);
     setTileAnnotationPreview(null);
+    setTileCalibrationPromptImageId(null);
     tileAnnotationDraftRef.current = null;
     setMprAnnotationDraft(null);
     setMprAnnotationPreview(null);
@@ -5246,6 +5272,20 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	            Draw one box, move to another slice on the same axis, then draw the second box.
 	          </p>
 	        )}
+        {tileCalibrationPromptImageId && (
+          <div className="inspection-fullscreen-calibration-panel" role="dialog" aria-label="Measurement calibration required">
+            <div className="workbench-notice">
+              <strong>No Calibration Set</strong>
+              <p>Set calibration before placing measurement annotations.</p>
+            </div>
+            <CalibrationManager
+              projectId={projectId}
+              imageId={tileCalibrationPromptImageId}
+              image={projectImageLookup[tileCalibrationPromptImageId]}
+              onCalibrationChange={handleTileCalibrationChange}
+            />
+          </div>
+        )}
         <ul className="measurement-list" data-testid="annotation-list">
           {annotationsLoading ? (
             <li className="muted">Loading annotations…</li>
@@ -6201,6 +6241,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     const position = getAnnotationSurfacePointerPosition(event);
     if (!position) return true;
     const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
+    if (!requireCalibrationForAnnotation(annotationImageId, { surface: 'tile', toolMode: annotationToolMode })) return true;
     if (annotationToolMode === 'measure') {
       const firstPoint = tileAnnotationDraft?.mode === 'measure' ? tileAnnotationDraft : null;
       if (!firstPoint) {
@@ -6234,6 +6275,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    const position = getAnnotationSurfacePointerPosition(event);
 	    if (!position) return true;
 	    const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
+	    if (!requireCalibrationForAnnotation(annotationImageId, { surface: 'tile', toolMode: annotationToolMode })) return true;
 	    const nextPoint = { ...position, mode: 'box', imageId: annotationImageId };
 	    tileAnnotationDraftRef.current = nextPoint;
 	    setTileAnnotationDraft(nextPoint);
@@ -6558,6 +6600,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     setFullscreenCropActive(false);
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
+	    if (!requireCalibrationForAnnotation(fullscreenImageModal?.imageId, { surface: 'fullscreen', toolMode: 'box' })) return;
 	    setFullscreenCalibrationPromptVisible(false);
 	    setFullscreenEditingEndpoint(null);
     setFullscreenEditingBoxCorner(null);
@@ -6589,6 +6632,12 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 
 	  const commitFullscreenBox = async (box) => {
 	    if (isFiniteAnnotationBox(box)) {
+	      if (!requireCalibrationForAnnotation(fullscreenImageModal?.imageId, { surface: 'fullscreen', toolMode: 'box' })) {
+	        setPendingBoxPoint(null);
+	        pendingBoxPointRef.current = null;
+	        setFullscreenAnnotationPreview(null);
+	        return;
+	      }
 	      const annotationSourceImageId = getAnnotationSourceImageIdForImage(fullscreenImageModal?.imageId);
 	      const existingBoxCount = (boxAnnotationsByImageId[String(annotationSourceImageId || '')] || []).length;
 	      await createBoxAnnotation({
