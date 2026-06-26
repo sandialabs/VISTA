@@ -1729,6 +1729,28 @@ describe('InspectionWorkbenchPanel', () => {
     expect(global.fetch.mock.calls.some((call) => call[0].includes('/annotations') && call[1]?.method === 'POST')).toBe(false);
   });
 
+  test('asks for calibration before allowing tile measurement boxes when calibration is missing', async () => {
+    mockWorkbenchFetch({ ...scenarioByUser[0], metadataDict: {} });
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
+
+    const tileImage = screen.getByAltText('front view');
+    Object.defineProperty(tileImage, 'naturalWidth', { configurable: true, value: 400 });
+    Object.defineProperty(tileImage, 'naturalHeight', { configurable: true, value: 200 });
+    tileImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box on tiles' }));
+    fireEvent.mouseDown(tileImage, { clientX: 50, clientY: 30, button: 0 });
+    fireEvent.mouseMove(tileImage, { clientX: 170, clientY: 90 });
+    fireEvent.mouseUp(tileImage, { clientX: 210, clientY: 130, button: 0 });
+
+    expect(await screen.findByRole('dialog', { name: 'Measurement calibration required' })).toBeInTheDocument();
+    expect(screen.getByText('No Calibration Set')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set Calibration' })).toBeInTheDocument();
+    expect(screen.getByLabelText('tile measurement overlay')).not.toHaveTextContent('0.00 mm');
+    expect(global.fetch.mock.calls.some((call) => call[0].includes('/annotations') && call[1]?.method === 'POST')).toBe(false);
+  });
+
   test('renders measurement line and length text in both tile and fullscreen overlays', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
