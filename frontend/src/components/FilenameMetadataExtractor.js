@@ -206,8 +206,26 @@ function FilenameMetadataExtractor({
   const previewStem = activePreviewFilename ? stripExtension(activePreviewFilename) : '';
 
   useEffect(() => {
-    if (userEditedConfig || !previewStem || pattern || keysInput) return;
+    if (userEditedConfig || !previewStem || keysInput) return;
     const candidateDelimiters = [VISTA_HIERARCHY_DELIMITER, '-', '.'];
+    const activeDelimiter = mode === 'simple' && pattern ? pattern : '';
+    if (activeDelimiter && configuredFields.length > 0) {
+      const configuredValues = previewStem.split(activeDelimiter);
+      if (configuredValues.length === configuredFields.length) {
+        setKeysInput(configuredFields.map((field) => field.key).join(', '));
+      }
+      return;
+    }
+    if (activeDelimiter) {
+      const candidateValues = previewStem.split(activeDelimiter);
+      if (candidateValues.length !== VISTA_HIERARCHY_KEYS.length) return;
+      const hierarchyKeys = [...VISTA_HIERARCHY_KEYS];
+      if (String(candidateValues[2] || '').toUpperCase().startsWith('BATCH')) {
+        hierarchyKeys[2] = 'batch_number';
+      }
+      setKeysInput(hierarchyKeys.join(', '));
+      return;
+    }
     const configuredMatch = configuredFields.length > 0
       ? candidateDelimiters
         .map((delimiter) => ({ delimiter, values: previewStem.split(delimiter) }))

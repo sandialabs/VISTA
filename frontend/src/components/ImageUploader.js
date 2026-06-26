@@ -1301,7 +1301,9 @@ function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = 
               fileNamingScheme={projectConfiguration?.file_naming_scheme}
               initialConfig={projectConfiguration?.file_naming_scheme?.metadata_extractor || {
                 mode: 'simple',
-                pattern: projectConfiguration?.file_naming_scheme?.delimiter || '_',
+                pattern: projectConfiguration?.file_naming_scheme
+                  ? (projectConfiguration.file_naming_scheme.delimiter || '')
+                  : '_',
                 keys: [],
               }}
               title="Filename Regex & Delimiter Decoder"
