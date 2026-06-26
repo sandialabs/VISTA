@@ -29,6 +29,52 @@ function buildActiveImageRefs(images) {
   });
 }
 
+
+function getFilenameStem(filename = '') {
+  const base = String(filename || '').split(/[\\/]/).pop() || '';
+  const dotIndex = base.lastIndexOf('.');
+  return dotIndex > 0 ? base.slice(0, dotIndex) : base;
+}
+
+function tokenizeFilename(filename = '') {
+  return getFilenameStem(filename).split(/[^A-Za-z0-9]+/).map((token) => token.trim()).filter(Boolean);
+}
+
+function normalizePartKey(value = '') {
+  return String(value || '').replace(/[^A-Za-z0-9]+/g, '').trim();
+}
+
+function buildAutoAssignPreview(images, selectedTokenIndexes) {
+  const indexes = new Set(selectedTokenIndexes);
+  if (indexes.size === 0) return [];
+  const groups = new Map();
+  (Array.isArray(images) ? images : []).forEach((image) => {
+    const tokens = tokenizeFilename(image.filename);
+    const partKey = normalizePartKey(tokens.filter((_, index) => indexes.has(index)).join(''));
+    if (!partKey) return;
+    if (!groups.has(partKey)) groups.set(partKey, []);
+    groups.get(partKey).push(image);
+  });
+  return Array.from(groups.entries())
+    .map(([partKey, groupedImages]) => ({ partKey, images: groupedImages }))
+    .sort((left, right) => left.partKey.localeCompare(right.partKey));
+}
+
+function buildTokenOptions(images) {
+  const examplesByIndex = new Map();
+  (Array.isArray(images) ? images : []).forEach((image) => {
+    tokenizeFilename(image.filename).forEach((token, index) => {
+      if (!examplesByIndex.has(index)) examplesByIndex.set(index, new Set());
+      if (examplesByIndex.get(index).size < 3) examplesByIndex.get(index).add(token);
+    });
+  });
+  return Array.from(examplesByIndex.entries()).map(([index, examples]) => ({
+    index,
+    label: `Segment ${index + 1}`,
+    examples: Array.from(examples),
+  }));
+}
+
 function buildImageIndexes(images) {
   const refs = buildActiveImageRefs(images);
   const byId = new Map();
@@ -91,6 +137,8 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
   const [selectionDrag, setSelectionDrag] = useState(null);
   const [showSomeModal, setShowSomeModal] = useState(false);
   const [someFilter, setSomeFilter] = useState('');
+  const [autoAssignTokenIndexes, setAutoAssignTokenIndexes] = useState([0, 1]);
+  const [autoAssigning, setAutoAssigning] = useState(false);
   const unassignedRef = useRef(null);
 
   React.useEffect(() => {
@@ -298,6 +346,75 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
     </button>
   );
 
+  const tokenOptions = useMemo(() => buildTokenOptions(localBuckets.unassigned), [localBuckets.unassigned]);
+  const autoAssignPreview = useMemo(
+    () => buildAutoAssignPreview(localBuckets.unassigned, autoAssignTokenIndexes),
+    [localBuckets.unassigned, autoAssignTokenIndexes]
+  );
+
+  const toggleAutoAssignToken = (index) => {
+    setAutoAssignTokenIndexes((prev) => (prev.includes(index) ? prev.filter((item) => item !== index) : [...prev, index].sort((a, b) => a - b)));
+  };
+
+  const findPartByKey = (partKey, buckets = localBuckets.partBuckets) => buckets.find((part) => normalizePartKey(part.serialNumber || part.displayName) === partKey);
+
+  const handleAutoAssignParts = async () => {
+    const preview = buildAutoAssignPreview(localBuckets.unassigned, autoAssignTokenIndexes);
+    if (preview.length === 0) return;
+    setAutoAssigning(true);
+    try {
+      const nextPartBuckets = [...localBuckets.partBuckets];
+      const partByKey = new Map(nextPartBuckets.map((part) => [normalizePartKey(part.serialNumber || part.displayName), part]));
+      const newlyAssignedKeys = new Set();
+
+      for (const group of preview) {
+        let targetPart = partByKey.get(group.partKey) || findPartByKey(group.partKey, nextPartBuckets);
+        if (!targetPart) {
+          const createResponse = await fetch(`/api/projects/${projectId}/parts`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serial_number: group.partKey, display_name: group.partKey }),
+          });
+          if (!createResponse.ok) throw new Error(`Failed to create part ${group.partKey} (${createResponse.status})`);
+          const createdPart = await createResponse.json();
+          targetPart = {
+            id: createdPart?.id ? String(createdPart.id) : `new-${group.partKey}-${Date.now()}`,
+            serialNumber: createdPart?.serial_number || group.partKey,
+            displayName: createdPart?.display_name || group.partKey,
+            images: [],
+          };
+          nextPartBuckets.push(targetPart);
+          partByKey.set(group.partKey, targetPart);
+        }
+
+        for (const image of group.images) {
+          const response = await fetch(`/api/projects/${projectId}/parts/image-assignments`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: image.filename, image_id: image.id || null, to_part_id: targetPart.id }),
+          });
+          if (!response.ok) throw new Error(`Failed to assign ${image.filename} (${response.status})`);
+          const imageKey = image.key || image.id || image.filename;
+          newlyAssignedKeys.add(imageKey);
+          if (!targetPart.images.some((existing) => (existing.key || existing.id || existing.filename) === imageKey)) {
+            targetPart.images.push(image);
+          }
+        }
+        targetPart.images.sort((left, right) => left.filename.localeCompare(right.filename));
+      }
+
+      setLocalBuckets({
+        partBuckets: nextPartBuckets.sort((left, right) => (left.displayName || '').localeCompare(right.displayName || '')),
+        unassigned: localBuckets.unassigned.filter((image) => !newlyAssignedKeys.has(image.key || image.id || image.filename)),
+      });
+      setSelectedUnassigned((prev) => prev.filter((key) => !newlyAssignedKeys.has(key)));
+      if (onAssignmentsChanged) await onAssignmentsChanged();
+      if (setError) setError(null);
+    } catch (err) {
+      if (setError) setError(err.message || 'Failed to auto-assign images to parts');
+    } finally {
+      setAutoAssigning(false);
+    }
+  };
+
   const filteredUnassigned = useMemo(() => {
     if (!someFilter.trim()) return localBuckets.unassigned;
     try {
@@ -314,6 +431,26 @@ function ImagesToPartsTab({ projectId, parts = [], images = [], onAssignmentsCha
         <header className="workbench-header"><div><h2>Images to Parts</h2><p>Drag images into target parts to repair or refine image assignments.</p></div>
           <label className="thumbnail-switch"><input type="checkbox" checked={showThumbnails} onChange={(event) => setShowThumbnails(event.target.checked)} aria-label="Show image thumbnails" />
             <span className="thumbnail-switch-track" aria-hidden="true"><span className="thumbnail-switch-thumb" /></span><span>Thumbnails</span></label></header>
+
+        <section className="auto-assign-parts-panel" aria-label="Automatically assign images to parts">
+          <div>
+            <h3>Automatically Assign Images to Parts</h3>
+            <p className="muted">Select filename segments to build part names. Matching unassigned images are grouped by the selected segments, spaces and separators are removed, and missing parts are created automatically.</p>
+          </div>
+          <div className="auto-assign-token-list">
+            {tokenOptions.length === 0 ? <p className="muted">Upload or unassign images to detect filename segments.</p> : tokenOptions.map((option) => (
+              <label key={option.index} className="auto-assign-token-option">
+                <input type="checkbox" checked={autoAssignTokenIndexes.includes(option.index)} onChange={() => toggleAutoAssignToken(option.index)} />
+                <span><strong>{option.label}</strong><small>Examples: {option.examples.join(', ')}</small></span>
+              </label>
+            ))}
+          </div>
+          <div className="auto-assign-preview-row">
+            <span>{autoAssignPreview.length} part{autoAssignPreview.length === 1 ? '' : 's'} will be updated from {autoAssignPreview.reduce((sum, group) => sum + group.images.length, 0)} image{autoAssignPreview.reduce((sum, group) => sum + group.images.length, 0) === 1 ? '' : 's'}.</span>
+            <button type="button" className="btn btn-primary btn-sm" onClick={handleAutoAssignParts} disabled={autoAssigning || autoAssignPreview.length === 0}>{autoAssigning ? 'Assigning…' : 'Assign Parts'}</button>
+          </div>
+          {autoAssignPreview.length > 0 ? <div className="auto-assign-preview-list">{autoAssignPreview.slice(0, 8).map((group) => <span key={group.partKey}>{group.partKey} ({group.images.length})</span>)}</div> : null}
+        </section>
 
         <div className="images-to-parts-grid">
           <div className="images-to-parts-column assignment-source-column sticky-assignment-column" onDragOver={(event) => event.preventDefault()} onDrop={handleDropToUnassigned} data-testid="images-to-parts-unassigned-target">

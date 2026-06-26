@@ -397,4 +397,93 @@ describe('ImagesToPartsTab', () => {
     await waitFor(() => expect(screen.getByTestId('images-to-parts-unassigned-target')).toHaveTextContent('scan (duplicate).npy'));
     await waitFor(() => expect(screen.getByTestId('images-to-parts-unassigned-target')).not.toHaveTextContent('scan.npy'));
   });
+
+  test('automatically creates parts from selected filename segments and assigns matching images', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (url, options = {}) => {
+      if (url === '/api/projects/proj-1/parts') {
+        const payload = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ id: `part-${payload.serial_number}`, serial_number: payload.serial_number, display_name: payload.display_name }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    const onAssignmentsChanged = jest.fn().mockResolvedValue();
+
+    render(
+      <ImagesToPartsTab
+        projectId="proj-1"
+        parts={[]}
+        images={[
+          { id: 'img-1', filename: 'L1_SN1_front.png' },
+          { id: 'img-2', filename: 'L1_SN1_back.png' },
+          { id: 'img-3', filename: 'L1_SN2_front.png' },
+          { id: 'img-4', filename: 'L1_SN2_back.png' },
+          { id: 'img-5', filename: 'L2_SN1_front.png' },
+          { id: 'img-6', filename: 'L2_SN1_back.png' },
+          { id: 'img-7', filename: 'L2_SN2_front.png' },
+          { id: 'img-8', filename: 'L2_SN2_back.png' },
+        ]}
+        onAssignmentsChanged={onAssignmentsChanged}
+        setError={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText('L1SN1 (2)')).toBeInTheDocument();
+    expect(screen.getByText('L1SN2 (2)')).toBeInTheDocument();
+    expect(screen.getByText('L2SN1 (2)')).toBeInTheDocument();
+    expect(screen.getByText('L2SN2 (2)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign Parts' }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ serial_number: 'L1SN1', display_name: 'L1SN1' }),
+    })));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ filename: 'L2_SN2_back.png', image_id: 'img-8', to_part_id: 'part-L2SN2' }),
+    })));
+    await waitFor(() => expect(onAssignmentsChanged).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'L1SN1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'L2SN2' })).toBeInTheDocument();
+  });
+
+  test('can use a numeric filename segment with no letter identifier as the assignment key', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (url, options = {}) => {
+      if (url === '/api/projects/proj-1/parts') {
+        const payload = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ id: `part-${payload.serial_number}`, serial_number: payload.serial_number, display_name: payload.display_name }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    render(
+      <ImagesToPartsTab
+        projectId="proj-1"
+        parts={[]}
+        images={[
+          { id: 'img-001', filename: 'L1_SN1_001.png' },
+          { id: 'img-002', filename: 'L1_SN1_002.png' },
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText(/Segment 1/));
+    fireEvent.click(screen.getByLabelText(/Segment 2/));
+    fireEvent.click(screen.getByLabelText(/Segment 3/));
+
+    expect(screen.getByText('001 (1)')).toBeInTheDocument();
+    expect(screen.getByText('002 (1)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign Parts' }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ serial_number: '001', display_name: '001' }),
+    })));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ filename: 'L1_SN1_001.png', image_id: 'img-001', to_part_id: 'part-001' }),
+    })));
+  });
+
 });
