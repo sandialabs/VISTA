@@ -260,7 +260,7 @@ const scenarioByUser = [
 
 const defaultCalibration = { pixels_per_mm: 20, pixels_per_inch: 508, unit: 'mm' };
 
-function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys, metadataDict = { calibration_default: defaultCalibration } }) {
+function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys, metadataDict = { calibration_default: defaultCalibration }, projectImages = null }) {
   let mutableParts = [...parts];
   const uploadedImages = [];
   const savedWorkspaceStates = [];
@@ -578,10 +578,10 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
       mutableParts[0] = updatedPart;
       return Promise.resolve({ ok: true, json: async () => updatedPart });
     }
-    if (url.includes('/parts')) {
-      return Promise.resolve({ ok: true, json: async () => mutableParts });
-    }
     if (url.includes('/images?include_deleted=true&limit=5000')) {
+      if (Array.isArray(projectImages)) {
+        return Promise.resolve({ ok: true, json: async () => projectImages });
+      }
       const imageRecords = mutableParts.flatMap((part) => {
         const viewImages = part?.metadata?.view_images || {};
         const viewRecords = Object.entries(viewImages).map(([viewName, imageRef], index) => ({
@@ -607,6 +607,9 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
         return [...viewRecords, ...sourceRecords];
       });
       return Promise.resolve({ ok: true, json: async () => [...imageRecords, ...uploadedImages] });
+    }
+    if (url.includes('/parts')) {
+      return Promise.resolve({ ok: true, json: async () => mutableParts });
     }
     return Promise.resolve({ ok: false, status: 404 });
   });
@@ -831,6 +834,120 @@ describe('InspectionWorkbenchPanel', () => {
     expect(await screen.findByText('No mapped images for this part.')).toBeInTheDocument();
     expect(screen.queryByAltText('front view')).not.toBeInTheDocument();
     expect(screen.queryByText('assigned-a.png')).not.toBeInTheDocument();
+  });
+
+  const buildRegressionPart = (id, displayName, filename, imageId, batchId = 'batch-1') => ({
+    id,
+    batch_id: batchId,
+    serial_number: id.toUpperCase(),
+    display_name: displayName,
+    review_state: 'unreviewed',
+    metadata: {
+      configured_views: ['front'],
+      modalities: ['visual'],
+      view_images: { front: filename },
+      source_images: [
+        { filename, image_id: imageId, side: 'front', modality: 'visual', overlay: false },
+      ],
+      annotations: [],
+    },
+  });
+
+  test('keeps remaining parts and images visible in inspection after another part is deleted', async () => {
+    const remainingPart = buildRegressionPart('part-remaining', 'Remaining Part', 'remaining-part.png', 'img-remaining-part');
+    mockWorkbenchFetch({
+      user: 'part-delete-regression',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-deleted' },
+      parts: [remainingPart],
+      projectImages: [
+        { id: 'img-remaining-part', filename: 'remaining-part.png', metadata: { part_id: 'part-remaining', view_name: 'front' } },
+        { id: 'img-deleted-part', filename: 'deleted-part.png', metadata: { part_id: 'part-deleted', view_name: 'front' } },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findAllByText('Remaining Part')).toHaveLength(2);
+    expect(screen.getByText('Parts: 1')).toBeInTheDocument();
+    expect(screen.getByAltText('front view')).toHaveAttribute('src', '/api/images/img-remaining-part/content');
+    expect(screen.queryByText('Deleted Part')).not.toBeInTheDocument();
+    expect(screen.queryByText('deleted-part.png')).not.toBeInTheDocument();
+  });
+
+  test('keeps loaded images visible and hides unloaded images in inspection', async () => {
+    const part = {
+      ...buildRegressionPart('part-with-unload', 'Part With Unload', 'remaining-image.png', 'img-remaining-image'),
+      metadata: {
+        configured_views: ['front', 'back'],
+        modalities: ['visual'],
+        view_images: { front: 'remaining-image.png', back: 'unloaded-image.png' },
+        source_images: [
+          { filename: 'remaining-image.png', image_id: 'img-remaining-image', side: 'front', modality: 'visual', overlay: false },
+          { filename: 'unloaded-image.png', image_id: 'img-unloaded-image', side: 'back', modality: 'visual', overlay: false },
+        ],
+        annotations: [],
+      },
+    };
+    mockWorkbenchFetch({
+      user: 'image-unload-regression',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-with-unload' },
+      parts: [part],
+      projectImages: [
+        { id: 'img-remaining-image', filename: 'remaining-image.png', metadata: { part_id: 'part-with-unload', view_name: 'front' } },
+        { id: 'img-unloaded-image', filename: 'unloaded-image.png', deleted_at: '2026-06-25T12:00:00Z', metadata: { part_id: 'part-with-unload', view_name: 'back' } },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findAllByText('Part With Unload')).toHaveLength(2);
+    expect(screen.getByAltText('front view')).toHaveAttribute('src', '/api/images/img-remaining-image/content');
+    expect(screen.queryByAltText('back view')).not.toBeInTheDocument();
+    expect(screen.queryByText('unloaded-image.png')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Part With Unload view toggles')).toHaveTextContent('FRONT');
+    expect(screen.getByLabelText('Part With Unload view toggles')).not.toHaveTextContent('BACK');
+  });
+
+  test('keeps remaining parts and loaded images visible after part deletion and image unload happen together', async () => {
+    const survivor = {
+      ...buildRegressionPart('part-survivor', 'Survivor Part', 'survivor-loaded.png', 'img-survivor-loaded'),
+      metadata: {
+        configured_views: ['front', 'back'],
+        modalities: ['visual'],
+        view_images: { front: 'survivor-loaded.png', back: 'survivor-unloaded.png' },
+        source_images: [
+          { filename: 'survivor-loaded.png', image_id: 'img-survivor-loaded', side: 'front', modality: 'visual', overlay: false },
+          { filename: 'survivor-unloaded.png', image_id: 'img-survivor-unloaded', side: 'back', modality: 'visual', overlay: false },
+        ],
+        annotations: [],
+      },
+    };
+    const secondSurvivor = buildRegressionPart('part-second-survivor', 'Second Survivor Part', 'second-survivor.png', 'img-second-survivor');
+    mockWorkbenchFetch({
+      user: 'combined-delete-unload-regression',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-deleted' },
+      parts: [survivor, secondSurvivor],
+      projectImages: [
+        { id: 'img-survivor-loaded', filename: 'survivor-loaded.png', metadata: { part_id: 'part-survivor', view_name: 'front' } },
+        { id: 'img-survivor-unloaded', filename: 'survivor-unloaded.png', deleted_at: '2026-06-25T12:00:00Z', metadata: { part_id: 'part-survivor', view_name: 'back' } },
+        { id: 'img-second-survivor', filename: 'second-survivor.png', metadata: { part_id: 'part-second-survivor', view_name: 'front' } },
+        { id: 'img-deleted-part', filename: 'deleted-combined.png', metadata: { part_id: 'part-deleted', view_name: 'front' } },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findAllByText('Survivor Part')).toHaveLength(2);
+    expect(screen.getByText('Second Survivor Part')).toBeInTheDocument();
+    expect(screen.getByText('Parts: 2')).toBeInTheDocument();
+    expect(screen.getByAltText('front view')).toHaveAttribute('src', '/api/images/img-survivor-loaded/content');
+    expect(screen.queryByAltText('back view')).not.toBeInTheDocument();
+    expect(screen.queryByText('survivor-unloaded.png')).not.toBeInTheDocument();
+    expect(screen.queryByText('Deleted Combined Part')).not.toBeInTheDocument();
+    expect(screen.queryByText('deleted-combined.png')).not.toBeInTheDocument();
   });
 
   afterEach(() => {
