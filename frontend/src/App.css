@@ -8112,3 +8112,59 @@ ul li:hover {
   width: 1rem;
   height: 1rem;
 }
+
+.auto-assign-parts-panel {
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.auto-assign-parts-panel h3 {
+  margin: 0 0 4px;
+}
+
+.auto-assign-token-list,
+.auto-assign-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.auto-assign-token-option {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.auto-assign-token-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.auto-assign-token-option small {
+  color: #64748b;
+}
+
+.auto-assign-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.auto-assign-preview-list span {
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
