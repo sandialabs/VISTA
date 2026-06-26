@@ -1290,6 +1290,21 @@ function getPartImageRefs(part) {
   return refs;
 }
 
+function isDeletedProjectImageRecord(record) {
+  return Boolean(record?.deleted_at || record?.deletedAt || record?.is_deleted || record?.deleted);
+}
+
+function isInspectionImageRefLoaded(entry, projectImageLookup = {}) {
+  const candidates = [
+    entry?.imageId,
+    entry?.imageRef,
+    entry?.filename,
+  ].map((value) => String(value || '').trim()).filter(Boolean);
+  const records = candidates.map((candidate) => projectImageLookup[candidate]).filter(Boolean);
+  if (records.length === 0) return true;
+  return records.some((record) => !isDeletedProjectImageRecord(record));
+}
+
 function resolveProjectImageId(projectImageLookup, ...candidates) {
   for (const candidate of candidates) {
     const key = String(candidate || '');
@@ -2862,8 +2877,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   }, [selectedPart, selectedViewName]);
   const selectedPartImageRefs = useMemo(() => {
     if (!selectedPart?.metadata || typeof selectedPart.metadata !== 'object') return [];
-    return getPartImageRefs(selectedPart);
-  }, [selectedPart]);
+    return getPartImageRefs(selectedPart).filter((entry) => isInspectionImageRefLoaded(entry, projectImageLookup));
+  }, [projectImageLookup, selectedPart]);
   const visibleSelectedPartImageRefs = useMemo(() => {
     const hidden = new Set(hiddenViewNames.map((name) => String(name).toLowerCase()));
     const enabled = new Set(enabledModalities.map((name) => String(name).toLowerCase()));
@@ -4498,8 +4513,14 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     const annotationCount = Array.isArray(part?.metadata?.annotations) ? part.metadata.annotations.length : 0;
                     const isSelected = part.id === selectedPart?.id;
                     const viewImages = part?.metadata?.view_images || {};
-                    const imageEntries = Object.entries(viewImages);
-                    const partImageRefs = getPartImageRefs(part);
+                    const imageEntries = Object.entries(viewImages)
+                      .filter(([viewName, imageRef]) => isInspectionImageRefLoaded({
+                        imageRef: String(imageRef || ''),
+                        filename: String(imageRef || ''),
+                        viewName,
+                      }, projectImageLookup));
+                    const partImageRefs = getPartImageRefs(part)
+                      .filter((entry) => isInspectionImageRefLoaded(entry, projectImageLookup));
                     const partModalities = getPartSummaryModalities(part, partImageRefs);
                     return (
                       <article
