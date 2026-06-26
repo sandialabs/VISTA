@@ -7,7 +7,49 @@ const pr08ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr08-project
 const pr09ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr09-inspector-modalities-measurements.png');
 const pr11ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr11-project-configuration.png');
 const pr14ScreenshotPath = path.resolve(__dirname, '../../artifacts/pr14-report-normalization-advanced.png');
+const projectDataLayoutScreenshotPath = path.resolve(__dirname, '../../artifacts/project-data-load-images-layout.png');
 const simulatedUsers = ['basic', 'intermediate', 'advanced'];
+
+test.describe('Project Data load images layout', () => {
+  test('places Images to Parts before Batches and keeps upload left of compact export', async ({ page }) => {
+    const { projectId } = await mockInspectionWorkbenchRoutes(page, { type: 'PT1', scenario: 'basic' });
+
+    await page.goto(`/project/${projectId}`, { waitUntil: 'networkidle' });
+    await page.getByRole('tab', { name: 'Project Data' }).click();
+
+    await expect(page.getByRole('tab', { name: 'Load Images', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Images to Parts' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Batches' })).toBeVisible();
+
+    const loadImagesTabBox = await page.getByRole('tab', { name: 'Load Images', exact: true }).boundingBox();
+    const imagesToPartsTabBox = await page.getByRole('tab', { name: 'Images to Parts' }).boundingBox();
+    const batchesTabBox = await page.getByRole('tab', { name: 'Batches' }).boundingBox();
+    expect(
+      loadImagesTabBox
+        && imagesToPartsTabBox
+        && batchesTabBox
+        && loadImagesTabBox.x < imagesToPartsTabBox.x
+        && imagesToPartsTabBox.x < batchesTabBox.x
+    ).toBeTruthy();
+
+    await expect(page.getByRole('heading', { name: 'Upload Images' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Filename Regex & Delimiter Decoder' })).toBeVisible();
+    await expect(page.getByLabel('Advanced (Regex)')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Export Data' })).toBeVisible();
+    const uploadCardBox = await page.locator('.project-data-upload-first .upload-section').boundingBox();
+    const exportCardBox = await page.locator('.project-data-upload-first .export-section').boundingBox();
+    expect(
+      uploadCardBox
+        && exportCardBox
+        && uploadCardBox.x < exportCardBox.x
+        && uploadCardBox.width > exportCardBox.width
+    ).toBeTruthy();
+
+    await page.locator('.project-data-tab-panel[aria-label="Load Images"]').screenshot({
+      path: projectDataLayoutScreenshotPath,
+    });
+  });
+});
 
 for (const projectType of ['PT1', 'PT2', 'PT3']) {
   for (const simulatedUser of simulatedUsers) {
@@ -19,7 +61,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         await page.getByRole('tab', { name: 'Project Data' }).click();
 
         await expect(page.getByTestId('project-data-summary')).toBeVisible();
-        await expect(page.getByRole('tab', { name: 'Load Images' })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByRole('tab', { name: 'Load Images', exact: true })).toHaveAttribute('aria-selected', 'true');
         await expect(page.getByRole('tab', { name: 'Batches' })).toBeVisible();
         await expect(page.getByRole('heading', { name: 'Upload Images' })).toBeVisible();
         await expect(page.getByRole('heading', { name: 'Data Validation' })).toBeVisible();
@@ -28,7 +70,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         await expect(page.getByTestId('project-metadata-tree')).toContainText('inspection_profile');
         await page.getByRole('tab', { name: 'Project Data' }).click();
         const summaryBox = await page.getByTestId('project-data-summary').boundingBox();
-        const tabsBox = await page.getByRole('tab', { name: 'Load Images' }).boundingBox();
+        const tabsBox = await page.getByRole('tab', { name: 'Load Images', exact: true }).boundingBox();
         expect(summaryBox && tabsBox && summaryBox.y < tabsBox.y).toBeTruthy();
         await page.getByTestId('request-ingest-validation').click();
         await expect(page.getByTestId('ingest-validation-result')).toContainText('Ingest validation complete');
@@ -73,7 +115,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
           await expect(page.getByRole('heading', { name: primaryPart })).toBeVisible();
         }
 
-        await page.getByRole('button', { name: /mark pass/i }).click();
+        await page.getByRole('button', { name: 'Pass', exact: true }).click();
         const expectedPassedCount = simulatedUser === 'advanced' ? 'Passed: 2' : 'Passed: 1';
         await expect(page.getByText(expectedPassedCount)).toBeVisible();
 
@@ -81,16 +123,17 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         if (simulatedUser === 'advanced') {
           const topViewButton = inspectionPanel.locator('.part-summary-images button', { hasText: 'TOP' }).first();
           await topViewButton.click();
-          await expect(inspectionPanel.locator('.view-cell.selected .view-cell-title')).toHaveText('TOP');
-          await inspectionPanel.locator('.view-cell', { hasText: 'FRONT' }).first().click();
+          await expect(inspectionPanel.locator('.part-summary-images button.active', { hasText: 'TOP' }).first()).toBeVisible();
+          await inspectionPanel.locator('.part-summary-images button', { hasText: 'FRONT' }).first().click();
           await expect(inspectionPanel.locator('.part-summary-images button.active', { hasText: 'FRONT' }).first()).toBeVisible();
         }
         await expect(page.getByTestId('annotation-controls')).toBeVisible();
+        await page.getByRole('button', { name: 'Other', exact: true }).click();
         await page.getByLabel('Annotation defect type').selectOption('Other');
         await page.getByPlaceholder('annotation modality').fill('visual');
         await page.getByPlaceholder('annotation comment').fill(`${simulatedUser}-surface-note`);
-        await page.getByRole('button', { name: 'Add annotation' }).click();
-        await expect(page.getByTestId('annotation-list')).toContainText('Other • visual • open');
+        await page.getByRole('button', { name: 'Save annotation' }).click();
+        await expect(page.getByTestId('annotation-list')).toContainText(`${simulatedUser}-surface-note`);
 
         await expect.poll(() => getWorkspaceStates().length).toBeGreaterThan(0);
         await expect.poll(() => {
@@ -127,6 +170,7 @@ test.describe('PR-09 annotation controls screenshot artifact', () => {
     await page.goto(`/project/${projectId}`, { waitUntil: 'networkidle' });
     await page.getByRole('tab', { name: 'Inspection' }).click();
     await expect(page.getByTestId('annotation-controls')).toBeVisible();
+    await page.getByRole('button', { name: 'Other', exact: true }).click();
     await page.getByLabel('Annotation defect type').selectOption('Other');
     await page.getByPlaceholder('annotation comment').fill('qa-length review note');
     const panel = page.locator('section[aria-label="Inspection Workbench"]');

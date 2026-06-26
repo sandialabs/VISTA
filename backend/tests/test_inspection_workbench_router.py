@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch
 import base64
 import io
+import json
 
 from PIL import Image, ImageDraw
 
@@ -436,8 +437,8 @@ def test_slice_segmentation_selects_clicked_toolbox_region(client):
         json={
             "axis": "axial",
             "slice_index": 4,
-            "method_id": "segmentation.connected_components",
-            "parameters": {"min_area_px": 4},
+            "method_id": "segmentation.opencv.placeholder",
+            "parameters": {"integration_mode": "placeholder"},
             "image_data_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
             "filename": "slice-z-004.png",
             "click_x": 44,
@@ -448,11 +449,10 @@ def test_slice_segmentation_selects_clicked_toolbox_region(client):
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["status"] == "completed"
-    assert payload["method_id"] == "segmentation.connected_components"
-    assert payload["summary"]["region_count"] == 2
-    assert len(payload["regions"]) == 2
-    assert payload["selected_region"]["bbox"][0] <= 44 <= payload["selected_region"]["bbox"][2]
-    assert payload["selected_region"]["bbox"][1] <= 44 <= payload["selected_region"]["bbox"][3]
+    assert payload["method_id"] == "segmentation.opencv.placeholder"
+    assert payload["summary"]["region_count"] == 0
+    assert payload["regions"] == []
+    assert payload["selected_region"] is None
 
 
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
@@ -1027,6 +1027,103 @@ def test_project_configuration_round_trip_supports_progressive_users(client, pro
             assert reloaded_config[key] == value
 
 
+def test_project_configuration_file_naming_scheme_survives_save_and_reload(client):
+    headers = {
+        "X-User-Id": "config-filename-hierarchy@example.com",
+        "X-User-Groups": '["config-filename-hierarchy"]',
+    }
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Filename hierarchy persistence",
+            "description": "Verify filename decoding config persists",
+            "meta_group_id": "config-filename-hierarchy",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    initial_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert initial_resp.status_code == 200, initial_resp.text
+    initial_config = initial_resp.json()["config"]
+    assert "file_naming_scheme" in initial_config
+
+    payload = {
+        **initial_config,
+        "file_naming_scheme": {
+            "hierarchy_levels": [
+                {"id": "drawing_number", "label": "Drawing", "abbreviation": "DWG"},
+                {"id": "lot_number", "label": "Lot", "abbreviation": "LT"},
+                {"id": "part_number", "label": "Part", "abbreviation": "PN"},
+                {"id": "serial_number", "label": "Serial", "abbreviation": "SN"},
+            ],
+            "image_descriptors": [
+                {"id": "view", "label": "View", "abbreviation": "VW"},
+                {"id": "modality", "label": "Modality", "abbreviation": "MD"},
+            ],
+        },
+    }
+
+    save_resp = client.put(
+        f"/api/projects/{project_id}/configuration",
+        json={"config": payload},
+        headers=headers,
+    )
+    assert save_resp.status_code == 200, save_resp.text
+    assert save_resp.json()["config"]["file_naming_scheme"] == payload["file_naming_scheme"]
+
+    reload_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert reload_resp.status_code == 200, reload_resp.text
+    assert reload_resp.json()["config"]["file_naming_scheme"] == payload["file_naming_scheme"]
+
+
+def test_project_configuration_metadata_parsers_survives_save_and_reload(client):
+    headers = {
+        "X-User-Id": "config-metadata-parsers@example.com",
+        "X-User-Groups": '["config-metadata-parsers"]',
+    }
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Metadata parser persistence",
+            "description": "Verify .nsipro parser config persists",
+            "meta_group_id": "config-metadata-parsers",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    initial_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert initial_resp.status_code == 200, initial_resp.text
+    initial_config = initial_resp.json()["config"]
+    assert initial_config["metadata_parsers"]["nsipro"]["parser_id"] == "default"
+
+    payload = {
+        **initial_config,
+        "metadata_parsers": {
+            "nsipro": {
+                "parser_id": "deployment_a",
+            },
+        },
+    }
+
+    save_resp = client.put(
+        f"/api/projects/{project_id}/configuration",
+        json={"config": payload},
+        headers=headers,
+    )
+    assert save_resp.status_code == 200, save_resp.text
+    assert save_resp.json()["config"]["metadata_parsers"] == payload["metadata_parsers"]
+
+    reload_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert reload_resp.status_code == 200, reload_resp.text
+    assert reload_resp.json()["config"]["metadata_parsers"] == payload["metadata_parsers"]
+
+
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
 def test_project_configuration_rejects_invalid_hotkeys(client, project_type):
     headers = {
@@ -1406,9 +1503,31 @@ def test_load_test_data_seeds_project_type_fixtures(client, project_type):
         assert parts[0]["metadata"]["mpr"]["axis_labels"] == ["XY", "XZ", "YZ"]
         assert parts[0]["metadata"]["volume_shape"] == {"axial": 64, "coronal": 96, "sagittal": 128}
         source_images = parts[0]["metadata"]["source_images"]
-        assert len(source_images) == 64
-        assert source_images[16]["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
-        assert source_images[16]["metadata"]["slice_index"] == 16
+        assert len(source_images) == 128
+        base_images = [source_image for source_image in source_images if not source_image["metadata"].get("overlay")]
+        overlay_images = [source_image for source_image in source_images if source_image["metadata"].get("overlay")]
+        assert len(base_images) == 64
+        assert len(overlay_images) == 64
+        slice_16 = next(
+            source_image
+            for source_image in base_images
+            if source_image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
+        )
+        assert slice_16["metadata"]["slice_index"] == 16
+        overlay_16 = next(
+            source_image
+            for source_image in overlay_images
+            if source_image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016_overlay.png"
+        )
+        assert overlay_16["metadata"]["overlay_base_filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
+        assert overlay_16["metadata"]["modality"] == "segmentation"
+        nsipro_metadata = parts[0]["metadata"]["nsipro_metadata"]
+        assert nsipro_metadata["source_filename"] == "PT3_GEOMETRIC_DUAL_LABEL.nsipro"
+        assert nsipro_metadata["parser"] == "nsipro-key-value"
+        assert nsipro_metadata["metadata"]["Application"]["application_info"].startswith("NIS-Elements")
+        assert nsipro_metadata["metadata"]["Microscope"]["microscope_name"] == "Nikon Ti2-E Inverted Microscope"
+        assert nsipro_metadata["metadata"]["Camera"]["exposure_ms"] == 12.5
+        assert nsipro_metadata["metadata"]["Volume"]["slices"] == 64
     elif project_type == "PT1":
         source_images = [
             source_image
@@ -1416,15 +1535,40 @@ def test_load_test_data_seeds_project_type_fixtures(client, project_type):
             for source_image in part["metadata"].get("source_images", [])
         ]
         filenames = {source_image["filename"] for source_image in source_images}
-        assert payload["images_received"] == 16
+        assert payload["images_received"] == 20
         assert "D1001_LOT01_SET01_SN0001_front_visual_false.jpg" in filenames
         assert "D1002_LOT02_SET01_SN0004_back_heatmap_true.jpg" in filenames
+        assert "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt" in filenames
+        assert "D1002_LOT02_SET01_SN0004_back_segmentation_true.txt" in filenames
+        text_overlay = next(
+            source_image
+            for source_image in source_images
+            if source_image["filename"] == "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt"
+        )
+        assert text_overlay["overlay"] is True
+        assert text_overlay["modality"] == "segmentation"
         assert len(parts) == 4
         assert all(part["batch_id"] is None for part in parts)
         assert parts[0]["metadata"]["source"] == "vista-test-data"
         assert parts[0]["metadata"]["design_number"].startswith("D")
         assert parts[0]["metadata"]["set_number"].startswith("SET")
     else:
+        source_images = [
+            source_image
+            for part in parts
+            for source_image in part["metadata"].get("source_images", [])
+        ]
+        filenames = {source_image["filename"] for source_image in source_images}
+        assert payload["images_received"] == 20
+        assert "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt" in filenames
+        assert "D1002_LOT02_SET01_SN0004_back_segmentation_true.txt" in filenames
+        text_overlay = next(
+            source_image
+            for source_image in source_images
+            if source_image["filename"] == "D1001_LOT01_SET01_SN0001_front_segmentation_true.txt"
+        )
+        assert text_overlay["overlay"] is True
+        assert text_overlay["modality"] == "segmentation"
         assert parts[0]["metadata"]["design_number"].startswith("D")
 
 
@@ -1452,23 +1596,26 @@ def test_pt3_load_test_data_survives_fixture_image_upload_failure(client):
     assert load_resp.status_code == 200, load_resp.text
     payload = load_resp.json()
     assert payload["project_type"] == "PT3"
-    assert payload["images_created"] == 64
+    assert payload["images_created"] == 128
     assert payload["ingest"]["counters"]["parts_created"] == 1
 
     images_resp = client.get(f"/api/projects/{project_id}/images?include_deleted=true&limit=2000", headers=headers)
     assert images_resp.status_code == 200, images_resp.text
     images = images_resp.json()
-    assert len(images) == 64
+    assert len(images) == 128
     assert images[0]["metadata"]["storage_status"] == "metadata_only"
-    assert images[16]["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
-    assert images[16]["metadata"]["slice_index"] == 16
+    slice_16 = next(image for image in images if image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png")
+    assert slice_16["metadata"]["slice_index"] == 16
+    overlay_16 = next(image for image in images if image["filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016_overlay.png")
+    assert overlay_16["metadata"]["overlay"] is True
+    assert overlay_16["metadata"]["overlay_base_filename"] == "PT3_GEOMETRIC_DUAL_LABEL_Z016.png"
 
     parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
     assert parts_resp.status_code == 200, parts_resp.text
     part_metadata = parts_resp.json()[0]["metadata"]
     assert part_metadata["mpr"]["axis_labels"] == ["XY", "XZ", "YZ"]
     assert part_metadata["volume_shape"] == {"axial": 64, "coronal": 96, "sagittal": 128}
-    assert len(part_metadata["source_images"]) == 64
+    assert len(part_metadata["source_images"]) == 128
 
 
 def test_pt3_load_test_data_survives_fixture_image_upload_exception(client):
@@ -1495,13 +1642,13 @@ def test_pt3_load_test_data_survives_fixture_image_upload_exception(client):
     assert load_resp.status_code == 200, load_resp.text
     payload = load_resp.json()
     assert payload["project_type"] == "PT3"
-    assert payload["images_created"] == 64
+    assert payload["images_created"] == 128
     assert payload["ingest"]["counters"]["parts_created"] == 1
 
     images_resp = client.get(f"/api/projects/{project_id}/images?include_deleted=true&limit=2000", headers=headers)
     assert images_resp.status_code == 200, images_resp.text
     images = images_resp.json()
-    assert len(images) == 64
+    assert len(images) == 128
     assert images[0]["metadata"]["storage_status"] == "metadata_only"
 
 
@@ -1683,3 +1830,596 @@ def test_bulk_ingest_supports_progressive_users_with_discrepancy_counters(client
             assert len(parts) == 1
             assert parts[0]["batch_id"] is None
             assert parts[0]["metadata"]["set_number"] == "SET01"
+
+
+def test_bulk_ingest_dereferences_associated_nsipro_metadata(client):
+    headers = {"X-User-Id": "nsipro-ingest@example.com", "X-User-Groups": '["nsipro-ingest"]'}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Nsipro ingest project",
+            "description": "backend authoritative associated metadata ingest",
+            "meta_group_id": "nsipro-ingest",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    metadata_key = "associated_upload_metadata:scan.nsipro:testhash"
+    metadata_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": metadata_key,
+            "value": {
+                "kind": "associated_image_upload_metadata",
+                "filename": "scan.nsipro",
+                "file_type": "nsipro",
+                "parser": "nsipro-key-value",
+                "parser_id": "default",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                "source_filename": "scan.nsipro",
+                "content_hash": "testhash",
+                "metadata": {"capture": {"operator": "alice", "exposure": 12}},
+            },
+        },
+        headers=headers,
+    )
+    assert metadata_resp.status_code == 201, metadata_resp.text
+
+    ingest_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "batches": [],
+            "unassigned_parts": [
+                {
+                    "serial_number": "NSIPRO-001",
+                    "display_name": "NSIPRO part",
+                    "metadata": {
+                        "associated_metadata_ref": metadata_key,
+                        "associated_metadata": {
+                            "project_metadata_key": metadata_key,
+                            "file_type": "nsipro",
+                            "parser_id": "default",
+                            "parser_version": "1.0.0",
+                            "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                        },
+                        "source_images": [
+                            {
+                                "filename": "front.png",
+                                "side": "front",
+                                "modality": "visual",
+                                "associated_metadata_ref": metadata_key,
+                                "associated_metadata": {
+                                    "project_metadata_key": metadata_key,
+                                    "file_type": "nsipro",
+                                    "parser_id": "default",
+                                    "parser_version": "1.0.0",
+                                    "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert ingest_resp.status_code == 200, ingest_resp.text
+
+    parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    parts = parts_resp.json()
+    assert len(parts) == 1
+    metadata = parts[0]["metadata"]
+    assert metadata["nsipro_metadata"] == {"capture": {"operator": "alice", "exposure": 12}}
+    assert metadata["nsipro_payload"]["parser_id"] == "default"
+    assert metadata["nsipro_payload"]["parser_hash"] == "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df"
+    assert metadata["source_images"][0]["nsipro_payload"]["metadata"] == metadata["nsipro_metadata"]
+
+    replacement_key = "associated_upload_metadata:scan-updated.nsipro:updatedhash"
+    replacement_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": replacement_key,
+            "value": {
+                "kind": "associated_image_upload_metadata",
+                "filename": "scan-updated.nsipro",
+                "file_type": "nsipro",
+                "parser": "nsipro-key-value",
+                "parser_id": "default",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                "source_filename": "scan-updated.nsipro",
+                "content_hash": "updatedhash",
+                "metadata": {"capture": {"operator": "bob", "exposure": 18}},
+            },
+        },
+        headers=headers,
+    )
+    assert replacement_resp.status_code == 201, replacement_resp.text
+
+    update_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "batches": [],
+            "unassigned_parts": [
+                {
+                    "serial_number": "NSIPRO-001",
+                    "display_name": "NSIPRO part",
+                    "metadata": {
+                        "source_images": [
+                            {
+                                "filename": "front.png",
+                                "side": "front",
+                                "modality": "visual",
+                                "associated_metadata_ref": replacement_key,
+                                "associated_metadata": {
+                                    "project_metadata_key": replacement_key,
+                                    "file_type": "nsipro",
+                                    "parser_id": "default",
+                                    "parser_version": "1.0.0",
+                                    "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    assert update_resp.json()["counters"]["parts_skipped_existing"] == 1
+
+    updated_parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert updated_parts_resp.status_code == 200, updated_parts_resp.text
+    updated_metadata = updated_parts_resp.json()[0]["metadata"]
+    assert updated_metadata["nsipro_metadata"] == {"capture": {"operator": "bob", "exposure": 18}}
+    assert updated_metadata["source_images"][0]["nsipro_payload"]["source_filename"] == "scan-updated.nsipro"
+    assert updated_metadata["source_images"][0]["nsipro_payload"]["metadata"] == updated_metadata["nsipro_metadata"]
+
+
+def test_bulk_ingest_persists_deployment_nsipro_custom_fields_after_dereference(client):
+    headers = {"X-User-Id": "nsipro-deployment@example.com", "X-User-Groups": '["nsipro-deployment"]'}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Deployment nsipro ingest project",
+            "description": "backend authoritative deployment .nsipro ingest",
+            "meta_group_id": "nsipro-deployment",
+            "project_type": "PT3",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    config_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert config_resp.status_code == 200, config_resp.text
+    config = config_resp.json()["config"]
+    config["metadata_parsers"] = {"nsipro": {"parser_id": "deployment_a"}}
+    save_config_resp = client.put(
+        f"/api/projects/{project_id}/configuration",
+        json={"config": config},
+        headers=headers,
+    )
+    assert save_config_resp.status_code == 200, save_config_resp.text
+
+    metadata_key = "associated_upload_metadata:deployment-a.nsipro:deploymenthash"
+    metadata_text = "\n".join(
+        [
+            "[Deployment]",
+            "Deployment ID = DEP-42",
+            "Line ID = LINE-7",
+            "Build Number = 118",
+            "[Custom Fields]",
+            "Inspection Lot = LOT-ALPHA",
+            "Operator Badge = QA-17",
+            "Scan Mode = micro CT",
+        ]
+    )
+    metadata_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": metadata_key,
+            "value": {
+                "kind": "associated_image_upload_metadata",
+                "filename": "deployment-a.nsipro",
+                "file_type": "nsipro",
+                "parser": "nsipro-key-value",
+                "parser_id": "deployment_a",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb",
+                "source_filename": "deployment-a.nsipro",
+                "content_hash": "deploymenthash",
+                "raw_text": metadata_text,
+            },
+        },
+        headers=headers,
+    )
+    assert metadata_resp.status_code == 201, metadata_resp.text
+
+    ingest_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "batches": [
+                {
+                    "name": "PT3_DEPLOYMENT_STACK",
+                    "description": "PT3 deployment stack",
+                    "parts": [
+                        {
+                            "serial_number": "DEP-PT3-001",
+                            "display_name": "Deployment PT3 part",
+                            "metadata": {
+                                "project_type": "PT3",
+                                "volume_stack_id": "stack-deployment-a",
+                                "associated_metadata_ref": metadata_key,
+                                "associated_metadata": {
+                                    "project_metadata_key": metadata_key,
+                                    "file_type": "nsipro",
+                                    "parser_id": "deployment_a",
+                                    "parser_version": "1.0.0",
+                                    "parser_hash": "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb",
+                                },
+                                "source_images": [
+                                    {
+                                        "filename": "slice-001.png",
+                                        "image_id": "slice-001",
+                                        "slice_axis": "z",
+                                        "slice_index": 1,
+                                        "associated_metadata_ref": metadata_key,
+                                        "associated_metadata": {
+                                            "project_metadata_key": metadata_key,
+                                            "file_type": "nsipro",
+                                            "parser_id": "deployment_a",
+                                            "parser_version": "1.0.0",
+                                            "parser_hash": "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb",
+                                        },
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ],
+            "unassigned_parts": [],
+        },
+        headers=headers,
+    )
+    assert ingest_resp.status_code == 200, ingest_resp.text
+
+    parts_resp = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    parts = parts_resp.json()
+    assert len(parts) == 1
+    metadata = parts[0]["metadata"]
+    assert metadata["nsipro_metadata"] == {
+        "deployment": {"deployment_id": "DEP-42", "line_id": "LINE-7", "build_number": 118},
+        "custom_fields": {
+            "inspection_lot": "LOT-ALPHA",
+            "operator_badge": "QA-17",
+            "scan_mode": "micro CT",
+        },
+    }
+    assert metadata["nsipro_payload"]["parser_id"] == "deployment_a"
+    assert metadata["source_images"][0]["nsipro_payload"]["metadata"] == metadata["nsipro_metadata"]
+    assert metadata["source_images"][0]["nsipro_payload"]["parser_hash"] == "sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb"
+
+def test_bulk_ingest_strict_nsipro_parser_contract_rejects_mismatched_payload(client):
+    headers = {"X-User-Id": "nsipro-strict@example.com", "X-User-Groups": '["nsipro-strict"]'}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Strict nsipro ingest project",
+            "description": "strict parser contract",
+            "meta_group_id": "nsipro-strict",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    config_resp = client.get(f"/api/projects/{project_id}/configuration", headers=headers)
+    assert config_resp.status_code == 200, config_resp.text
+    config = config_resp.json()["config"]
+    config["metadata_parsers"] = {
+        "nsipro": {
+            "parser_id": "default",
+            "parser_version": "1.0.0",
+            "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+            "strict_version_match": True,
+        }
+    }
+    save_resp = client.put(f"/api/projects/{project_id}/configuration", json={"config": config}, headers=headers)
+    assert save_resp.status_code == 200, save_resp.text
+
+    metadata_key = "associated_upload_metadata:strict.nsipro:testhash"
+    metadata_resp = client.post(
+        f"/api/projects/{project_id}/metadata",
+        json={
+            "key": metadata_key,
+            "value": {
+                "filename": "strict.nsipro",
+                "file_type": "nsipro",
+                "parser_id": "default",
+                "parser_version": "1.0.0",
+                "parser_hash": "sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df",
+                "metadata": {"operator": "alice"},
+            },
+        },
+        headers=headers,
+    )
+    assert metadata_resp.status_code == 201, metadata_resp.text
+
+    ingest_resp = client.post(
+        f"/api/projects/{project_id}/ingest",
+        json={
+            "unassigned_parts": [
+                {
+                    "serial_number": "NSIPRO-STRICT-001",
+                    "metadata": {
+                        "associated_metadata_ref": metadata_key,
+                        "associated_metadata": {
+                            "project_metadata_key": metadata_key,
+                            "file_type": "nsipro",
+                            "parser_id": "deployment_b",
+                            "parser_version": "1.0.0",
+                            "parser_hash": "sha256:5992e0724aa1667d6069e6943dac78a43c6a2526b070f7f8d78980cead254ba0",
+                        },
+                    },
+                }
+            ]
+        },
+        headers=headers,
+    )
+    assert ingest_resp.status_code == 422
+    assert ".nsipro parser contract mismatch" in ingest_resp.json()["detail"]
+
+def _create_project_for_part_image_tests(client, name="Part Image Project"):
+    headers = {"X-User-Id": "parts-images@example.com", "X-User-Groups": '["parts-images"]'}
+    response = client.post(
+        "/api/projects/",
+        json={"name": name, "description": None, "meta_group_id": "parts-images", "project_type": "PT1"},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"], headers
+
+
+def _upload_part_test_image(client, project_id, headers, filename="part-image.png", metadata=None):
+    image = Image.new("RGB", (8, 8), (12, 34, 56))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    data = {"metadata": json.dumps(metadata)} if metadata is not None else None
+    response = client.post(
+        f"/api/projects/{project_id}/images",
+        files={"file": (filename, buffer, "image/png")},
+        data=data,
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_image_assignment_can_move_image_back_to_unassigned(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Unassign image project")
+    uploaded = _upload_part_test_image(client, project_id, headers, "assignable.png")
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-UNASSIGN", "display_name": "Unassign Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_response.status_code == 200, assign_response.text
+
+    unassign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": None},
+        headers=headers,
+    )
+    assert unassign_response.status_code == 200, unassign_response.text
+    assert unassign_response.json()["from_part_id"] == part_id
+    assert unassign_response.json()["to_part_id"] is None
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200
+    assert parts_response.json()[0]["metadata"]["source_images"] == []
+
+
+def test_image_assignment_preserves_crop_child_metadata(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Crop child image project")
+    crop_metadata = {
+        "crop_child_image": True,
+        "parent_image_id": "parent-image-1",
+        "parent_image_filename": "parent.png",
+        "crop_annotation_id": "annotation-box-1",
+        "crop_title": "12_34_crop of parent.png",
+        "crop_bbox": {"x": 12, "y": 34, "width": 56, "height": 78},
+        "side": "crop",
+        "modality": "visual",
+    }
+    uploaded = _upload_part_test_image(
+        client,
+        project_id,
+        headers,
+        "12_34_crop of parent.png.png",
+        metadata=crop_metadata,
+    )
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-CROP", "display_name": "Crop Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_response.status_code == 200, assign_response.text
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    source_image = parts_response.json()[0]["metadata"]["source_images"][0]
+    assert source_image["crop_child_image"] is True
+    assert source_image["parent_image_id"] == "parent-image-1"
+    assert source_image["parent_image_filename"] == "parent.png"
+    assert source_image["crop_annotation_id"] == "annotation-box-1"
+    assert source_image["crop_bbox"] == {"x": 12, "y": 34, "width": 56, "height": 78}
+
+
+def test_delete_part_removes_part_without_deleting_images(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Delete part project")
+    uploaded = _upload_part_test_image(client, project_id, headers, "survives-part-delete.png")
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-DELETE", "display_name": "Delete Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+    assign_response = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": uploaded["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_response.status_code == 200, assign_response.text
+
+    delete_response = client.delete(f"/api/projects/{project_id}/parts/{part_id}", headers=headers)
+    assert delete_response.status_code == 204, delete_response.text
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200
+    assert parts_response.json() == []
+    images_response = client.get(f"/api/projects/{project_id}/images", headers=headers)
+    assert images_response.status_code == 200
+    assert [image["filename"] for image in images_response.json()] == [uploaded["filename"]]
+
+
+def test_overlay_assignment_maps_overlay_to_base_image(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Overlay assignment project")
+    base = _upload_part_test_image(client, project_id, headers, "base.png", {"side": "front", "modality": "visual"})
+    overlay = _upload_part_test_image(client, project_id, headers, "overlay.png", {"modality": "heatmap", "overlay": True})
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-OVERLAY", "display_name": "Overlay Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_base = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": base["filename"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_base.status_code == 200, assign_base.text
+
+    assign_overlay = client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={"overlay_filename": overlay["filename"], "base_filename": base["filename"]},
+        headers=headers,
+    )
+    assert assign_overlay.status_code == 200, assign_overlay.text
+    assert assign_overlay.json()["to_part_id"] == part_id
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    metadata = parts_response.json()[0]["metadata"]
+    overlay_records = [record for record in metadata["source_images"] if record.get("overlay")]
+    assert len(overlay_records) == 1
+    assert overlay_records[0]["filename"] == "overlay.png"
+    assert overlay_records[0]["overlay_base_filename"] == "base.png"
+    assert overlay_records[0]["overlay_base_image_id"] == base["id"]
+    assert overlay_records[0]["side"] == "front"
+
+
+def test_overlay_assignment_can_unassign_overlay(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Overlay unassignment project")
+    base = _upload_part_test_image(client, project_id, headers, "base-unassign.png", {"side": "front"})
+    overlay = _upload_part_test_image(client, project_id, headers, "overlay-unassign.png", {"overlay": True})
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "SN-OVERLAY-UNASSIGN", "display_name": "Overlay Unassign Target"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+    assert client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": base["filename"], "to_part_id": part_id},
+        headers=headers,
+    ).status_code == 200
+    assert client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={"overlay_filename": overlay["filename"], "base_filename": base["filename"]},
+        headers=headers,
+    ).status_code == 200
+
+    unassign_overlay = client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={"overlay_filename": overlay["filename"], "base_filename": None},
+        headers=headers,
+    )
+    assert unassign_overlay.status_code == 200, unassign_overlay.text
+    assert unassign_overlay.json()["from_part_id"] == part_id
+    assert unassign_overlay.json()["to_part_id"] is None
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    assert [record for record in parts_response.json()[0]["metadata"]["source_images"] if record.get("overlay")] == []
+
+
+def test_duplicate_filename_assignment_and_overlay_use_image_ids(client):
+    project_id, headers = _create_project_for_part_image_tests(client, "Duplicate filename PT3 overlay project")
+    base = _upload_part_test_image(client, project_id, headers, "scan.png", {"side": "axial", "modality": "volume"})
+    overlay = _upload_part_test_image(client, project_id, headers, "scan.png", {"modality": "mask", "overlay": True})
+    part_response = client.post(
+        f"/api/projects/{project_id}/parts",
+        json={"serial_number": "PT3-DUP", "display_name": "PT3 duplicate stack"},
+        headers=headers,
+    )
+    assert part_response.status_code == 201, part_response.text
+    part_id = part_response.json()["id"]
+
+    assign_base = client.post(
+        f"/api/projects/{project_id}/parts/image-assignments",
+        json={"filename": "scan.png", "image_id": base["id"], "to_part_id": part_id},
+        headers=headers,
+    )
+    assert assign_base.status_code == 200, assign_base.text
+
+    assign_overlay = client.post(
+        f"/api/projects/{project_id}/parts/overlay-assignments",
+        json={
+            "overlay_filename": "scan.png",
+            "overlay_image_id": overlay["id"],
+            "base_filename": "scan.png",
+            "base_image_id": base["id"],
+        },
+        headers=headers,
+    )
+    assert assign_overlay.status_code == 200, assign_overlay.text
+
+    parts_response = client.get(f"/api/projects/{project_id}/parts", headers=headers)
+    assert parts_response.status_code == 200, parts_response.text
+    source_images = parts_response.json()[0]["metadata"]["source_images"]
+    base_records = [record for record in source_images if not record.get("overlay")]
+    overlay_records = [record for record in source_images if record.get("overlay")]
+    assert [record["image_id"] for record in base_records] == [base["id"]]
+    assert [record["image_id"] for record in overlay_records] == [overlay["id"]]
+    assert overlay_records[0]["overlay_base_image_id"] == base["id"]

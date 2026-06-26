@@ -1,10 +1,43 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import MetadataEditDialog from './MetadataEditDialog';
 
 function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError }) {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState(null);
   const [editingValue, setEditingValue] = useState('');
+  const [projectMetadata, setProjectMetadata] = useState({});
+  const [projectMetadataLoading, setProjectMetadataLoading] = useState(false);
+
+
+  useEffect(() => {
+    const projectId = image?.project_id;
+    if (!projectId) {
+      setProjectMetadata({});
+      return undefined;
+    }
+
+    let cancelled = false;
+    setProjectMetadataLoading(true);
+    fetch(`/api/projects/${projectId}/metadata-dict`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        return response.json();
+      })
+      .then((payload) => {
+        if (!cancelled) setProjectMetadata(payload && typeof payload === 'object' ? payload : {});
+      })
+      .catch((error) => {
+        console.error('Error loading project metadata:', error);
+        if (!cancelled) setProjectMetadata({});
+      })
+      .finally(() => {
+        if (!cancelled) setProjectMetadataLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [image?.project_id]);
 
   // Helper function to format file size
   const formatFileSize = (bytes) => {
@@ -182,6 +215,7 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
   const customMetadata = image?.metadata || image?.metadata_ || {};
   const hasCustomMetadata = Object.keys(customMetadata).length > 0;
+  const hasProjectMetadata = Object.keys(projectMetadata).length > 0;
 
   return (
     <div className="card" id="metadata-container">
@@ -230,44 +264,78 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
             </div>
 
             {hasCustomMetadata ? (
-              <table className="metadata-table custom-metadata-table">
-                <tbody>
-                  {Object.entries(customMetadata).map(([key, value]) => (
-                    <tr key={key}>
-                      <td className="metadata-label">{key}</td>
-                      <td className="metadata-value">
-                        <div className="metadata-value-content">
-                          {value === null ? (
-                            <span className="metadata-null">null</span>
-                          ) : typeof value === 'object' ? (
-                            <pre>{JSON.stringify(value, null, 2)}</pre>
-                          ) : (
-                            value.toString()
-                          )}
-                        </div>
-                        <div className="metadata-actions">
-                          <button
-                            className="btn btn-small"
-                            onClick={() => handleOpenEditDialog(key, value)}
-                            disabled={loading}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-small btn-danger"
-                            onClick={() => handleDeleteMetadata(key)}
-                            disabled={loading}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="custom-metadata-scroll" tabIndex="0" aria-label="Custom metadata fields">
+                <table className="metadata-table custom-metadata-table">
+                  <tbody>
+                    {Object.entries(customMetadata).map(([key, value]) => (
+                      <tr key={key}>
+                        <td className="metadata-label">{key}</td>
+                        <td className="metadata-value">
+                          <div className="metadata-value-content">
+                            {value === null ? (
+                              <span className="metadata-null">null</span>
+                            ) : typeof value === 'object' ? (
+                              <pre>{JSON.stringify(value, null, 2)}</pre>
+                            ) : (
+                              value.toString()
+                            )}
+                          </div>
+                          <div className="metadata-actions">
+                            <button
+                              className="btn btn-small"
+                              onClick={() => handleOpenEditDialog(key, value)}
+                              disabled={loading}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-small btn-danger"
+                              onClick={() => handleDeleteMetadata(key)}
+                              disabled={loading}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <p className="no-metadata-message">No custom metadata available</p>
+            )}
+
+            <div className="custom-metadata-header">
+              <h3>Project Metadata</h3>
+            </div>
+            {projectMetadataLoading ? (
+              <p>Loading project metadata...</p>
+            ) : hasProjectMetadata ? (
+              <div className="custom-metadata-scroll" tabIndex="0" aria-label="Project metadata fields">
+                <table className="metadata-table custom-metadata-table">
+                  <tbody>
+                    {Object.entries(projectMetadata).map(([key, value]) => (
+                      <tr key={key}>
+                        <td className="metadata-label">{key}</td>
+                        <td className="metadata-value">
+                          <div className="metadata-value-content">
+                            {value === null ? (
+                              <span className="metadata-null">null</span>
+                            ) : typeof value === 'object' ? (
+                              <pre>{JSON.stringify(value, null, 2)}</pre>
+                            ) : (
+                              value.toString()
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="no-metadata-message">No project metadata available</p>
             )}
           </>
         ) : (

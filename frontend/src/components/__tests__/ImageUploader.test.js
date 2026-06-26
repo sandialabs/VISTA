@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import ImageUploader, { buildInspectionPartIngestPayload } from '../ImageUploader';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import ImageUploader, { buildDuplicateFilenameMap, buildInspectionPartIngestPayload, formatUploadSize, parseAssociatedMetadataText, tagDuplicateFilename } from '../ImageUploader';
 
 const makeFile = (name) => new File(['data'], name, { type: 'image/png' });
 
@@ -23,9 +23,90 @@ function renderUploader(props = {}) {
 
 beforeEach(() => {
   jest.restoreAllMocks();
+  jest.useRealTimers();
 });
 
 describe('ImageUploader', () => {
+
+  describe('Duplicate filename tagging', () => {
+    test('tags selected duplicate filenames before extension', () => {
+      const first = makeFile('overlay.png');
+      const second = makeFile('overlay.png');
+      const third = makeFile('overlay.png');
+      const filenameMap = buildDuplicateFilenameMap([first, second, third]);
+
+      expect(tagDuplicateFilename('part.tif', 1)).toBe('part (duplicate).tif');
+      expect(formatUploadSize(1024 ** 2)).toBe('1.00 MB');
+      expect(formatUploadSize(1024 ** 3)).toBe('1.00 GB');
+      expect(filenameMap.get(first)).toBe('overlay.png');
+      expect(filenameMap.get(second)).toBe('overlay (duplicate).png');
+      expect(filenameMap.get(third)).toBe('overlay (duplicate 2).png');
+    });
+
+    test('uploads duplicate selections with duplicate tags and original filename metadata', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (url) => {
+        if (String(url).includes('/ingest')) return { ok: true, json: async () => ({}) };
+        return { ok: true, json: async () => ({ id: `img-${fetchSpy.mock.calls.length}` }) };
+      });
+
+      renderUploader();
+      selectFiles([makeFile('overlay.png'), makeFile('overlay.png')]);
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      });
+
+      const firstBody = fetchSpy.mock.calls[0][1].body;
+      const secondBody = fetchSpy.mock.calls[1][1].body;
+      expect(firstBody.get('file').name).toBe('overlay.png');
+      expect(firstBody.get('metadata')).toBeNull();
+      expect(secondBody.get('file').name).toBe('overlay (duplicate).png');
+      expect(JSON.parse(secondBody.get('metadata'))).toMatchObject({
+        original_filename: 'overlay.png',
+        duplicate_filename_tagged: true,
+      });
+    });
+
+
+    test('reports selected upload data size and refreshes byte progress every five seconds', async () => {
+      jest.useFakeTimers();
+      const firstUpload = {};
+      const secondUpload = {};
+      firstUpload.promise = new Promise((resolve) => { firstUpload.resolve = resolve; });
+      secondUpload.promise = new Promise((resolve) => { secondUpload.resolve = resolve; });
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockReturnValueOnce(firstUpload.promise)
+        .mockReturnValueOnce(secondUpload.promise);
+
+      renderUploader();
+      selectFiles([
+        new File(['a'.repeat(1024)], 'small.png', { type: 'image/png' }),
+        new File(['b'.repeat(2048)], 'large.png', { type: 'image/png' }),
+      ]);
+
+      expect(screen.getByText('2 files selected (3.00 KB)')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+      expect(screen.getByText('0 B / 3.00 KB uploaded')).toBeInTheDocument();
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        firstUpload.resolve({ ok: true, json: async () => ({ id: 'img-small', filename: 'small.png' }) });
+        await Promise.resolve();
+      });
+      expect(screen.getByText('0 B / 3.00 KB uploaded')).toBeInTheDocument();
+
+      await act(async () => {
+        jest.advanceTimersByTime(5000);
+      });
+      expect(screen.getByText('1.00 KB / 3.00 KB uploaded')).toBeInTheDocument();
+
+      await act(async () => {
+        secondUpload.resolve({ ok: true, json: async () => ({ id: 'img-large', filename: 'large.png' }) });
+        await Promise.resolve();
+      });
+    });
+  });
   describe('Upload button disabled state', () => {
     test('upload button is enabled by default', () => {
       renderUploader();
@@ -122,6 +203,111 @@ describe('ImageUploader', () => {
     });
   });
 
+
+
+  describe('S3 file loading', () => {
+    test('lists S3 files and imports the selected files', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            bucket: 'source-bucket',
+            prefix: 'incoming',
+            objects: [
+              { key: 'incoming/a.png', filename: 'a.png', size: 12 },
+              { key: 'incoming/b.png', filename: 'b.png', size: 34 },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            imported: [{ id: 'img-a', filename: 'a.png' }],
+            failed: [],
+          }),
+        });
+      const { props } = renderUploader();
+
+      fireEvent.change(screen.getByLabelText('S3 URL (Optional)'), {
+        target: { value: 's3://source-bucket/incoming' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /load files from s3/i }));
+
+      expect(await screen.findByTestId('s3-file-picker')).toBeInTheDocument();
+      expect(screen.getByText('a.png')).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText(/b\.png/i));
+      fireEvent.click(screen.getByRole('button', { name: /load selected s3 files/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(fetchSpy.mock.calls[0][0]).toBe('/api/projects/proj-1/s3/list');
+      expect(JSON.parse(fetchSpy.mock.calls[0][1].body)).toEqual({ s3_url: 's3://source-bucket/incoming' });
+      expect(fetchSpy.mock.calls[1][0]).toBe('/api/projects/proj-1/s3/import');
+      expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).toEqual({
+        s3_url: 's3://source-bucket/incoming',
+        keys: ['incoming/a.png'],
+        per_file_metadata: {},
+        group_identifiers: {},
+      });
+      expect(props.onUploadComplete).toHaveBeenCalledWith([{ id: 'img-a', filename: 'a.png' }]);
+      expect(props.setError).toHaveBeenCalledWith(null);
+    });
+
+    test('loads S3 hierarchy filenames with extracted metadata and ingest payload', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            objects: [
+              {
+                key: 'incoming/D1001_LOT01_SET01_SN0001_front_visual_false.jpg',
+                filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg',
+                size: 12,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            imported: [{ id: 'img-front', filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg' }],
+            failed: [],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }),
+        });
+
+      renderUploader();
+      fireEvent.change(screen.getByLabelText('S3 URL (Optional)'), {
+        target: { value: 's3://source-bucket/incoming' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /load files from s3/i }));
+
+      await screen.findByTestId('s3-file-picker');
+      await waitFor(() => expect(screen.getByLabelText('Delimiter')).toHaveValue('_'));
+      fireEvent.click(screen.getByRole('button', { name: /load selected s3 files/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      expect(JSON.parse(fetchSpy.mock.calls[1][1].body).per_file_metadata).toEqual({
+        'incoming/D1001_LOT01_SET01_SN0001_front_visual_false.jpg': {
+          design_number: 'D1001',
+          lot_number: 'LOT01',
+          set_number: 'SET01',
+          serial_number: 'SN0001',
+          side: 'front',
+          modality: 'visual',
+          overlay: false,
+        },
+      });
+      expect(fetchSpy.mock.calls[2][0]).toBe('/api/projects/proj-1/ingest');
+      expect(JSON.parse(fetchSpy.mock.calls[2][1].body).unassigned_parts[0]).toEqual(expect.objectContaining({
+        serial_number: 'SN0001',
+        display_name: 'D1001 LOT01 SET01 SN0001',
+      }));
+    });
+  });
+
   describe('Load Test Data', () => {
     test.each([
       ['PT1', 16, 4],
@@ -197,6 +383,39 @@ describe('ImageUploader', () => {
         expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/load-test-data', { method: 'POST' });
       });
       expect(props.setError).toHaveBeenCalledWith('Failed to load PT3 test data. PT3 test stack not found');
+    });
+  });
+
+  describe('Project-level metadata loading', () => {
+    test('loads a selected metadata file without uploading images', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ key: 'saved' }),
+      });
+      const onProjectMetadataLoaded = jest.fn();
+      renderUploader({ onProjectMetadataLoaded });
+
+      const metadataInput = screen.getByLabelText(/metadata file/i);
+      const metadataFile = new File([JSON.stringify({ operator: 'qa', lot: 42 })], 'project.json', {
+        type: 'application/json',
+      });
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/parsed project\.json/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /load metadata/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      expect(fetchSpy.mock.calls[0][0]).toBe('/api/projects/proj-1/metadata');
+      expect(fetchSpy.mock.calls[0][1].method).toBe('POST');
+      const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(payload.key).toMatch(/^associated_upload_metadata:project\.json:/);
+      expect(payload.value.metadata).toEqual({ operator: 'qa', lot: 42 });
+      expect(await screen.findByText(/Loaded project\.json as project metadata/i)).toBeInTheDocument();
+      expect(onProjectMetadataLoaded).toHaveBeenCalledWith(expect.objectContaining({
+        filename: 'project.json',
+        reference_type: 'project_metadata',
+      }));
     });
   });
 
@@ -343,6 +562,122 @@ describe('ImageUploader', () => {
         { id: 'img-back', filename: 'D1001_LOT01_SET01_SN0001_back_visual_false.jpg' },
       ]);
     });
+
+    test('uses saved filename hierarchy abbreviations to decode uploaded filenames into inspection parts', async () => {
+      const projectConfiguration = {
+        file_naming_scheme: {
+          hierarchy_levels: [
+            { id: 'drawing_number', label: 'Drawing', abbreviation: 'DWG' },
+            { id: 'lot_number', label: 'Lot', abbreviation: 'LT' },
+            { id: 'part_number', label: 'Part', abbreviation: 'PN' },
+            { id: 'serial_number', label: 'Serial', abbreviation: 'SN' },
+          ],
+          image_descriptors: [
+            { id: 'view', label: 'View', abbreviation: 'VW' },
+            { id: 'modality', label: 'Modality', abbreviation: 'MD' },
+          ],
+        },
+      };
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-left', filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-right', filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 }, discrepancies: [] }) });
+
+      renderUploader({ projectConfiguration });
+      selectFiles([
+        makeFile('DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png'),
+        makeFile('DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png'),
+      ]);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Delimiter')).toHaveValue('_');
+        expect(screen.getByLabelText('Keys (comma-separated)')).toHaveValue('design_number, lot_number, set_number, serial_number, side, modality, overlay');
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      expect(JSON.parse(fetchSpy.mock.calls[0][1].body.get('metadata'))).toEqual(expect.objectContaining({
+        design_number: '100',
+        lot_number: '22',
+        set_number: '7',
+        serial_number: '9',
+        side: 'left',
+        modality: 'visual',
+        overlay: false,
+      }));
+      expect(JSON.parse(fetchSpy.mock.calls[2][1].body)).toEqual({
+        batches: [],
+        unassigned_parts: [
+          expect.objectContaining({
+            serial_number: '9',
+            display_name: '100 22 7 9',
+            metadata: expect.objectContaining({
+              design_number: '100',
+              lot_number: '22',
+              set_number: '7',
+              serial_number: '9',
+              configured_views: ['left', 'right'],
+              modalities: ['thermal', 'visual'],
+              view_images: {
+                left: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png',
+                right: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png',
+              },
+              source_images: expect.arrayContaining([
+                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png', image_id: 'img-left' }),
+                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png', image_id: 'img-right' }),
+              ]),
+            }),
+          }),
+        ],
+      });
+    });
+
+    test('supports hyphen-delimited batch naming convention from saved filename hierarchy', async () => {
+      const projectConfiguration = {
+        file_naming_scheme: {
+          hierarchy_levels: [
+            { id: 'drawing_number', label: 'Drawing', abbreviation: 'D' },
+            { id: 'lot_number', label: 'Lot', abbreviation: 'L' },
+            { id: 'batch', label: 'Batch', abbreviation: 'B' },
+            { id: 'serial_number', label: 'Serial', abbreviation: 'S' },
+          ],
+          image_descriptors: [
+            { id: 'view', label: 'View', abbreviation: 'V' },
+            { id: 'modality', label: 'Modality', abbreviation: 'M' },
+          ],
+        },
+      };
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-front', filename: 'D200-L03-B55-S888-Vfront-Mvisual-false.jpg' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 }, discrepancies: [] }) });
+
+      renderUploader({ projectConfiguration });
+      selectFiles([makeFile('D200-L03-B55-S888-Vfront-Mvisual-false.jpg')]);
+
+      await waitFor(() => expect(screen.getByLabelText('Delimiter')).toHaveValue('-'));
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).toEqual({
+        batches: [
+          expect.objectContaining({
+            name: '200_03_55',
+            parts: [
+              expect.objectContaining({
+                serial_number: '888',
+                metadata: expect.objectContaining({
+                  batch_number: '55',
+                  view_images: { front: 'D200-L03-B55-S888-Vfront-Mvisual-false.jpg' },
+                }),
+              }),
+            ],
+          }),
+        ],
+        unassigned_parts: [],
+      });
+    });
+
   });
 
   describe('buildInspectionPartIngestPayload', () => {
@@ -435,6 +770,55 @@ describe('ImageUploader', () => {
           },
         },
       }));
+    });
+
+
+
+    test('preserves arbitrary image version fields and links configured overlay images to base filenames', () => {
+      const payload = buildInspectionPartIngestPayload([
+        {
+          image: { id: 'img-base', filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png' },
+          metadata: {
+            design_number: 'D100',
+            lot_number: 'LOT01',
+            set_number: 'SET01',
+            serial_number: 'SN0001',
+            side: 'front',
+            modality: 'visual',
+            version: 'v1',
+            overlay: false,
+          },
+        },
+        {
+          image: { id: 'img-overlay', filename: 'D100_LOT01_SET01_SN0001_front_visual_v1_overlay.png' },
+          metadata: {
+            design_number: 'D100',
+            lot_number: 'LOT01',
+            set_number: 'SET01',
+            serial_number: 'SN0001',
+            side: 'front',
+            modality: 'visual',
+            version: 'v1',
+            overlay: true,
+            overlay_base_filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png',
+          },
+        },
+      ]);
+
+      expect(payload.unassigned_parts[0].metadata.source_images).toEqual(expect.arrayContaining([
+        expect.objectContaining({ filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png', image_id: 'img-base', version: 'v1' }),
+        expect.objectContaining({
+          filename: 'D100_LOT01_SET01_SN0001_front_visual_v1_overlay.png',
+          image_id: 'img-overlay',
+          overlay: true,
+          overlay_base_filename: 'D100_LOT01_SET01_SN0001_front_visual_v1.png',
+          version: 'v1',
+        }),
+      ]));
+      expect(payload.unassigned_parts[0].metadata.filename_identifiers).toEqual({ version: 'v1' });
+      expect(payload.unassigned_parts[0].metadata.overlay_images).toEqual({
+        front: { visual: 'D100_LOT01_SET01_SN0001_front_visual_v1_overlay.png' },
+      });
     });
 
     test('groups PT3 Build-It stack metadata and maps all images to the part', () => {
@@ -576,4 +960,356 @@ describe('ImageUploader', () => {
       });
     });
   });
+  describe('Associated metadata file upload', () => {
+    test('stores parsed JSON once as project metadata and references it from each uploaded image', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ key: 'stored-metadata' }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: async () => ({ id: 'img-1', filename: 'photo.png' }),
+        });
+
+      renderUploader();
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['{"camera":"A1","exposure":10}'], 'capture.json', { type: 'application/json' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Parsed capture\.json as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(fetchSpy.mock.calls[0][0]).toBe('/api/projects/proj-1/metadata');
+      expect(fetchSpy.mock.calls[0][1].method).toBe('POST');
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.key).toMatch(/^associated_upload_metadata:capture\.json:/);
+      expect(projectMetadataPayload.value).toEqual(expect.objectContaining({
+        kind: 'associated_image_upload_metadata',
+        filename: 'capture.json',
+        file_type: 'json',
+        parser: 'json',
+        metadata: { camera: 'A1', exposure: 10 },
+      }));
+
+      const uploadBody = fetchSpy.mock.calls[1][1].body;
+      const imageMetadata = JSON.parse(uploadBody.get('metadata'));
+      expect(imageMetadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(imageMetadata.associated_metadata).toEqual(expect.objectContaining({
+        reference_type: 'project_metadata',
+        project_metadata_key: projectMetadataPayload.key,
+        filename: 'capture.json',
+        file_type: 'json',
+        parser: 'json',
+      }));
+      expect(imageMetadata.associated_metadata.metadata).toBeUndefined();
+    });
+
+    test('treats a .nsipro selected with image files as associated metadata instead of an upload image', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-nsipro-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-1', filename: 'photo.png' }) });
+
+      renderUploader();
+      const metadataFile = new File(['[capture]\noperator=alice\nexposure=12'], 'scan.nsipro', { type: 'text/plain' });
+      selectFiles([makeFile('photo.png'), metadataFile]);
+
+      expect(await screen.findByText(/Parsed scan\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      expect(screen.getByText(/1 file selected/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.value).toEqual(expect.objectContaining({
+        filename: 'scan.nsipro',
+        file_type: 'nsipro',
+        metadata: { capture: { operator: 'alice', exposure: 12 } },
+      }));
+      const uploadBody = fetchSpy.mock.calls[1][1].body;
+      expect(uploadBody.get('file').name).toBe('photo.png');
+      const imageMetadata = JSON.parse(uploadBody.get('metadata'));
+      expect(imageMetadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(imageMetadata.nsipro_metadata.capture).toEqual({ operator: 'alice', exposure: 12 });
+    });
+
+
+    test('uses a deployment-specific .nsipro fixture to normalize custom fields for ingest', async () => {
+      const deploymentNsiproFixture = [
+        '[Deployment]',
+        'Deployment ID = DEP-42',
+        'Line ID = LINE-7',
+        'Build Number = 118',
+        '[Custom Fields]',
+        'Inspection Lot = LOT-ALPHA',
+        'Operator Badge = QA-17',
+        'Scan Mode = micro CT',
+      ].join('\n');
+
+      expect(parseAssociatedMetadataText(deploymentNsiproFixture, 'deployment-a.nsipro', {
+        projectConfiguration: { metadata_parsers: { nsipro: { parser_id: 'deployment_a' } } },
+      })).toEqual(expect.objectContaining({
+        parser: 'nsipro-key-value',
+        parser_id: 'deployment_a',
+        parser_hash: 'sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb',
+        metadata: {
+          deployment: {
+            deployment_id: 'DEP-42',
+            line_id: 'LINE-7',
+            build_number: 118,
+          },
+          custom_fields: {
+            inspection_lot: 'LOT-ALPHA',
+            operator_badge: 'QA-17',
+            scan_mode: 'micro CT',
+          },
+        },
+      }));
+
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-deployment-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-front', filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }) });
+
+      renderUploader({
+        projectConfiguration: { metadata_parsers: { nsipro: { parser_id: 'deployment_a' } } },
+      });
+      selectFiles([makeFile('D1001_LOT01_SET01_SN0001_front_visual_false.jpg')]);
+      fireEvent.change(screen.getByLabelText('Delimiter'), { target: { value: '_' } });
+      fireEvent.change(screen.getByLabelText('Keys (comma-separated)'), {
+        target: { value: 'design_number, lot_number, set_number, serial_number, side, modality, overlay' },
+      });
+      const metadataFile = new File([deploymentNsiproFixture], 'deployment-a.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Parsed deployment-a\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      const storedMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(storedMetadataPayload.value).toEqual(expect.objectContaining({
+        filename: 'deployment-a.nsipro',
+        file_type: 'nsipro',
+        parser_id: 'deployment_a',
+        metadata: expect.objectContaining({
+          custom_fields: expect.objectContaining({ operator_badge: 'QA-17' }),
+        }),
+      }));
+
+      const imageMetadata = JSON.parse(fetchSpy.mock.calls[1][1].body.get('metadata'));
+      expect(imageMetadata.nsipro_metadata).toEqual(expect.objectContaining({
+        deployment: expect.objectContaining({ deployment_id: 'DEP-42', build_number: 118 }),
+        custom_fields: expect.objectContaining({ inspection_lot: 'LOT-ALPHA', scan_mode: 'micro CT' }),
+      }));
+
+      const ingestPayload = JSON.parse(fetchSpy.mock.calls[2][1].body);
+      const sourceImage = ingestPayload.unassigned_parts[0].metadata.source_images[0];
+      expect(ingestPayload.unassigned_parts[0].metadata.nsipro_metadata.custom_fields.operator_badge).toBe('QA-17');
+      expect(sourceImage.nsipro_metadata).toEqual(expect.objectContaining({
+        deployment: expect.objectContaining({ line_id: 'LINE-7' }),
+        custom_fields: expect.objectContaining({ operator_badge: 'QA-17' }),
+      }));
+    });
+
+    test('adds decoded .nsipro deployment fields to hierarchy ingest payload while preserving lightweight references', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-front', filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }) });
+
+      renderUploader();
+      selectFiles([makeFile('D1001_LOT01_SET01_SN0001_front_visual_false.jpg')]);
+      fireEvent.change(screen.getByLabelText('Delimiter'), { target: { value: '_' } });
+      fireEvent.change(screen.getByLabelText('Keys (comma-separated)'), {
+        target: { value: 'design_number, lot_number, set_number, serial_number, side, modality, overlay' },
+      });
+      const metadataFile = new File([
+        '[deployment]\ndeployment_id=DEP-42\noperator=alice\nfixture=F-7\nraw_content=',
+        'x'.repeat(3000),
+      ], 'deployment.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Parsed deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.value.metadata.deployment).toEqual(expect.objectContaining({
+        deployment_id: 'DEP-42',
+        operator: 'alice',
+        fixture: 'F-7',
+      }));
+
+      const imageMetadata = JSON.parse(fetchSpy.mock.calls[1][1].body.get('metadata'));
+      expect(imageMetadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(imageMetadata.associated_metadata).toEqual(expect.objectContaining({
+        reference_type: 'project_metadata',
+        project_metadata_key: projectMetadataPayload.key,
+        filename: 'deployment.nsipro',
+        file_type: 'nsipro',
+      }));
+      expect(imageMetadata.associated_metadata.metadata).toBeUndefined();
+      expect(imageMetadata.nsipro_metadata).toEqual({
+        deployment: {
+          deployment_id: 'DEP-42',
+          operator: 'alice',
+          fixture: 'F-7',
+        },
+      });
+
+      expect(fetchSpy.mock.calls[2][0]).toBe('/api/projects/proj-1/ingest');
+      const ingestPart = JSON.parse(fetchSpy.mock.calls[2][1].body).unassigned_parts[0];
+      expect(ingestPart.metadata.associated_metadata_ref).toBe(projectMetadataPayload.key);
+      expect(ingestPart.metadata.associated_metadata.metadata).toBeUndefined();
+      expect(ingestPart.metadata.nsipro_metadata.deployment).toEqual(expect.objectContaining({
+        deployment_id: 'DEP-42',
+        operator: 'alice',
+        fixture: 'F-7',
+      }));
+      expect(ingestPart.metadata.nsipro_metadata.deployment.raw_content).toBeUndefined();
+      expect(ingestPart.metadata.source_images[0]).toEqual(expect.objectContaining({
+        associated_metadata_ref: projectMetadataPayload.key,
+        nsipro_metadata: {
+          deployment: {
+            deployment_id: 'DEP-42',
+            operator: 'alice',
+            fixture: 'F-7',
+          },
+        },
+      }));
+    });
+
+    test('adds decoded .nsipro deployment fields to PT3 volume-stack ingest records', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'slice-1', filename: 'slice-001.png' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ project_id: 'proj-1', counters: { parts_created: 1 } }) });
+
+      renderUploader({ projectType: 'PT3' });
+      selectFiles([makeFile('slice-001.png')]);
+      fireEvent.change(screen.getByLabelText('Metadata (Optional JSON)'), {
+        target: { value: JSON.stringify({ volume_stack_id: 'stack-7', serial_number: 'VOL-7', slice_axis: 'z', slice_index: 1, modality: 'ct' }) },
+      });
+      const metadataFile = new File(['[deployment]\ndeployment_id=DEP-PT3\nscanner=CT-9'], 'stack.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Parsed stack\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      expect(fetchSpy.mock.calls[2][0]).toBe('/api/projects/proj-1/ingest');
+      const ingestPayload = JSON.parse(fetchSpy.mock.calls[2][1].body);
+      const pt3Part = ingestPayload.batches[0].parts[0];
+      const projectMetadataKey = JSON.parse(fetchSpy.mock.calls[0][1].body).key;
+      expect(pt3Part.metadata).toEqual(expect.objectContaining({
+        project_type: 'PT3',
+        volume_stack_id: 'stack-7',
+        associated_metadata_ref: projectMetadataKey,
+        nsipro_metadata: { deployment: { deployment_id: 'DEP-PT3', scanner: 'CT-9' } },
+      }));
+      expect(pt3Part.metadata.source_images[0]).toEqual(expect.objectContaining({
+        filename: 'slice-001.png',
+        image_id: 'slice-1',
+        associated_metadata_ref: projectMetadataKey,
+        nsipro_metadata: { deployment: { deployment_id: 'DEP-PT3', scanner: 'CT-9' } },
+      }));
+    });
+
+    test('parses .nsipro key-value metadata files', async () => {
+      expect(parseAssociatedMetadataText('[capture]\noperator=alice\nexposure: 12\nvalid=true', 'scan.nsipro')).toEqual({
+        parser: 'nsipro-key-value',
+        parser_id: 'default',
+        parser_version: '1.0.0',
+        parser_hash: 'sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df',
+        metadata: {
+          capture: {
+            operator: 'alice',
+            exposure: 12,
+            valid: true,
+          },
+        },
+        warnings: [],
+        source_filename: 'scan.nsipro',
+      });
+    });
+
+
+    test('uses project configuration metadata_parsers.nsipro.parser_id for .nsipro association uploads', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ key: 'stored-metadata' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'img-1', filename: 'photo.png' }) });
+
+      renderUploader({
+        projectConfiguration: {
+          metadata_parsers: { nsipro: { parser_id: 'deployment_a' } },
+        },
+      });
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['operator=alice'], 'deployment.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByText(/Parsed deployment\.nsipro as associated_upload_metadata:/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const projectMetadataPayload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(projectMetadataPayload.value).toEqual(expect.objectContaining({
+        filename: 'deployment.nsipro',
+        file_type: 'nsipro',
+        parser: 'nsipro-key-value',
+        parser_id: 'deployment_a',
+        metadata: { operator: 'alice' },
+      }));
+      const imageMetadata = JSON.parse(fetchSpy.mock.calls[1][1].body.get('metadata'));
+      expect(imageMetadata.associated_metadata).toEqual(expect.objectContaining({
+        parser: 'nsipro-key-value',
+        parser_id: 'deployment_a',
+      }));
+    });
+
+    test('fails closed with a clear upload error for unknown configured .nsipro parser ids', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({}) });
+
+      renderUploader({
+        projectConfiguration: {
+          metadata_parsers: { nsipro: { parser_id: 'unknown_deployment' } },
+        },
+      });
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['operator=alice'], 'deployment.nsipro', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Unknown .nsipro parser configured: unknown_deployment.');
+      expect(screen.getByRole('button', { name: /upload images/i })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    test('blocks upload when associated metadata has an unsupported type', async () => {
+      const { props } = renderUploader();
+      selectFiles([makeFile('photo.png')]);
+      const metadataFile = new File(['x'], 'notes.txt', { type: 'text/plain' });
+      const metadataInput = screen.getByLabelText('Metadata File (Optional)');
+      Object.defineProperty(metadataInput, 'files', { value: [metadataFile], configurable: true });
+      fireEvent.change(metadataInput);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Unsupported metadata file type');
+      expect(screen.getByRole('button', { name: /upload images/i })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
+      expect(props.setError).not.toHaveBeenCalledWith(null);
+    });
+  });
+
 });

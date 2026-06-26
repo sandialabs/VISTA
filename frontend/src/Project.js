@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import './App.css';
 
@@ -15,6 +15,8 @@ import ProjectPhaseFlow from './components/ProjectPhaseFlow';
 import ImagesToPartsTab from './components/ImagesToPartsTab';
 import BatchesTab from './components/BatchesTab';
 import RemoveImagesTab from './components/RemoveImagesTab';
+import OverlaysTab from './components/OverlaysTab';
+import ProjectDataMetadataTab from './components/ProjectDataMetadataTab';
 import { resolveCurrentProjectPhase } from './utils/projectPhases';
 import { DEFAULT_INTERFACE_HIERARCHY, loadInterfaceHierarchy } from './utils/interfaceHierarchy';
 
@@ -27,9 +29,11 @@ const MAIN_TAB_DEFINITIONS = {
 };
 const PROJECT_DATA_TABS = {
   load_images: { label: 'Load Images' },
-  batches: { label: 'Batches' },
   images_to_parts: { label: 'Images to Parts' },
-  remove_images: { label: 'Remove Images' },
+  overlays: { label: 'Overlays' },
+  metadata: { label: 'Metadata' },
+  batches: { label: 'Batches' },
+  remove_images: { label: 'Unload Images' },
   recently_deleted: { label: 'Recently Deleted' },
 };
 
@@ -87,6 +91,8 @@ function Project({ currentUserGroups = [] }) {
     payload: null,
   });
   const [inspectionLaunchFilters, setInspectionLaunchFilters] = useState(null);
+  const projectConfigurationPanelRef = useRef(null);
+  const [autosaveTabDelayMessage, setAutosaveTabDelayMessage] = useState('');
 
   const fetchImages = useCallback(async (projId) => {
     const PAGE_SIZE = 200;
@@ -219,9 +225,33 @@ function Project({ currentUserGroups = [] }) {
     };
   }, []);
 
+  const refreshProjectMetadata = useCallback(async () => {
+    const metadataResponse = await fetch(`/api/projects/${id}/metadata-dict`);
+    if (metadataResponse.ok) {
+      const metadataData = await metadataResponse.json();
+      setMetadata(metadataData);
+    }
+  }, [id]);
+
   const handleUploadComplete = useCallback(async () => {
     await refreshProjectCounts();
-  }, [refreshProjectCounts]);
+    await refreshProjectMetadata();
+  }, [refreshProjectCounts, refreshProjectMetadata]);
+
+  const handleMainTabChange = useCallback(async (nextTabKey) => {
+    if (nextTabKey === activeMainTab) return;
+
+    if (activeMainTab === 'project_configuration' && projectConfigurationPanelRef.current?.hasPendingAutosave()) {
+      setAutosaveTabDelayMessage('Autosaving project configuration before changing tabs…');
+      const saved = await projectConfigurationPanelRef.current.flushPendingAutosave('Configuration autosaved.');
+      setAutosaveTabDelayMessage('');
+      if (!saved) {
+        return;
+      }
+    }
+
+    setActiveMainTab(nextTabKey);
+  }, [activeMainTab]);
 
   const refreshRecentlyDeletedOverlays = useCallback(async () => {
     setRecentlyDeletedLoading(true);
@@ -337,7 +367,9 @@ function Project({ currentUserGroups = [] }) {
                 <ImageUploader
                   projectId={id}
                   projectType={project?.project_type}
+                  projectConfiguration={projectConfiguration}
                   onUploadComplete={handleUploadComplete}
+                  onProjectMetadataLoaded={refreshProjectMetadata}
                   setError={setError}
                 />
               </div>
@@ -347,6 +379,7 @@ function Project({ currentUserGroups = [] }) {
                   projectName={project?.name}
                   counts={dataCounts}
                   setError={setError}
+                  onImportComplete={handleUploadComplete}
                 />
               </div>
             </div>
@@ -410,6 +443,28 @@ function Project({ currentUserGroups = [] }) {
         />
       )}
 
+      {activeProjectDataTab === 'overlays' && (
+        <OverlaysTab
+          projectId={id}
+          parts={projectParts}
+          images={projectImages}
+          onAssignmentsChanged={refreshProjectCounts}
+          setError={setError}
+        />
+      )}
+
+      {activeProjectDataTab === 'metadata' && (
+        <ProjectDataMetadataTab
+          projectId={id}
+          metadata={metadata}
+          parts={projectParts}
+          onAssociationsChanged={async () => {
+            await refreshProjectCounts();
+            await refreshProjectMetadata();
+          }}
+          setError={setError}
+        />
+      )}
 
       {activeProjectDataTab === 'remove_images' && (
         <RemoveImagesTab
@@ -489,10 +544,13 @@ function Project({ currentUserGroups = [] }) {
     recentlyDeletedOverlays,
     handleUploadComplete,
     ingestResult,
+    metadata,
     project?.is_archived,
     project?.name,
     project?.project_type,
+    projectConfiguration,
     refreshProjectCounts,
+    refreshProjectMetadata,
     refreshRecentlyDeletedOverlays,
     requestIngestValidation,
     restoreRecentlyDeletedOverlay,
@@ -529,6 +587,7 @@ function Project({ currentUserGroups = [] }) {
             projectType={project?.project_type}
             currentInterfaceLayout={interfaceHierarchy}
             isAdminUser={currentUserGroups.includes('admin') || currentUserGroups.includes('admins')}
+            ref={projectConfigurationPanelRef}
             onConfigurationSaved={(nextConfig) => setProjectConfiguration(nextConfig)}
           />
           {!project?.is_archived && (
@@ -573,7 +632,7 @@ function Project({ currentUserGroups = [] }) {
           className={`project-tab ${activeMainTab === tabKey ? 'active' : ''}`}
           role="tab"
           aria-selected={activeMainTab === tabKey}
-          onClick={() => setActiveMainTab(tabKey)}
+          onClick={() => handleMainTabChange(tabKey)}
         >
           {MAIN_TAB_DEFINITIONS[tabKey]?.label || tabKey}
         </button>
@@ -610,6 +669,12 @@ function Project({ currentUserGroups = [] }) {
         {error && (
           <div className="alert alert-error">
             <strong>Error:</strong> {error}
+          </div>
+        )}
+
+        {autosaveTabDelayMessage && (
+          <div className="alert alert-info" role="status">
+            {autosaveTabDelayMessage}
           </div>
         )}
 

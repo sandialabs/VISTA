@@ -1,7 +1,266 @@
-import React, { useState, useCallback, useRef } from 'react';
-import FilenameMetadataExtractor from './FilenameMetadataExtractor';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import FilenameMetadataExtractor, { applyOverlayIndicatorMetadata, buildConfiguredFilenameFields, extractValues, stripConfiguredAbbreviation, stripExtension } from './FilenameMetadataExtractor';
+import { getConfiguredNsiproParserId, parseNsiproText } from '../metadata/nsiproParsers';
 
 const CONCURRENT_UPLOADS = 6;
+const S3_IMPORT_LIMIT = 100;
+const UPLOAD_PROGRESS_UPDATE_INTERVAL_MS = 5000;
+const BYTES_PER_KIB = 1024;
+const BYTES_PER_MIB = BYTES_PER_KIB ** 2;
+const BYTES_PER_GIB = BYTES_PER_KIB ** 3;
+
+const ASSOCIATED_METADATA_EXTENSIONS = ['.json', '.nsipro'];
+
+export function tagDuplicateFilename(filename = '', occurrence = 0) {
+  const safeFilename = String(filename || 'upload.bin').trim() || 'upload.bin';
+  if (occurrence <= 0) return safeFilename;
+  const dotIndex = safeFilename.lastIndexOf('.');
+  const suffix = occurrence === 1 ? ' (duplicate)' : ` (duplicate ${occurrence})`;
+  if (dotIndex > 0) {
+    return `${safeFilename.slice(0, dotIndex)}${suffix}${safeFilename.slice(dotIndex)}`;
+  }
+  return `${safeFilename}${suffix}`;
+}
+
+export function buildDuplicateFilenameMap(files = []) {
+  const counts = new Map();
+  const mapped = new Map();
+  files.forEach((file, index) => {
+    const filename = file?.name || `upload-${index}.bin`;
+    const occurrence = counts.get(filename) || 0;
+    counts.set(filename, occurrence + 1);
+    mapped.set(file, tagDuplicateFilename(filename, occurrence));
+  });
+  return mapped;
+}
+
+
+export function getUploadItemSizeBytes(item) {
+  return Math.max(0, Number(item?.size) || 0);
+}
+
+export function getTotalUploadSizeBytes(items = []) {
+  return items.reduce((sum, item) => sum + getUploadItemSizeBytes(item), 0);
+}
+
+export function formatUploadSize(bytes = 0) {
+  const safeBytes = Math.max(0, Number(bytes) || 0);
+  if (safeBytes >= BYTES_PER_GIB) return `${(safeBytes / BYTES_PER_GIB).toFixed(2)} GB`;
+  if (safeBytes >= BYTES_PER_MIB) return `${(safeBytes / BYTES_PER_MIB).toFixed(2)} MB`;
+  if (safeBytes >= BYTES_PER_KIB) return `${(safeBytes / BYTES_PER_KIB).toFixed(2)} KB`;
+  return `${safeBytes} B`;
+}
+
+function progressPercent(uploadProgress) {
+  if (!uploadProgress) return 0;
+  const totalBytes = Math.max(0, Number(uploadProgress.totalBytes) || 0);
+  if (totalBytes > 0) {
+    return Math.min(100, Math.round((Math.max(0, Number(uploadProgress.loadedBytes) || 0) / totalBytes) * 100));
+  }
+  const total = Math.max(1, Number(uploadProgress.total) || 0);
+  return Math.min(100, Math.round((Math.max(0, Number(uploadProgress.completed) || 0) / total) * 100));
+}
+
+function progressLabel(uploadProgress) {
+  if (!uploadProgress) return '';
+  const totalBytes = Math.max(0, Number(uploadProgress.totalBytes) || 0);
+  if (totalBytes > 0) {
+    return `${formatUploadSize(uploadProgress.loadedBytes)} / ${formatUploadSize(totalBytes)} uploaded`;
+  }
+  return `${uploadProgress.completed} / ${uploadProgress.total} uploaded`;
+}
+
+function getFileExtension(filename = '') {
+  const normalized = String(filename).toLowerCase();
+  const dotIndex = normalized.lastIndexOf('.');
+  return dotIndex >= 0 ? normalized.slice(dotIndex) : '';
+}
+
+function safeMetadataReferenceName(filename = '') {
+  return String(filename || 'metadata')
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'metadata';
+}
+
+function stableStringHash(value = '') {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash) + value.charCodeAt(index);
+    hash >>>= 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+// Associated .nsipro files are decoded in the frontend before upload ingest so
+// users get immediate validation feedback and the ingest payload can include the
+// parser id/version/hash contract. The backend remains authoritative: ingest
+// dereferences associated_metadata_ref from project metadata, validates parser
+// contract fields in strict mode, and normalizes the persisted .nsipro payload.
+export function parseAssociatedMetadataText(text, filename = '', options = {}) {
+  const extension = getFileExtension(filename);
+  if (!ASSOCIATED_METADATA_EXTENSIONS.includes(extension)) {
+    throw new Error('Unsupported metadata file type. Choose a .json or .nsipro file.');
+  }
+
+  const trimmed = String(text || '').trim();
+  if (!trimmed) {
+    throw new Error('Metadata file is empty.');
+  }
+
+  if (extension === '.json') {
+    try {
+      return { parser: 'json', metadata: JSON.parse(trimmed) };
+    } catch (err) {
+      throw new Error('Invalid JSON metadata file.');
+    }
+  }
+
+  return parseNsiproText(trimmed, filename, options);
+}
+
+
+function isAssociatedMetadataFile(file) {
+  return ASSOCIATED_METADATA_EXTENSIONS.includes(getFileExtension(file?.name));
+}
+
+function readAssociatedMetadataFileText(file) {
+  if (file && typeof file.text === 'function') {
+    return file.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Unable to read metadata file.'));
+    reader.readAsText(file);
+  });
+}
+
+function buildAssociatedMetadataBundle(file, text, parsedResult) {
+  const extension = getFileExtension(file?.name);
+  const contentHash = stableStringHash(`${file?.name || ''}\n${text}`);
+  const key = `associated_upload_metadata:${safeMetadataReferenceName(file?.name)}:${contentHash}`;
+  return {
+    key,
+    value: {
+      kind: 'associated_image_upload_metadata',
+      filename: file?.name || 'metadata',
+      file_type: extension.replace(/^\./, ''),
+      parser: parsedResult.parser,
+      parser_id: parsedResult.parser_id,
+      requested_parser_id: parsedResult.requested_parser_id,
+      parser_version: parsedResult.parser_version,
+      parser_hash: parsedResult.parser_hash,
+      warnings: Array.isArray(parsedResult.warnings) ? parsedResult.warnings : [],
+      source_filename: parsedResult.source_filename || file?.name || 'metadata',
+      content_hash: contentHash,
+      size_bytes: typeof file?.size === 'number' ? file.size : text.length,
+      metadata: parsedResult.metadata,
+    },
+  };
+}
+
+
+
+const RAW_ASSOCIATED_METADATA_KEYS = new Set([
+  'raw',
+  'raw_data',
+  'raw_payload',
+  'raw_content',
+  'file_content',
+  'binary',
+  'bytes',
+]);
+const MAX_ASSOCIATED_METADATA_STRING_LENGTH = 2048;
+
+function sanitizeAssociatedMetadataValue(value, parentKey = '') {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'string') {
+    if (value.length > MAX_ASSOCIATED_METADATA_STRING_LENGTH) {
+      return `${value.slice(0, MAX_ASSOCIATED_METADATA_STRING_LENGTH)}…`;
+    }
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAssociatedMetadataValue(item, parentKey));
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value).reduce((acc, [key, childValue]) => {
+      const normalizedKey = String(key || '').trim().toLowerCase();
+      if (RAW_ASSOCIATED_METADATA_KEYS.has(normalizedKey)) return acc;
+      if ((normalizedKey.includes('raw') || normalizedKey.includes('content')) && typeof childValue === 'string' && childValue.length > MAX_ASSOCIATED_METADATA_STRING_LENGTH) {
+        return acc;
+      }
+      const sanitized = sanitizeAssociatedMetadataValue(childValue, normalizedKey || parentKey);
+      if (sanitized !== undefined) acc[key] = sanitized;
+      return acc;
+    }, {});
+  }
+  return String(value);
+}
+
+function getAssociatedBundleNsiproMetadata(bundle) {
+  if (bundle?.value?.file_type !== 'nsipro') return null;
+  const metadata = bundle.value.metadata;
+  if (!metadata || typeof metadata !== 'object') return null;
+  return sanitizeAssociatedMetadataValue(metadata);
+}
+
+function getRecordNsiproMetadata(recordMetadata) {
+  const candidates = [
+    recordMetadata?.nsipro_metadata,
+    recordMetadata?.nsipro_payload,
+    recordMetadata?.associated_metadata?.nsipro_metadata,
+    recordMetadata?.associated_metadata?.nsipro_payload,
+  ];
+  return candidates.find((candidate) => candidate && typeof candidate === 'object') || null;
+}
+
+function getAssociatedMetadataFields(recordMetadata) {
+  const fields = {};
+  if (recordMetadata?.associated_metadata_ref) {
+    fields.associated_metadata_ref = recordMetadata.associated_metadata_ref;
+  }
+  if (recordMetadata?.associated_metadata && typeof recordMetadata.associated_metadata === 'object') {
+    fields.associated_metadata = recordMetadata.associated_metadata;
+  }
+  return fields;
+}
+
+function getNsiproIngestMetadata(recordMetadata) {
+  const nsiproMetadata = getRecordNsiproMetadata(recordMetadata);
+  return nsiproMetadata ? { nsipro_metadata: nsiproMetadata } : {};
+}
+
+function buildMetadataWithAssociatedReference(baseMetadata, associatedMetadataReference = null, nsiproMetadata = null) {
+  if (!associatedMetadataReference) return baseMetadata;
+  return {
+    ...(baseMetadata || {}),
+    associated_metadata_ref: associatedMetadataReference.project_metadata_key,
+    associated_metadata: associatedMetadataReference,
+    ...(nsiproMetadata ? { nsipro_metadata: nsiproMetadata } : {}),
+  };
+}
+
+function buildAssociatedMetadataImageReference(bundle) {
+  if (!bundle?.key || !bundle?.value) return null;
+  return {
+    reference_type: 'project_metadata',
+    project_metadata_key: bundle.key,
+    filename: bundle.value.filename,
+    file_type: bundle.value.file_type,
+    parser: bundle.value.parser,
+    parser_id: bundle.value.parser_id,
+    requested_parser_id: bundle.value.requested_parser_id,
+    parser_version: bundle.value.parser_version,
+    parser_hash: bundle.value.parser_hash,
+    warnings: Array.isArray(bundle.value.warnings) ? bundle.value.warnings : [],
+    source_filename: bundle.value.source_filename || bundle.value.filename,
+    content_hash: bundle.value.content_hash,
+  };
+}
+
 const HIERARCHY_KEYS = [
   'design_number',
   'lot_number',
@@ -17,18 +276,73 @@ function normalizeBoolean(value) {
   return ['true', '1', 'yes', 'y'].includes(value.trim().toLowerCase());
 }
 
+function firstNonEmptyValue(candidate, keys) {
+  for (const key of keys) {
+    const value = candidate?.[key];
+    if (value !== undefined && value !== null && String(value).trim()) return value;
+  }
+  return '';
+}
+
+
+const RESERVED_INGEST_METADATA_KEYS = new Set([
+  'design_number',
+  'drawing_number',
+  'drawing',
+  'design',
+  'lot_number',
+  'lot',
+  'set_number',
+  'part_number',
+  'part',
+  'part_group',
+  'batch_number',
+  'batch',
+  'serial_number',
+  'serial',
+  'sn',
+  'side',
+  'side_identifier',
+  'view',
+  'view_name',
+  'modality',
+  'image_modality',
+  'overlay',
+  'overlay_base_filename',
+  'base_filename',
+  'overlay_base_image_id',
+  'base_image_id',
+  'associated_metadata_ref',
+  'associated_metadata',
+  'nsipro_metadata',
+  'nsipro_payload',
+]);
+
+function getAdditionalFilenameMetadata(candidate) {
+  if (!candidate || typeof candidate !== 'object') return {};
+  return Object.entries(candidate).reduce((acc, [key, value]) => {
+    if (!key || RESERVED_INGEST_METADATA_KEYS.has(key)) return acc;
+    if (value === undefined || value === null || value === '') return acc;
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
 function normalizeHierarchyMetadata(candidate) {
   if (!candidate || typeof candidate !== 'object') return null;
   const normalized = {
     ...candidate,
-    design_number: String(candidate.design_number || '').trim(),
-    lot_number: String(candidate.lot_number || '').trim(),
-    set_number: String(candidate.set_number || '').trim(),
-    batch_number: String(candidate.batch_number || '').trim(),
-    serial_number: String(candidate.serial_number || '').trim(),
-    side: String(candidate.side || candidate.side_identifier || '').trim().toLowerCase(),
-    modality: String(candidate.modality || '').trim().toLowerCase(),
+    design_number: String(firstNonEmptyValue(candidate, ['design_number', 'drawing_number', 'drawing', 'design'])).trim(),
+    lot_number: String(firstNonEmptyValue(candidate, ['lot_number', 'lot'])).trim(),
+    set_number: String(firstNonEmptyValue(candidate, ['set_number', 'part_number', 'part', 'part_group'])).trim(),
+    batch_number: String(firstNonEmptyValue(candidate, ['batch_number', 'batch'])).trim(),
+    serial_number: String(firstNonEmptyValue(candidate, ['serial_number', 'serial', 'sn'])).trim(),
+    side: String(firstNonEmptyValue(candidate, ['side', 'side_identifier', 'view', 'view_name'])).trim().toLowerCase(),
+    modality: String(firstNonEmptyValue(candidate, ['modality', 'image_modality'])).trim().toLowerCase(),
     overlay: normalizeBoolean(candidate.overlay),
+    overlay_base_filename: String(firstNonEmptyValue(candidate, ['overlay_base_filename', 'base_filename'])).trim(),
+    overlay_base_image_id: String(firstNonEmptyValue(candidate, ['overlay_base_image_id', 'base_image_id'])).trim(),
+    additional_filename_metadata: getAdditionalFilenameMetadata(candidate),
   };
   const hasRequiredHierarchy = HIERARCHY_KEYS
     .filter((key) => key !== 'overlay')
@@ -36,6 +350,9 @@ function normalizeHierarchyMetadata(candidate) {
   if (!hasRequiredHierarchy || (!normalized.set_number && !normalized.batch_number)) return null;
   if (!normalized.set_number) delete normalized.set_number;
   if (!normalized.batch_number) delete normalized.batch_number;
+  if (!normalized.overlay_base_filename) delete normalized.overlay_base_filename;
+  if (!normalized.overlay_base_image_id) delete normalized.overlay_base_image_id;
+  if (Object.keys(normalized.additional_filename_metadata).length === 0) delete normalized.additional_filename_metadata;
   return normalized;
 }
 
@@ -60,6 +377,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
             source: recordMetadata.source || 'manual-build-it',
             project_type: 'PT3',
             volume_stack_id: volumeStackId,
+            ...getAssociatedMetadataFields(recordMetadata),
+            ...getNsiproIngestMetadata(recordMetadata),
             source_images: [],
           },
         });
@@ -72,6 +391,10 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
         slice_index: typeof recordMetadata.slice_index === 'number' ? recordMetadata.slice_index : null,
         modality: recordMetadata.modality || null,
         overlay: normalizeBoolean(recordMetadata.overlay),
+        overlay_base_filename: recordMetadata.overlay_base_filename || null,
+        overlay_base_image_id: recordMetadata.overlay_base_image_id || null,
+        ...getAssociatedMetadataFields(recordMetadata),
+        ...getNsiproIngestMetadata(recordMetadata),
       });
       return;
     }
@@ -93,6 +416,8 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
     const filename = record.image?.filename || record.filename;
     if (!filename) return;
 
+    const additionalFilenameMetadata = metadata.additional_filename_metadata || {};
+
     if (!partsByKey.has(partKey)) {
       partsByKey.set(partKey, {
         batchName,
@@ -109,7 +434,10 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
           modalities: [],
           view_images: {},
           overlay_images: {},
+          ...getAssociatedMetadataFields(metadata),
+          ...getNsiproIngestMetadata(metadata),
           source_images: [],
+          ...(Object.keys(additionalFilenameMetadata).length > 0 ? { filename_identifiers: { ...additionalFilenameMetadata } } : {}),
         },
       });
       if (metadata.set_number) {
@@ -135,6 +463,11 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
       modality,
       overlay: metadata.overlay,
       image_id: record.image?.id || null,
+      overlay_base_filename: metadata.overlay_base_filename || null,
+      overlay_base_image_id: metadata.overlay_base_image_id || null,
+      ...getAssociatedMetadataFields(metadata),
+      ...getNsiproIngestMetadata(metadata),
+      ...additionalFilenameMetadata,
     });
     if (metadata.overlay) {
       part.metadata.overlay_images[side] = {
@@ -187,35 +520,219 @@ export function buildInspectionPartIngestPayload(uploadedRecords) {
   };
 }
 
-function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setError }) {
+function buildSavedFilenameExtractorConfig(projectConfiguration) {
+  const scheme = projectConfiguration?.file_naming_scheme || {};
+  const extractor = scheme.metadata_extractor || {};
+  const mode = extractor.mode === 'advanced' ? 'advanced' : 'simple';
+  const pattern = String(extractor.pattern || extractor.delimiter || scheme.delimiter || '');
+  const keys = Array.isArray(extractor.keys) ? extractor.keys.filter(Boolean) : [];
+  const configuredFields = buildConfiguredFilenameFields(scheme);
+  const isValid = pattern.length === 0 || keys.length > 0;
+
+  return {
+    isValid,
+    hasPattern: pattern.length > 0,
+    keys,
+    extractMetadata: (filename) => {
+      if (!pattern || keys.length === 0) return null;
+      const stem = stripExtension(filename);
+      const { values, error } = extractValues(stem, mode, pattern);
+      if (error || values.length !== keys.length) return null;
+      const obj = {};
+      keys.forEach((key, index) => {
+        const field = configuredFields[index];
+        obj[key] = mode === 'simple' ? stripConfiguredAbbreviation(values[index], field) : values[index];
+      });
+      return applyOverlayIndicatorMetadata(filename, obj, values, keys, mode, pattern, scheme);
+    },
+  };
+}
+
+function ImageUploader({ projectId, projectType = 'PT1', projectConfiguration = null, onUploadComplete, onProjectMetadataLoaded, setError }) {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadMetadata, setUploadMetadata] = useState('');
+  const [associatedMetadataFile, setAssociatedMetadataFile] = useState(null);
+  const [associatedMetadataBundle, setAssociatedMetadataBundle] = useState(null);
+  const [associatedMetadataParsing, setAssociatedMetadataParsing] = useState(false);
+  const [associatedMetadataSaving, setAssociatedMetadataSaving] = useState(false);
+  const [associatedMetadataSaved, setAssociatedMetadataSaved] = useState(null);
+  const [associatedMetadataError, setAssociatedMetadataError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [extractorConfig, setExtractorConfig] = useState({
-    isValid: true,
-    hasPattern: false,
-    extractMetadata: () => null,
-    keys: [],
-  });
+  const savedExtractorConfig = useMemo(
+    () => buildSavedFilenameExtractorConfig(projectConfiguration),
+    [projectConfiguration],
+  );
+  const [legacyExtractorConfig, setLegacyExtractorConfig] = useState(null);
+  const extractorConfig = legacyExtractorConfig || savedExtractorConfig;
+  const nsiproParserId = useMemo(
+    () => getConfiguredNsiproParserId(projectConfiguration),
+    [projectConfiguration],
+  );
   const [groupKey, setGroupKey] = useState('');
   const [uploading, setUploading] = useState(false);
   const [loadingTestData, setLoadingTestData] = useState(false);
   const [testDataResult, setTestDataResult] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
+  const [s3Url, setS3Url] = useState('');
+  const [s3Objects, setS3Objects] = useState([]);
+  const [selectedS3Keys, setSelectedS3Keys] = useState([]);
+  const [loadingS3Files, setLoadingS3Files] = useState(false);
+  const [importingS3Files, setImportingS3Files] = useState(false);
+  const [s3PickerOpen, setS3PickerOpen] = useState(false);
   const cancelledRef = useRef(false);
+  const uploadProgressRef = useRef(null);
+  const uploadProgressTimerRef = useRef(null);
+
+  const clearUploadProgressTimer = useCallback(() => {
+    if (uploadProgressTimerRef.current) {
+      clearInterval(uploadProgressTimerRef.current);
+      uploadProgressTimerRef.current = null;
+    }
+  }, []);
+
+  const setUploadProgressSnapshot = useCallback((snapshot, { flush = false } = {}) => {
+    uploadProgressRef.current = snapshot;
+    if (flush) {
+      setUploadProgress(snapshot);
+    }
+  }, []);
+
+  const beginUploadProgress = useCallback((initialProgress) => {
+    clearUploadProgressTimer();
+    setUploadProgressSnapshot(initialProgress, { flush: true });
+    uploadProgressTimerRef.current = setInterval(() => {
+      if (uploadProgressRef.current) {
+        setUploadProgress({ ...uploadProgressRef.current });
+      }
+    }, UPLOAD_PROGRESS_UPDATE_INTERVAL_MS);
+  }, [clearUploadProgressTimer, setUploadProgressSnapshot]);
+
+  const finishUploadProgress = useCallback(() => {
+    clearUploadProgressTimer();
+    uploadProgressRef.current = null;
+    setUploadProgress(null);
+  }, [clearUploadProgressTimer]);
+
+  useEffect(() => () => {
+    clearUploadProgressTimer();
+  }, [clearUploadProgressTimer]);
+
+  const extractorPreviewFiles = selectedFiles.length > 0
+    ? selectedFiles
+    : s3Objects.map((object) => ({ name: object.filename || object.key }));
 
   const handleExtractorChange = useCallback((config) => {
-    setExtractorConfig(config);
-    // If selected group key is no longer in the keys list, clear it
+    setLegacyExtractorConfig(config);
     if (groupKey && config.keys && !config.keys.includes(groupKey)) {
       setGroupKey('');
     }
   }, [groupKey]);
 
+  useEffect(() => {
+    if (groupKey && !extractorConfig.keys.includes(groupKey)) {
+      setGroupKey('');
+    }
+  }, [extractorConfig.keys, groupKey]);
+
+  const handleAssociatedMetadataFileChange = async (e) => {
+    await applyAssociatedMetadataFile(e.target.files && e.target.files[0]);
+  };
+
+  const applyAssociatedMetadataFile = useCallback(async (file) => {
+    setAssociatedMetadataFile(file || null);
+    setAssociatedMetadataBundle(null);
+    setAssociatedMetadataError(null);
+    setAssociatedMetadataSaved(null);
+    if (!file) return;
+
+    if (!isAssociatedMetadataFile(file)) {
+      setAssociatedMetadataError('Unsupported metadata file type. Choose a .json or .nsipro file.');
+      return;
+    }
+
+    setAssociatedMetadataParsing(true);
+    try {
+      const text = await readAssociatedMetadataFileText(file);
+      const parsedResult = parseAssociatedMetadataText(text, file.name, {
+        parserId: nsiproParserId,
+        projectConfiguration,
+        failClosed: true,
+      });
+      setAssociatedMetadataBundle(buildAssociatedMetadataBundle(file, text, parsedResult));
+    } catch (err) {
+      setAssociatedMetadataError(err?.message || 'Unable to parse associated metadata file.');
+    } finally {
+      setAssociatedMetadataParsing(false);
+    }
+  }, [nsiproParserId, projectConfiguration]);
+
+  const applySelectedUploadFiles = useCallback(async (files) => {
+    const fileList = Array.from(files || []);
+    const metadataFile = fileList.find(isAssociatedMetadataFile) || null;
+    const uploadFiles = fileList.filter((file) => file !== metadataFile);
+    setSelectedFiles(uploadFiles);
+    if (metadataFile) {
+      await applyAssociatedMetadataFile(metadataFile);
+    }
+  }, [applyAssociatedMetadataFile]);
+
+  const saveAssociatedMetadataBundle = useCallback(async () => {
+    if (!associatedMetadataFile) return null;
+    if (associatedMetadataParsing) {
+      throw new Error('Associated metadata file is still being parsed.');
+    }
+    if (associatedMetadataError || !associatedMetadataBundle) {
+      throw new Error(associatedMetadataError || 'Associated metadata file could not be parsed.');
+    }
+
+    const response = await fetch(`/api/projects/${projectId}/metadata`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: associatedMetadataBundle.key,
+        value: associatedMetadataBundle.value,
+      }),
+    });
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const payload = await response.json();
+        detail = payload?.detail || detail;
+      } catch (parseError) {
+        detail = response.statusText || detail;
+      }
+      throw new Error(detail);
+    }
+    return buildAssociatedMetadataImageReference(associatedMetadataBundle);
+  }, [associatedMetadataBundle, associatedMetadataError, associatedMetadataFile, associatedMetadataParsing, projectId]);
+
+
+  const handleLoadAssociatedMetadata = async () => {
+    if (!associatedMetadataFile) {
+      setAssociatedMetadataError('Choose a metadata file before loading metadata.');
+      return;
+    }
+    setAssociatedMetadataSaving(true);
+    setAssociatedMetadataSaved(null);
+    try {
+      const reference = await saveAssociatedMetadataBundle();
+      setAssociatedMetadataSaved(reference);
+      setError(null);
+      if (onProjectMetadataLoaded) {
+        await onProjectMetadataLoaded(reference);
+      }
+    } catch (err) {
+      const detail = err?.message ? ` ${err.message}` : '';
+      setError(`Unable to load metadata file.${detail}`);
+    } finally {
+      setAssociatedMetadataSaving(false);
+    }
+  };
+
   // Handle file input change
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     if (e.target.files) {
-      setSelectedFiles(Array.from(e.target.files));
+      await applySelectedUploadFiles(e.target.files);
     }
   };
 
@@ -230,18 +747,18 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
     setIsDragOver(false);
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files) {
-      setSelectedFiles(Array.from(e.dataTransfer.files));
+      await applySelectedUploadFiles(e.dataTransfer.files);
     }
   };
 
   // Handle file upload
   const handleUpload = async (e) => {
     e.preventDefault();
-    
+
     if (selectedFiles.length === 0) {
       setError('Please select at least one file to upload.');
       return;
@@ -252,7 +769,7 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
       setError('Filename metadata extractor has errors. Please fix them before uploading.');
       return;
     }
-    
+
     // Validate manual metadata JSON if provided
     let manualMetadata = null;
     if (uploadMetadata.trim()) {
@@ -263,16 +780,35 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
         return;
       }
     }
-    
+
     setUploading(true);
     cancelledRef.current = false;
     const total = selectedFiles.length;
-    setUploadProgress({ completed: 0, failed: 0, total });
+    const totalBytes = getTotalUploadSizeBytes(selectedFiles);
+    const uploadFilenameMap = buildDuplicateFilenameMap(selectedFiles);
+    beginUploadProgress({ completed: 0, failed: 0, total, loadedBytes: 0, totalBytes });
+
+    let associatedMetadataReference = null;
+    let associatedMetadataNsiproMetadata = null;
+    if (associatedMetadataFile) {
+      try {
+        associatedMetadataReference = await saveAssociatedMetadataBundle();
+        associatedMetadataNsiproMetadata = getAssociatedBundleNsiproMetadata(associatedMetadataBundle);
+      } catch (err) {
+        const detail = err?.message ? ` ${err.message}` : '';
+        setError(`Unable to associate metadata file.${detail}`);
+        finishUploadProgress();
+        setUploading(false);
+        return;
+      }
+    }
+
 
     const results = [];
     const uploadedRecords = [];
     let completed = 0;
     let failed = 0;
+    let loadedBytes = 0;
 
     // Upload files with bounded concurrency
     const queue = [...selectedFiles];
@@ -283,16 +819,27 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
         if (!file) return;
 
         const formData = new FormData();
-        formData.append('file', file);
+        const uploadFilename = uploadFilenameMap.get(file) || file.name;
+        formData.append('file', file, uploadFilename);
 
         const extractedMetadata = extractorConfig.extractMetadata(file.name);
         const mergedMetadata = (extractedMetadata || manualMetadata)
           ? { ...(extractedMetadata || {}), ...(manualMetadata || {}) }
           : null;
-        const hierarchyMetadata = normalizeHierarchyMetadata(mergedMetadata);
+        const metadataWithAssociatedReference = buildMetadataWithAssociatedReference(
+          mergedMetadata,
+          associatedMetadataReference,
+          associatedMetadataNsiproMetadata,
+        );
+        const hierarchyMetadata = normalizeHierarchyMetadata(metadataWithAssociatedReference);
+        const duplicateMetadata = uploadFilename !== file.name
+          ? { original_filename: file.name, duplicate_filename_tagged: true }
+          : {};
         const metadataForUpload = hierarchyMetadata
-          ? { ...mergedMetadata, ...hierarchyMetadata }
-          : mergedMetadata;
+          ? { ...metadataWithAssociatedReference, ...hierarchyMetadata, ...duplicateMetadata }
+          : (Object.keys(duplicateMetadata).length > 0
+            ? { ...(metadataWithAssociatedReference || {}), ...duplicateMetadata }
+            : metadataWithAssociatedReference);
 
         if (metadataForUpload) {
           formData.append('metadata', JSON.stringify(metadataForUpload));
@@ -314,7 +861,7 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
           results.push(uploadedImage);
           uploadedRecords.push({
             image: uploadedImage,
-            filename: file.name,
+            filename: uploadFilename,
             metadata: metadataForUpload || {},
           });
         } catch (err) {
@@ -322,7 +869,8 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
           failed += 1;
         }
         completed += 1;
-        setUploadProgress({ completed, failed, total });
+        loadedBytes += getUploadItemSizeBytes(file);
+        setUploadProgressSnapshot({ completed, failed, total, loadedBytes, totalBytes });
       }
     };
 
@@ -364,8 +912,229 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
     }
     setSelectedFiles([]);
     setUploadMetadata('');
-    setUploadProgress(null);
+    finishUploadProgress();
     setUploading(false);
+  };
+
+  const getMergedMetadataForName = useCallback((filename, manualMetadata, associatedMetadataReference = null, associatedMetadataNsiproMetadata = null) => {
+    const extractedMetadata = extractorConfig.extractMetadata(filename);
+    const mergedMetadata = (extractedMetadata || manualMetadata)
+      ? { ...(extractedMetadata || {}), ...(manualMetadata || {}) }
+      : null;
+    const metadataWithAssociatedReference = buildMetadataWithAssociatedReference(
+      mergedMetadata,
+      associatedMetadataReference,
+      associatedMetadataNsiproMetadata,
+    );
+    const hierarchyMetadata = normalizeHierarchyMetadata(metadataWithAssociatedReference);
+    return hierarchyMetadata
+      ? { ...metadataWithAssociatedReference, ...hierarchyMetadata }
+      : metadataWithAssociatedReference;
+  }, [extractorConfig]);
+
+  const parseManualMetadata = () => {
+    if (!uploadMetadata.trim()) return null;
+    try {
+      return JSON.parse(uploadMetadata);
+    } catch (err) {
+      setError('Invalid JSON format for metadata.');
+      return undefined;
+    }
+  };
+
+  const handleLoadS3Files = async () => {
+    if (!s3Url.trim()) {
+      setError('Please specify an S3 URL.');
+      return;
+    }
+    setLoadingS3Files(true);
+    setS3Objects([]);
+    setSelectedS3Keys([]);
+    setS3PickerOpen(false);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/s3/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ s3_url: s3Url.trim() }),
+      });
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json();
+          detail = payload?.detail || detail;
+        } catch (parseError) {
+          detail = response.statusText || detail;
+        }
+        throw new Error(detail);
+      }
+      const payload = await response.json();
+      const objects = payload.objects || [];
+      setS3Objects(objects);
+      setSelectedS3Keys(objects.map((object) => object.key).slice(0, S3_IMPORT_LIMIT));
+      setS3PickerOpen(true);
+      setError(objects.length ? null : 'No supported files were found at that S3 URL.');
+    } catch (err) {
+      const detail = err?.message ? ` ${err.message}` : '';
+      setError(`Failed to load files from S3.${detail}`);
+    } finally {
+      setLoadingS3Files(false);
+    }
+  };
+
+  const handleToggleS3Key = (key) => {
+    setSelectedS3Keys((current) => (
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key].slice(0, S3_IMPORT_LIMIT)
+    ));
+  };
+
+  const handleToggleAllS3Keys = () => {
+    setSelectedS3Keys((current) => (
+      current.length === s3Objects.length
+        ? []
+        : s3Objects.map((object) => object.key).slice(0, S3_IMPORT_LIMIT)
+    ));
+  };
+
+  const handleImportS3Files = async () => {
+    if (selectedS3Keys.length === 0) {
+      setError('Please choose at least one S3 file to load.');
+      return;
+    }
+    if (!extractorConfig.isValid) {
+      setError('Filename metadata extractor has errors. Please fix them before loading S3 files.');
+      return;
+    }
+    const manualMetadata = parseManualMetadata();
+    if (manualMetadata === undefined) return;
+
+    let associatedMetadataReference = null;
+    let associatedMetadataNsiproMetadata = null;
+    if (associatedMetadataFile) {
+      try {
+        associatedMetadataReference = await saveAssociatedMetadataBundle();
+        associatedMetadataNsiproMetadata = getAssociatedBundleNsiproMetadata(associatedMetadataBundle);
+      } catch (err) {
+        const detail = err?.message ? ` ${err.message}` : '';
+        setError(`Unable to associate metadata file.${detail}`);
+        return;
+      }
+    }
+
+    setImportingS3Files(true);
+    try {
+      const selectedObjects = s3Objects.filter((object) => selectedS3Keys.includes(object.key));
+      const totalBytes = getTotalUploadSizeBytes(selectedObjects);
+      beginUploadProgress({ completed: 0, failed: 0, total: selectedS3Keys.length, loadedBytes: 0, totalBytes });
+      const perFileMetadata = {};
+      const groupIdentifiers = {};
+      selectedObjects.forEach((object) => {
+        const metadataForUpload = getMergedMetadataForName(
+          object.filename,
+          manualMetadata,
+          associatedMetadataReference,
+          associatedMetadataNsiproMetadata,
+        );
+        if (metadataForUpload) {
+          perFileMetadata[object.key] = metadataForUpload;
+        }
+        const extractedMetadata = extractorConfig.extractMetadata(object.filename);
+        if (groupKey && extractedMetadata && extractedMetadata[groupKey]) {
+          groupIdentifiers[object.key] = extractedMetadata[groupKey];
+        }
+      });
+
+      const response = await fetch(`/api/projects/${projectId}/s3/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          s3_url: s3Url.trim(),
+          keys: selectedS3Keys,
+          per_file_metadata: perFileMetadata,
+          group_identifiers: groupIdentifiers,
+        }),
+      });
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json();
+          detail = payload?.detail || detail;
+        } catch (parseError) {
+          detail = response.statusText || detail;
+        }
+        throw new Error(detail);
+      }
+      const payload = await response.json();
+      const imported = payload.imported || [];
+      const failed = payload.failed || [];
+      const completedKeys = new Set([
+        ...imported.map((item) => item.metadata?.source_s3_key).filter(Boolean),
+        ...imported.map((item) => item.source_s3_key).filter(Boolean),
+        ...failed.map((item) => item.key || item.source_s3_key).filter(Boolean),
+      ]);
+      const completedObjects = completedKeys.size > 0
+        ? selectedObjects.filter((object) => completedKeys.has(object.key))
+        : selectedObjects.slice(0, imported.length + failed.length);
+      setUploadProgressSnapshot({
+        completed: imported.length + failed.length,
+        failed: failed.length,
+        total: selectedS3Keys.length,
+        loadedBytes: getTotalUploadSizeBytes(completedObjects),
+        totalBytes,
+      }, { flush: true });
+
+      let ingestError = null;
+      const uploadedRecords = selectedObjects
+        .map((object) => {
+          const image = imported.find((item) => item.metadata?.source_s3_key === object.key)
+            || imported.find((item) => item.filename === object.filename);
+          if (!image) return null;
+          return {
+            image,
+            filename: object.filename,
+            metadata: perFileMetadata[object.key] || {},
+          };
+        })
+        .filter(Boolean);
+      const ingestPayload = buildInspectionPartIngestPayload(uploadedRecords);
+      const partCount = ingestPayload.batches.reduce((acc, batch) => acc + batch.parts.length, 0)
+        + ingestPayload.unassigned_parts.length;
+      if (partCount > 0) {
+        try {
+          const ingestResponse = await fetch(`/api/projects/${projectId}/ingest`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ingestPayload),
+          });
+          if (!ingestResponse.ok) {
+            throw new Error(`HTTP ${ingestResponse.status}`);
+          }
+        } catch (err) {
+          ingestError = err;
+          console.error('Error ingesting S3-loaded images as inspection parts:', err);
+        }
+      }
+
+      if (imported.length > 0 && onUploadComplete) {
+        onUploadComplete(imported);
+      }
+      if (failed.length > 0) {
+        setError(`S3 load complete: ${imported.length} succeeded, ${failed.length} failed out of ${selectedS3Keys.length}.`);
+      } else if (ingestError) {
+        setError('S3 files loaded, but parts could not be created from filename metadata.');
+      } else {
+        setError(null);
+      }
+      setS3PickerOpen(false);
+      setSelectedS3Keys([]);
+    } catch (err) {
+      const detail = err?.message ? ` ${err.message}` : '';
+      setError(`Failed to import selected S3 files.${detail}`);
+    } finally {
+      setImportingS3Files(false);
+      finishUploadProgress();
+    }
   };
 
   const handleLoadTestData = async () => {
@@ -399,6 +1168,11 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
     }
   };
 
+  const selectedFilesTotalBytes = getTotalUploadSizeBytes(selectedFiles);
+  const selectedS3TotalBytes = getTotalUploadSizeBytes(
+    s3Objects.filter((object) => selectedS3Keys.includes(object.key))
+  );
+
   return (
     <div className="card">
       <div className="card-header">
@@ -406,7 +1180,7 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
       </div>
       <div className="card-content">
         <form onSubmit={handleUpload}>
-          <div 
+          <div
             className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -421,28 +1195,120 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
                 Drag and drop images/voxel data here, or click to select files
               </div>
               <div className="upload-area-subtext">
-                Supports image files and 3D voxel arrays (.npy, .npz, .inspiro)
+                Supports image files, 3D voxel arrays (.npy, .npz, .inspiro), and one associated .nsipro/.json metadata file
               </div>
               <div className={`upload-area-status ${selectedFiles.length > 0 ? 'has-files' : 'no-files'}`}>
-                {selectedFiles.length > 0 
-                  ? `${selectedFiles.length} ${selectedFiles.length === 1 ? 'file' : 'files'} selected` 
+                {selectedFiles.length > 0
+                  ? `${selectedFiles.length} ${selectedFiles.length === 1 ? 'file' : 'files'} selected (${formatUploadSize(selectedFilesTotalBytes)})`
                   : 'No files selected'}
               </div>
             </div>
-            <input 
-              type="file" 
-              id="file-input" 
-              accept="image/*,image/tiff,.tiff,.tif,.npy,.npz,.inspiro" 
-              multiple 
+            <input
+              type="file"
+              id="file-input"
+              accept="image/*,image/tiff,.tiff,.tif,.npy,.npz,.inspiro,.json,.nsipro,application/json"
+              multiple
               style={{ display: 'none' }}
               onChange={handleFileChange}
             />
           </div>
 
-          <FilenameMetadataExtractor
-            files={selectedFiles}
-            onConfigChange={handleExtractorChange}
-          />
+          <div className="form-group" style={{ marginTop: '16px' }}>
+            <label htmlFor="s3-url-input">S3 URL (Optional)</label>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input
+                id="s3-url-input"
+                type="text"
+                className="form-control"
+                placeholder="s3://bucket/path/to/files/"
+                value={s3Url}
+                onChange={(e) => setS3Url(e.target.value)}
+                disabled={uploading || loadingTestData || loadingS3Files || importingS3Files}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleLoadS3Files}
+                disabled={uploading || loadingTestData || loadingS3Files || importingS3Files}
+              >
+                {loadingS3Files ? 'Loading S3 Files...' : 'Load Files from S3'}
+              </button>
+            </div>
+            <small className="form-text">
+              Enter an s3:// bucket or prefix, then choose which files to load into this project.
+            </small>
+          </div>
+
+          {s3PickerOpen && (
+            <div className="card" style={{ margin: '12px 0', border: '1px solid #dee2e6' }} data-testid="s3-file-picker">
+              <div className="card-header">
+                <h3 style={{ margin: 0 }}>Choose S3 Files</h3>
+              </div>
+              <div className="card-content">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span>{selectedS3Keys.length} / {s3Objects.length} selected ({formatUploadSize(selectedS3TotalBytes)})</span>
+                  <button type="button" className="btn btn-secondary" onClick={handleToggleAllS3Keys}>
+                    {selectedS3Keys.length === s3Objects.length ? 'Clear Selection' : 'Select All'}
+                  </button>
+                </div>
+                <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid #e9ecef', borderRadius: '4px' }}>
+                  {s3Objects.map((object) => (
+                    <label
+                      key={object.key}
+                      style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '8px', borderBottom: '1px solid #f1f3f5' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedS3Keys.includes(object.key)}
+                        onChange={() => handleToggleS3Key(object.key)}
+                      />
+                      <span style={{ flex: 1 }}>
+                        <strong>{object.filename}</strong>
+                        <br />
+                        <small>{object.key} · {formatUploadSize(object.size)}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ marginTop: '12px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    onClick={handleImportS3Files}
+                    disabled={importingS3Files || selectedS3Keys.length === 0 || !extractorConfig.isValid}
+                  >
+                    {importingS3Files ? 'Loading Selected S3 Files...' : 'Load Selected S3 Files'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ marginLeft: '8px' }}
+                    onClick={() => setS3PickerOpen(false)}
+                    disabled={importingS3Files}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+
+          <div className="filename-decoder-utility">
+            <FilenameMetadataExtractor
+              files={extractorPreviewFiles}
+              onConfigChange={handleExtractorChange}
+              fileNamingScheme={projectConfiguration?.file_naming_scheme}
+              initialConfig={projectConfiguration?.file_naming_scheme?.metadata_extractor || {
+                mode: 'simple',
+                pattern: projectConfiguration?.file_naming_scheme
+                  ? (projectConfiguration.file_naming_scheme.delimiter || '')
+                  : '_',
+                keys: [],
+              }}
+              title="Filename Regex & Delimiter Decoder"
+            />
+          </div>
 
           {extractorConfig.keys && extractorConfig.keys.length > 0 && (
             <div className="form-group">
@@ -463,23 +1329,69 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
               </small>
             </div>
           )}
-          
+
+          <div className="form-group">
+            <fieldset className="metadata-association-section" style={{ border: '1px solid #e9ecef', borderRadius: '4px', padding: '12px' }}>
+              <legend style={{ fontSize: '1rem', fontWeight: 600, padding: '0 4px' }}>Associate Metadata</legend>
+              <label htmlFor="associated-metadata-input">Metadata File (Optional)</label>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  id="associated-metadata-input"
+                  type="file"
+                  accept=".json,.nsipro,application/json"
+                  onChange={handleAssociatedMetadataFileChange}
+                  disabled={associatedMetadataSaving}
+                />
+                <span className="form-text" aria-live="polite">
+                  {associatedMetadataFile ? associatedMetadataFile.name : 'No metadata file chosen'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleLoadAssociatedMetadata}
+                  disabled={associatedMetadataSaving || associatedMetadataParsing || !associatedMetadataBundle || Boolean(associatedMetadataError)}
+                >
+                  {associatedMetadataSaving ? 'Loading Metadata...' : 'Load Metadata'}
+                </button>
+              </div>
+              <small className="form-text">
+                Choose one .json or .nsipro file after selecting images to reference it from uploaded images, or choose a metadata file by itself and click Load Metadata to associate it with the whole project.
+              </small>
+              {associatedMetadataParsing && (
+                <div className="form-text" role="status">Parsing associated metadata…</div>
+              )}
+              {associatedMetadataBundle && !associatedMetadataError && (
+                <div className="form-text" role="status">
+                  Parsed {associatedMetadataBundle.value.filename} as {associatedMetadataBundle.key}.
+                </div>
+              )}
+              {associatedMetadataSaved && (
+                <div className="alert alert-success" role="status">
+                  Loaded {associatedMetadataSaved.filename} as project metadata. It will display with every image or slice in this project.
+                </div>
+              )}
+              {associatedMetadataError && (
+                <div className="alert alert-danger" role="alert">{associatedMetadataError}</div>
+              )}
+            </fieldset>
+          </div>
+
           <div className="form-group">
             <label htmlFor="metadata-input">Metadata (Optional JSON)</label>
-            <textarea 
-              id="metadata-input" 
-              rows="3" 
+            <textarea
+              id="metadata-input"
+              rows="3"
               placeholder='{"key": "value"}'
               value={uploadMetadata}
               onChange={(e) => setUploadMetadata(e.target.value)}
             ></textarea>
           </div>
-          
+
           <div className="form-group">
             <button
               type="submit"
               className="btn btn-success"
-              disabled={uploading || loadingTestData || !extractorConfig.isValid}
+              disabled={uploading || loadingTestData || associatedMetadataSaving || !extractorConfig.isValid || associatedMetadataParsing || Boolean(associatedMetadataError)}
             >
               {uploading ? 'Uploading...' : 'Upload Images'}
             </button>
@@ -506,15 +1418,22 @@ function ImageUploader({ projectId, projectType = 'PT1', onUploadComplete, setEr
           {uploadProgress && (
             <div style={{ marginTop: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                <span>{uploadProgress.completed} / {uploadProgress.total} uploaded</span>
+                <span>{progressLabel(uploadProgress)}</span>
                 {uploadProgress.failed > 0 && (
                   <span style={{ color: '#dc3545' }}>{uploadProgress.failed} failed</span>
                 )}
               </div>
-              <div style={{ width: '100%', height: '8px', backgroundColor: '#e9ecef', borderRadius: '4px', overflow: 'hidden' }}>
+              <div
+                role="progressbar"
+                aria-label="Image upload data progress"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={progressPercent(uploadProgress)}
+                style={{ width: '100%', height: '8px', backgroundColor: '#e9ecef', borderRadius: '4px', overflow: 'hidden' }}
+              >
                 <div
                   style={{
-                    width: `${Math.round((uploadProgress.completed / uploadProgress.total) * 100)}%`,
+                    width: `${progressPercent(uploadProgress)}%`,
                     height: '100%',
                     backgroundColor: uploadProgress.failed > 0 ? '#ffc107' : '#28a745',
                     transition: 'width 0.2s',

@@ -1,0 +1,386 @@
+const DEFAULT_NSIPRO_PARSER_ID = 'default';
+const GENERIC_NSIPRO_PARSER_VERSION = '1.0.0';
+const NSIPRO_PARSER_HASHES = {
+  default: 'sha256:3295a8f571b23a6bb2a5ae1ef21e5500d39fdabf209ea122d7352f65d1b217df',
+  deployment_a: 'sha256:d1c01fbbf53558bc44e1fcc73a8f537f0feec684ef38b8c919beefb59c1be6bb',
+  deployment_b: 'sha256:5992e0724aa1667d6069e6943dac78a43c6a2526b070f7f8d78980cead254ba0',
+};
+
+function parseScalarMetadataValue(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) return '';
+  if (/^(true|false)$/i.test(value)) return value.toLowerCase() === 'true';
+  if (/^null$/i.test(value)) return null;
+  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value);
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    return value.replace(/^['"]|['"]$/g, '');
+  }
+}
+
+function buildNsiproResult({ parser, parserVersion, parserHash = NSIPRO_PARSER_HASHES[DEFAULT_NSIPRO_PARSER_ID], metadata, warnings = [], sourceFilename = '' }) {
+  return {
+    parser,
+    parser_id: DEFAULT_NSIPRO_PARSER_ID,
+    parser_version: parserVersion,
+    parser_hash: parserHash,
+    metadata,
+    warnings,
+    source_filename: sourceFilename,
+  };
+}
+
+function appendXmlChild(parent, key, value) {
+  if (Object.prototype.hasOwnProperty.call(parent, key)) {
+    if (!Array.isArray(parent[key])) parent[key] = [parent[key]];
+    parent[key].push(value);
+  } else {
+    parent[key] = value;
+  }
+}
+
+function xmlElementToMetadata(element) {
+  const attributes = Array.from(element.attributes || {}).reduce((acc, attribute) => {
+    acc[attribute.localName || attribute.name] = parseScalarMetadataValue(attribute.value);
+    return acc;
+  }, {});
+  const childElements = Array.from(element.children || []);
+  const directText = Array.from(element.childNodes || [])
+    .filter((node) => node.nodeType === Node.TEXT_NODE || node.nodeType === Node.CDATA_SECTION_NODE)
+    .map((node) => node.textContent || '')
+    .join('')
+    .trim();
+
+  if (!childElements.length && Object.keys(attributes).length === 0) {
+    return parseScalarMetadataValue(directText);
+  }
+
+  const result = {};
+  if (Object.keys(attributes).length > 0) result['@attributes'] = attributes;
+
+  childElements.forEach((child) => {
+    appendXmlChild(result, child.localName || child.tagName, xmlElementToMetadata(child));
+  });
+
+  if (directText) result['#text'] = parseScalarMetadataValue(directText);
+  return result;
+}
+function leadingWhitespaceWidth(value) {
+  let width = 0;
+  for (const char of String(value || '')) {
+    if (char === ' ') {
+      width += 1;
+    } else if (char === '\t') {
+      width += 4;
+    } else {
+      break;
+    }
+  }
+  return width;
+}
+
+function decodeXmlPredefinedEntities(value) {
+  return String(value || '')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hexValue) => String.fromCodePoint(parseInt(hexValue, 16)))
+    .replace(/&#(\d+);/g, (_, numericValue) => String.fromCodePoint(parseInt(numericValue, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function parseLenientXmlLikeTagLine(line) {
+  const stripped = String(line || '').trim();
+  if (
+    !stripped.startsWith('<')
+    || stripped.startsWith('</')
+    || stripped.startsWith('<?')
+    || stripped.startsWith('<!')
+  ) {
+    return null;
+  }
+
+  const tagEnd = stripped.indexOf('>');
+  if (tagEnd <= 1) return null;
+  const tagName = stripped.slice(1, tagEnd).replace(/\/$/, '').trim();
+  if (!tagName) return null;
+  const inlineClosingTag = `</${tagName}>`;
+  let rawValue = stripped.slice(tagEnd + 1).trim();
+  if (rawValue.endsWith(inlineClosingTag)) {
+    rawValue = rawValue.slice(0, -inlineClosingTag.length).trim();
+  }
+  return { tagName, rawValue };
+}
+
+function parseLenientNsiproXmlLikeText(text) {
+  const root = {};
+  const stack = [{ tag: null, indent: -1, data: root }];
+
+  String(text || '').split(/\r?\n/).forEach((rawLine) => {
+    const stripped = rawLine.trim();
+    if (!stripped) return;
+    const indent = leadingWhitespaceWidth(rawLine);
+
+    if (stripped.startsWith('<?') || stripped.startsWith('<!--')) return;
+
+    if (stripped.startsWith('</')) {
+      const closingName = stripped.includes('>')
+        ? stripped.slice(2, stripped.indexOf('>')).trim()
+        : stripped.slice(2).trim();
+      while (stack.length > 1) {
+        const frame = stack.pop();
+        if (frame.tag === closingName) break;
+      }
+      return;
+    }
+
+    const parsed = parseLenientXmlLikeTagLine(rawLine);
+    if (!parsed) return;
+
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+      stack.pop();
+    }
+
+    const parent = stack[stack.length - 1].data;
+    if (!parent || typeof parent !== 'object' || Array.isArray(parent)) return;
+
+    if (parsed.rawValue) {
+      appendXmlChild(parent, parsed.tagName, parseScalarMetadataValue(decodeXmlPredefinedEntities(parsed.rawValue)));
+    } else {
+      const child = {};
+      appendXmlChild(parent, parsed.tagName, child);
+      stack.push({ tag: parsed.tagName, indent, data: child });
+    }
+  });
+
+  if (Object.keys(root).length === 0) {
+    throw new Error('No XML-like metadata entries were found in the .nsipro file.');
+  }
+
+  return root;
+}
+
+
+export function parseNsiproXmlText(text, filename = '') {
+  const trimmed = String(text || '').trim();
+  if (!trimmed.startsWith('<')) {
+    throw new Error('Not an XML .nsipro document.');
+  }
+  if (/<!DOCTYPE|<!ENTITY/i.test(trimmed)) {
+    throw new Error('XML .nsipro metadata with DOCTYPE or entity declarations is not supported.');
+  }
+
+  const parser = new DOMParser();
+  const document = parser.parseFromString(trimmed, 'application/xml');
+  const parserError = document.querySelector('parsererror');
+  if (parserError || !document.documentElement) {
+    return buildNsiproResult({
+      parser: 'nsipro-xml',
+      parserVersion: GENERIC_NSIPRO_PARSER_VERSION,
+      metadata: parseLenientNsiproXmlLikeText(trimmed),
+      warnings: [],
+      sourceFilename: filename,
+    });
+  }
+
+  const root = document.documentElement;
+  return buildNsiproResult({
+    parser: 'nsipro-xml',
+    parserVersion: GENERIC_NSIPRO_PARSER_VERSION,
+    metadata: { [root.localName || root.tagName]: xmlElementToMetadata(root) },
+    warnings: [],
+    sourceFilename: filename,
+  });
+}
+
+export function parseGenericNsiproKeyValueText(text, filename = '') {
+  const root = {};
+  const warnings = [];
+  let currentSection = root;
+
+  String(text || '').split(/\r?\n/).forEach((rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';') || line.startsWith('//')) return;
+
+    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    if (sectionMatch) {
+      const sectionName = sectionMatch[1].trim();
+      if (!sectionName) return;
+      if (!root[sectionName] || typeof root[sectionName] !== 'object') root[sectionName] = {};
+      currentSection = root[sectionName];
+      return;
+    }
+
+    const delimiterIndex = ['=', ':']
+      .map((delimiter) => line.indexOf(delimiter))
+      .filter((candidateIndex) => candidateIndex > 0)
+      .sort((left, right) => left - right)[0];
+
+    if (delimiterIndex === undefined) {
+      warnings.push(`Skipped line ${index + 1}: no key/value delimiter found.`);
+      return;
+    }
+
+    const key = line.slice(0, delimiterIndex).trim();
+    if (!key) {
+      warnings.push(`Skipped line ${index + 1}: metadata key is empty.`);
+      return;
+    }
+
+    currentSection[key] = parseScalarMetadataValue(line.slice(delimiterIndex + 1));
+  });
+
+  if (Object.keys(root).length === 0) {
+    throw new Error('No metadata entries were found in the .nsipro file.');
+  }
+
+  return buildNsiproResult({
+    parser: 'nsipro-key-value',
+    parserVersion: GENERIC_NSIPRO_PARSER_VERSION,
+    metadata: root,
+    warnings,
+    sourceFilename: filename,
+  });
+}
+
+function normalizeDeploymentMetadataKey(key) {
+  return String(key || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
+function normalizeDeploymentSection(section) {
+  if (!section || typeof section !== 'object' || Array.isArray(section)) return {};
+  return Object.entries(section).reduce((acc, [key, value]) => {
+    const normalizedKey = normalizeDeploymentMetadataKey(key);
+    if (normalizedKey) acc[normalizedKey] = value;
+    return acc;
+  }, {});
+}
+
+function firstDeploymentSection(metadata, candidateNames) {
+  const normalizedCandidates = new Set(candidateNames.map(normalizeDeploymentMetadataKey));
+  return Object.entries(metadata || {}).find(([key, value]) => (
+    normalizedCandidates.has(normalizeDeploymentMetadataKey(key))
+    && value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+  ))?.[1] || null;
+}
+
+function parseDeploymentANsiproText(text, filename = '') {
+  const result = parseDefaultNsiproText(text, filename);
+  const deploymentSection = firstDeploymentSection(result.metadata, ['deployment', 'deployment metadata', 'capture deployment']);
+  const customFieldSection = firstDeploymentSection(result.metadata, ['custom fields', 'custom_fields', 'deployment custom fields']);
+
+  if (!deploymentSection && !customFieldSection) return result;
+
+  return {
+    ...result,
+    metadata: {
+      ...(deploymentSection ? { deployment: normalizeDeploymentSection(deploymentSection) } : {}),
+      ...(customFieldSection ? { custom_fields: normalizeDeploymentSection(customFieldSection) } : {}),
+    },
+  };
+}
+
+function parseNsiproJsonText(text, filename = '') {
+  return buildNsiproResult({
+    parser: 'nsipro-json',
+    parserVersion: GENERIC_NSIPRO_PARSER_VERSION,
+    metadata: JSON.parse(String(text || '').trim()),
+    warnings: [],
+    sourceFilename: filename,
+  });
+}
+
+function parseDefaultNsiproText(text, filename = '') {
+  try {
+    return parseNsiproJsonText(text, filename);
+  } catch (jsonError) {
+    if (String(text || '').trim().startsWith('<')) {
+      return parseNsiproXmlText(text, filename);
+    }
+    return parseGenericNsiproKeyValueText(text, filename);
+  }
+}
+
+export const NSIPRO_PARSERS = {
+  default: {
+    id: DEFAULT_NSIPRO_PARSER_ID,
+    version: GENERIC_NSIPRO_PARSER_VERSION,
+    parse: parseDefaultNsiproText,
+  },
+  deployment_a: {
+    id: 'deployment_a',
+    version: GENERIC_NSIPRO_PARSER_VERSION,
+    parse: parseDeploymentANsiproText,
+  },
+  deployment_b: {
+    id: 'deployment_b',
+    version: GENERIC_NSIPRO_PARSER_VERSION,
+    parse: parseDefaultNsiproText,
+  },
+};
+
+export function getConfiguredNsiproParserId(projectConfiguration) {
+  const candidates = [
+    projectConfiguration?.metadata_parsers?.nsipro?.parser_id,
+    projectConfiguration?.nsipro_parser,
+    projectConfiguration?.nsipro_parser_id,
+    projectConfiguration?.metadata?.nsipro_parser,
+    projectConfiguration?.metadata?.nsipro_parser_id,
+    projectConfiguration?.metadata_ingest?.nsipro_parser,
+    projectConfiguration?.metadata_ingest?.nsipro_parser_id,
+    projectConfiguration?.associated_metadata?.nsipro_parser,
+    projectConfiguration?.associated_metadata?.nsipro_parser_id,
+    projectConfiguration?.associated_metadata?.parser_id,
+  ];
+  return candidates.find((candidate) => typeof candidate === 'string' && candidate.trim())?.trim() || '';
+}
+
+function getEnvNsiproParserId() {
+  return process.env.REACT_APP_NSIPRO_PARSER || '';
+}
+
+function normalizeParserId(parserId) {
+  return String(parserId || '').trim() || DEFAULT_NSIPRO_PARSER_ID;
+}
+
+export function parseNsiproText(text, filename = '', options = {}) {
+  const parserId = normalizeParserId(
+    options.parserId
+      || getConfiguredNsiproParserId(options.projectConfiguration)
+      || getEnvNsiproParserId(),
+  );
+  const failClosed = Boolean(options.failClosed || options.failOnUnknownParser);
+  const parserEntry = NSIPRO_PARSERS[parserId];
+
+  if (!parserEntry) {
+    if (failClosed) {
+      throw new Error(`Unknown .nsipro parser configured: ${parserId}.`);
+    }
+    const fallbackResult = NSIPRO_PARSERS[DEFAULT_NSIPRO_PARSER_ID].parse(text, filename, options);
+    return {
+      ...fallbackResult,
+      parser_id: DEFAULT_NSIPRO_PARSER_ID,
+      requested_parser_id: parserId,
+      warnings: [
+        ...fallbackResult.warnings,
+        `Unknown .nsipro parser "${parserId}"; used default parser instead.`,
+      ],
+    };
+  }
+
+  const result = parserEntry.parse(text, filename, options);
+  return {
+    ...result,
+    parser_id: parserEntry.id,
+    parser_hash: NSIPRO_PARSER_HASHES[parserEntry.id] || result.parser_hash,
+  };
+}

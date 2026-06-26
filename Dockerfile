@@ -62,7 +62,6 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy backend code
 COPY ./backend /app/backend
-COPY ./test_toolbox /app/test_toolbox
 # COPY .env /app/.env
 
 # Copy frontend files selectively (excluding node_modules)
@@ -73,9 +72,6 @@ COPY ./frontend/package.json ./frontend/package-lock.json ./frontend/
 COPY ./frontend/public ./frontend/public
 COPY ./frontend/src ./frontend/src
 COPY ./frontend/config-overrides.js ./frontend/
-
-# copy the test folder over as well. 
-COPY test ./test
 
 # Install frontend dependencies and build
 WORKDIR /app/frontend
@@ -102,12 +98,8 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 
 # Copy backend code
 COPY --from=builder /app/backend /app/backend
-COPY --from=builder /app/test_toolbox /app/test_toolbox
 # Copy frontend build files
 COPY --from=builder /app/frontend/build /app/ui2
-# Copy test folder
-COPY test ./test
-
 # Set frontend build path environment variable
 ENV FRONTEND_BUILD_PATH=/app/ui2
 

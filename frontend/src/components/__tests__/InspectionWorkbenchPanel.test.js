@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import InspectionWorkbenchPanel from '../InspectionWorkbenchPanel';
+import ImagesToPartsTab from '../ImagesToPartsTab';
 
 jest.setTimeout(90000);
 
@@ -259,8 +260,9 @@ const scenarioByUser = [
 
 const defaultCalibration = { pixels_per_mm: 20, pixels_per_inch: 508, unit: 'mm' };
 
-function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys, metadataDict = { calibration_default: defaultCalibration } }) {
+function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys, metadataDict = { calibration_default: defaultCalibration }, projectImages = null }) {
   let mutableParts = [...parts];
+  const uploadedImages = [];
   const savedWorkspaceStates = [];
   const savedConfigurations = [];
   const annotationsByPart = Object.fromEntries(
@@ -400,6 +402,48 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
     if (url.includes('/batches')) {
       return Promise.resolve({ ok: true, json: async () => batches });
     }
+    if (url.includes('/projects/proj-1/images') && options.method === 'POST') {
+      const file = options.body?.get?.('file');
+      const metadata = JSON.parse(options.body?.get?.('metadata') || '{}');
+      const created = {
+        id: `uploaded-image-${uploadedImages.length + 1}`,
+        filename: file?.name || `uploaded-image-${uploadedImages.length + 1}.png`,
+        content_type: file?.type || 'image/png',
+        metadata,
+      };
+      uploadedImages.push(created);
+      return Promise.resolve({ ok: true, status: 201, json: async () => created });
+    }
+    if (url.includes('/parts/image-assignments') && options.method === 'POST') {
+      const payload = JSON.parse(options.body || '{}');
+      const uploaded = uploadedImages.find((image) => image.filename === payload.filename) || {};
+      mutableParts = mutableParts.map((part) => {
+        if (part.id !== payload.to_part_id) return part;
+        const existing = Array.isArray(part.metadata?.source_images) ? part.metadata.source_images : [];
+        return {
+          ...part,
+          metadata: {
+            ...(part.metadata || {}),
+            source_images: [
+              ...existing.filter((record) => record.filename !== payload.filename),
+              {
+                filename: payload.filename,
+                image_id: uploaded.id,
+                side: uploaded.metadata?.side || 'crop',
+                modality: uploaded.metadata?.modality || 'visual',
+                overlay: false,
+                crop_child_image: Boolean(uploaded.metadata?.crop_child_image),
+                parent_image_id: uploaded.metadata?.parent_image_id,
+                parent_image_filename: uploaded.metadata?.parent_image_filename,
+                crop_annotation_id: uploaded.metadata?.crop_annotation_id,
+                crop_bbox: uploaded.metadata?.crop_bbox,
+              },
+            ],
+          },
+        };
+      });
+      return Promise.resolve({ ok: true, json: async () => ({ filename: payload.filename, from_part_id: null, to_part_id: payload.to_part_id }) });
+    }
     if (url.includes('/parts/') && options.method === 'PATCH') {
       if (url.includes('/annotations/')) {
         const segments = url.split('/');
@@ -460,7 +504,7 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
           part_id: mutableParts[0]?.id || 'part',
           axis: payload.axis || 'axial',
           slice_index: payload.slice_index || 0,
-          method_id: payload.method_id || 'segmentation.connected_components',
+          method_id: payload.method_id || 'segmentation.opencv.placeholder',
           status: 'completed',
           cached: false,
           regions: [
@@ -534,10 +578,10 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
       mutableParts[0] = updatedPart;
       return Promise.resolve({ ok: true, json: async () => updatedPart });
     }
-    if (url.includes('/parts')) {
-      return Promise.resolve({ ok: true, json: async () => mutableParts });
-    }
     if (url.includes('/images?include_deleted=true&limit=5000')) {
+      if (Array.isArray(projectImages)) {
+        return Promise.resolve({ ok: true, json: async () => projectImages });
+      }
       const imageRecords = mutableParts.flatMap((part) => {
         const viewImages = part?.metadata?.view_images || {};
         const viewRecords = Object.entries(viewImages).map(([viewName, imageRef], index) => ({
@@ -562,7 +606,10 @@ function mockWorkbenchFetch({ user, batches, parts, workspaceState = {}, hotkeys
           : [];
         return [...viewRecords, ...sourceRecords];
       });
-      return Promise.resolve({ ok: true, json: async () => imageRecords });
+      return Promise.resolve({ ok: true, json: async () => [...imageRecords, ...uploadedImages] });
+    }
+    if (url.includes('/parts')) {
+      return Promise.resolve({ ok: true, json: async () => mutableParts });
     }
     return Promise.resolve({ ok: false, status: 404 });
   });
@@ -580,6 +627,329 @@ function scenarioNameIncludesAdvanced(payload) {
 
 
 describe('InspectionWorkbenchPanel', () => {
+
+  test('opens PT3 current-part metadata modal with .nsipro and other tabs', async () => {
+    mockWorkbenchFetch({
+      user: 'metadata-modal',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-nsipro-1' },
+      parts: [
+        {
+          id: 'part-nsipro-1',
+          batch_id: 'batch-1',
+          serial_number: 'SN-NSIPRO-001',
+          display_name: 'Metadata Rich Part',
+          review_state: 'unreviewed',
+          metadata: {
+            nsipro_metadata: {
+              source_filename: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
+              parser: 'nsipro-key-value',
+              fields: { voltage_kv: 90, exposure_ms: 8.75 },
+              deployment: { deployment_id: 'DEP-42', line_id: 'LINE-7' },
+              custom_fields: { inspection_lot: 'LOT-ALPHA', operator_badge: 'QA-17', scan_mode: 'micro CT' },
+              metadata: {
+                Application: { application_info: 'NIS-Elements AR 5.30.00 (Build 1688)' },
+                Microscope: { microscope_name: 'Nikon Ti2-E Inverted Microscope', objective_name: 'Plan Apo Lambda 20x' },
+                Camera: { camera_name: 'DS-Qi2 Monochrome Camera', exposure_ms: 12.5, bit_depth: 16 },
+                Calibration: { pixel_size_um: 2.5, z_step_um: 5 },
+                Volume: { width_px: 128, height_px: 96, slices: 64 },
+              },
+            },
+            alloy: 'Ti-6Al-4V',
+            source_images: [
+              {
+                filename: 'slice-001.png',
+                image_id: 'img-slice-001',
+                side: 'front',
+                modality: 'visual',
+                selected_metadata_file: 'PT3_GEOMETRIC_DUAL_LABEL.nsipro',
+                nsipro_payload: { voltage_kv: 80, voxel_size_um: 1.25 },
+              },
+            ],
+            annotations: [],
+          },
+        },
+      ],
+    });
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByTestId('pt3-inspection-layout')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Metadata' }));
+
+    const modal = screen.getByRole('heading', { name: 'Part Metadata' }).closest('.modal-content');
+    expect(modal).toBeInTheDocument();
+    expect(within(modal).getByText('Metadata Rich Part')).toBeInTheDocument();
+    expect(within(modal).getByRole('tab', { name: '.nsipro' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(modal).getByText('metadata.nsipro_metadata.source_filename')).toBeInTheDocument();
+    expect(within(modal).getAllByText(/PT3_GEOMETRIC_DUAL_LABEL\.nsipro/).length).toBeGreaterThan(0);
+    expect(within(modal).getByText('metadata.nsipro_metadata.fields.voltage_kv')).toBeInTheDocument();
+    expect(within(modal).getByText('90')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.fields.exposure_ms')).toBeInTheDocument();
+    expect(within(modal).getByText('8.75')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.custom_fields.inspection_lot')).toBeInTheDocument();
+    expect(within(modal).getByText('LOT-ALPHA')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.custom_fields.operator_badge')).toBeInTheDocument();
+    expect(within(modal).getByText('QA-17')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.custom_fields.scan_mode')).toBeInTheDocument();
+    expect(within(modal).getByText('micro CT')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.deployment.deployment_id')).toBeInTheDocument();
+    expect(within(modal).getByText('DEP-42')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Application.application_info')).toBeInTheDocument();
+    expect(within(modal).getByText('NIS-Elements AR 5.30.00 (Build 1688)')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Microscope.microscope_name')).toBeInTheDocument();
+    expect(within(modal).getByText('Nikon Ti2-E Inverted Microscope')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Camera.exposure_ms')).toBeInTheDocument();
+    expect(within(modal).getByText('12.5')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.nsipro_metadata.metadata.Volume.slices')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.source_images[0].nsipro_payload.voltage_kv')).toBeInTheDocument();
+    expect(within(modal).getByText('metadata.source_images[0].nsipro_payload.voxel_size_um')).toBeInTheDocument();
+    expect(within(modal).getByText('1.25')).toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.alloy')).not.toBeInTheDocument();
+
+    fireEvent.click(within(modal).getByRole('tab', { name: 'Other' }));
+    expect(within(modal).getByRole('tab', { name: 'Other' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(modal).getByText('metadata.alloy')).toBeInTheDocument();
+    expect(within(modal).getByText('Ti-6Al-4V')).toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.source_filename')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.fields.voltage_kv')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.fields.exposure_ms')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.custom_fields.inspection_lot')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.custom_fields.operator_badge')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.custom_fields.scan_mode')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.nsipro_metadata.deployment.deployment_id')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.source_images[0].nsipro_payload.voxel_size_um')).not.toBeInTheDocument();
+    expect(within(modal).queryByText('metadata.source_images[0].selected_metadata_file')).not.toBeInTheDocument();
+  });
+
+  test('shows part summary modality buttons only for loaded image modalities', async () => {
+    mockWorkbenchFetch({
+      user: 'loaded-modalities',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-loaded-modalities' },
+      parts: [
+        {
+          id: 'part-loaded-modalities',
+          batch_id: 'batch-1',
+          serial_number: 'SN-LOADED-001',
+          display_name: 'Loaded Modalities Part',
+          review_state: 'unreviewed',
+          metadata: {
+            configured_views: ['front', 'thermal'],
+            modalities: ['visual', 'infrared', 'uv'],
+            view_images: { front: 'front-loaded.png', thermal: 'thermal-loaded.png' },
+            source_images: [
+              { filename: 'front-loaded.png', image_id: 'img-front-loaded', side: 'front', modality: 'visual', overlay: false },
+              { filename: 'thermal-loaded.png', image_id: 'img-thermal-loaded', side: 'thermal', modality: 'infrared', overlay: false },
+            ],
+            annotations: [],
+          },
+        },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    const modalityToggles = await screen.findByLabelText('Loaded Modalities Part modality toggles');
+    expect(within(modalityToggles).getByRole('button', { name: 'VISUAL' })).toBeInTheDocument();
+    expect(within(modalityToggles).getByRole('button', { name: 'INFRARED' })).toBeInTheDocument();
+    expect(within(modalityToggles).queryByRole('button', { name: 'UV' })).not.toBeInTheDocument();
+  });
+
+  test('hides an image from the inspection workbench after moving it from a part to unassigned', async () => {
+    let parts = [
+      {
+        id: 'part-1',
+        batch_id: 'batch-1',
+        serial_number: 'SN-001',
+        display_name: 'Part 1',
+        review_state: 'unreviewed',
+        metadata: {
+          configured_views: ['front'],
+          modalities: ['visual'],
+          view_images: { front: 'assigned-a.png' },
+          source_images: [
+            { filename: 'assigned-a.png', image_id: 'img-assigned-a', side: 'front', modality: 'visual', overlay: false },
+          ],
+          annotations: [],
+        },
+      },
+    ];
+    const images = [{ id: 'img-assigned-a', filename: 'assigned-a.png', metadata: { part_id: 'part-1', view_name: 'front' } }];
+    const rebuildPartImageMaps = (part, retainedSourceImages) => ({
+      ...part,
+      metadata: {
+        ...part.metadata,
+        source_images: retainedSourceImages,
+        configured_views: retainedSourceImages.map((record) => record.side).filter(Boolean),
+        modalities: retainedSourceImages.map((record) => record.modality).filter(Boolean),
+        view_images: retainedSourceImages.reduce((acc, record) => {
+          if (record.side && !record.overlay) acc[record.side] = record.filename;
+          return acc;
+        }, {}),
+        overlay_images: {},
+      },
+    });
+
+    global.fetch = jest.fn();
+    jest.spyOn(global, 'fetch').mockImplementation((url, options = {}) => {
+      if (url.includes('/parts/image-assignments') && options.method === 'POST') {
+        const payload = JSON.parse(options.body || '{}');
+        parts = parts.map((part) => rebuildPartImageMaps(
+          part,
+          (part.metadata.source_images || []).filter((record) => record.filename !== payload.filename),
+        ));
+        return Promise.resolve({ ok: true, json: async () => ({ filename: payload.filename, from_part_id: 'part-1', to_part_id: payload.to_part_id }) });
+      }
+      if (url.includes('/batches')) return Promise.resolve({ ok: true, json: async () => [{ id: 'batch-1', name: 'Batch 1' }] });
+      if (url.includes('/parts/') && url.includes('/annotations') && (!options.method || options.method === 'GET')) {
+        return Promise.resolve({ ok: true, json: async () => ({ part_id: 'part-1', annotations: [] }) });
+      }
+      if (url.includes('/parts')) return Promise.resolve({ ok: true, json: async () => parts });
+      if (url.includes('/workspace-state')) return Promise.resolve({ ok: true, json: async () => ({ state: { selected_batch_id: 'batch-1', selected_part_id: 'part-1' } }) });
+      if (url.includes('/configuration')) return Promise.resolve({ ok: true, json: async () => ({ config: {} }) });
+      if (url.includes('/metadata-dict')) return Promise.resolve({ ok: true, json: async () => ({ calibration_default: defaultCalibration }) });
+      if (url.includes('/images?include_deleted=true&limit=5000')) return Promise.resolve({ ok: true, json: async () => images });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    });
+
+    const { unmount } = render(
+      <ImagesToPartsTab projectId="proj-1" parts={parts} images={images} />,
+    );
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'assigned-a.png' }));
+    fireEvent.drop(screen.getByTestId('images-to-parts-unassigned-target'));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: 'assigned-a.png', image_id: 'img-assigned-a', to_part_id: null }),
+      });
+    });
+    await waitFor(() => expect(parts[0].metadata.source_images).toHaveLength(0));
+    unmount();
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findByText('No mapped images for this part.')).toBeInTheDocument();
+    expect(screen.queryByAltText('front view')).not.toBeInTheDocument();
+    expect(screen.queryByText('assigned-a.png')).not.toBeInTheDocument();
+  });
+
+  const buildRegressionPart = (id, displayName, filename, imageId, batchId = 'batch-1') => ({
+    id,
+    batch_id: batchId,
+    serial_number: id.toUpperCase(),
+    display_name: displayName,
+    review_state: 'unreviewed',
+    metadata: {
+      configured_views: ['front'],
+      modalities: ['visual'],
+      view_images: { front: filename },
+      source_images: [
+        { filename, image_id: imageId, side: 'front', modality: 'visual', overlay: false },
+      ],
+      annotations: [],
+    },
+  });
+
+  test('keeps remaining parts and images visible in inspection after another part is deleted', async () => {
+    const remainingPart = buildRegressionPart('part-remaining', 'Remaining Part', 'remaining-part.png', 'img-remaining-part');
+    mockWorkbenchFetch({
+      user: 'part-delete-regression',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-deleted' },
+      parts: [remainingPart],
+      projectImages: [
+        { id: 'img-remaining-part', filename: 'remaining-part.png', metadata: { part_id: 'part-remaining', view_name: 'front' } },
+        { id: 'img-deleted-part', filename: 'deleted-part.png', metadata: { part_id: 'part-deleted', view_name: 'front' } },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findAllByText('Remaining Part')).toHaveLength(2);
+    expect(screen.getByText('Parts: 1')).toBeInTheDocument();
+    expect(screen.getByAltText('front view')).toHaveAttribute('src', '/api/images/img-remaining-part/content');
+    expect(screen.queryByText('Deleted Part')).not.toBeInTheDocument();
+    expect(screen.queryByText('deleted-part.png')).not.toBeInTheDocument();
+  });
+
+  test('keeps loaded images visible and hides unloaded images in inspection', async () => {
+    const part = {
+      ...buildRegressionPart('part-with-unload', 'Part With Unload', 'remaining-image.png', 'img-remaining-image'),
+      metadata: {
+        configured_views: ['front', 'back'],
+        modalities: ['visual'],
+        view_images: { front: 'remaining-image.png', back: 'unloaded-image.png' },
+        source_images: [
+          { filename: 'remaining-image.png', image_id: 'img-remaining-image', side: 'front', modality: 'visual', overlay: false },
+          { filename: 'unloaded-image.png', image_id: 'img-unloaded-image', side: 'back', modality: 'visual', overlay: false },
+        ],
+        annotations: [],
+      },
+    };
+    mockWorkbenchFetch({
+      user: 'image-unload-regression',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-with-unload' },
+      parts: [part],
+      projectImages: [
+        { id: 'img-remaining-image', filename: 'remaining-image.png', metadata: { part_id: 'part-with-unload', view_name: 'front' } },
+        { id: 'img-unloaded-image', filename: 'unloaded-image.png', deleted_at: '2026-06-25T12:00:00Z', metadata: { part_id: 'part-with-unload', view_name: 'back' } },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findAllByText('Part With Unload')).toHaveLength(2);
+    expect(screen.getByAltText('front view')).toHaveAttribute('src', '/api/images/img-remaining-image/content');
+    expect(screen.queryByAltText('back view')).not.toBeInTheDocument();
+    expect(screen.queryByText('unloaded-image.png')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Part With Unload view toggles')).toHaveTextContent('FRONT');
+    expect(screen.getByLabelText('Part With Unload view toggles')).not.toHaveTextContent('BACK');
+  });
+
+  test('keeps remaining parts and loaded images visible after part deletion and image unload happen together', async () => {
+    const survivor = {
+      ...buildRegressionPart('part-survivor', 'Survivor Part', 'survivor-loaded.png', 'img-survivor-loaded'),
+      metadata: {
+        configured_views: ['front', 'back'],
+        modalities: ['visual'],
+        view_images: { front: 'survivor-loaded.png', back: 'survivor-unloaded.png' },
+        source_images: [
+          { filename: 'survivor-loaded.png', image_id: 'img-survivor-loaded', side: 'front', modality: 'visual', overlay: false },
+          { filename: 'survivor-unloaded.png', image_id: 'img-survivor-unloaded', side: 'back', modality: 'visual', overlay: false },
+        ],
+        annotations: [],
+      },
+    };
+    const secondSurvivor = buildRegressionPart('part-second-survivor', 'Second Survivor Part', 'second-survivor.png', 'img-second-survivor');
+    mockWorkbenchFetch({
+      user: 'combined-delete-unload-regression',
+      batches: [{ id: 'batch-1', name: 'Batch 1' }],
+      workspaceState: { selected_batch_id: 'batch-1', selected_part_id: 'part-deleted' },
+      parts: [survivor, secondSurvivor],
+      projectImages: [
+        { id: 'img-survivor-loaded', filename: 'survivor-loaded.png', metadata: { part_id: 'part-survivor', view_name: 'front' } },
+        { id: 'img-survivor-unloaded', filename: 'survivor-unloaded.png', deleted_at: '2026-06-25T12:00:00Z', metadata: { part_id: 'part-survivor', view_name: 'back' } },
+        { id: 'img-second-survivor', filename: 'second-survivor.png', metadata: { part_id: 'part-second-survivor', view_name: 'front' } },
+        { id: 'img-deleted-part', filename: 'deleted-combined.png', metadata: { part_id: 'part-deleted', view_name: 'front' } },
+      ],
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    expect(await screen.findAllByText('Survivor Part')).toHaveLength(2);
+    expect(screen.getByText('Second Survivor Part')).toBeInTheDocument();
+    expect(screen.getByText('Parts: 2')).toBeInTheDocument();
+    expect(screen.getByAltText('front view')).toHaveAttribute('src', '/api/images/img-survivor-loaded/content');
+    expect(screen.queryByAltText('back view')).not.toBeInTheDocument();
+    expect(screen.queryByText('survivor-unloaded.png')).not.toBeInTheDocument();
+    expect(screen.queryByText('Deleted Combined Part')).not.toBeInTheDocument();
+    expect(screen.queryByText('deleted-combined.png')).not.toBeInTheDocument();
+  });
+
   afterEach(() => {
     delete global.fetch;
   });
@@ -670,6 +1040,52 @@ describe('InspectionWorkbenchPanel', () => {
       unmount();
     }
   }, 90000);
+
+
+  test('shows filename-decoded image to part mappings in inspection workbench', async () => {
+    const decodedScenario = {
+      user: 'filename-decoding',
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+      workspaceState: { selected_part_id: 'part-decoded-1' },
+      batches: [],
+      parts: [
+        {
+          id: 'part-decoded-1',
+          batch_id: null,
+          serial_number: '9',
+          display_name: '100 22 7 9',
+          review_state: 'unreviewed',
+          metadata: {
+            design_number: '100',
+            lot_number: '22',
+            set_number: '7',
+            serial_number: '9',
+            configured_views: ['left', 'right'],
+            modalities: ['thermal', 'visual'],
+            view_images: {
+              left: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png',
+              right: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png',
+            },
+            source_images: [
+              { filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png', image_id: 'img-left', side: 'left', modality: 'visual', overlay: false },
+              { filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png', image_id: 'img-right', side: 'right', modality: 'thermal', overlay: false },
+            ],
+            annotations: [],
+          },
+        },
+      ],
+    };
+
+    mockWorkbenchFetch(decodedScenario);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('100 22 7 9').length).toBeGreaterThan(0);
+    });
+    expect(screen.getByRole('button', { name: 'LEFT' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'RIGHT' })).toBeInTheDocument();
+    expect(screen.getByTestId('selected-image-panel')).toBeInTheDocument();
+  });
 
   test.each(projectTypes)('applies configurable inspector hotkeys for %s', async (projectType) => {
     for (const scenario of scenarioByUser) {
@@ -921,7 +1337,7 @@ describe('InspectionWorkbenchPanel', () => {
     window.innerWidth = 1800;
     window.dispatchEvent(new Event('resize'));
 
-    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT2" />);
 
     await waitFor(() => {
       expect(screen.getByText(`Batches: ${scenario.batches.length}`)).toBeInTheDocument();
@@ -970,6 +1386,7 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getByTestId('annotation-controls')).toHaveTextContent('For selected part: No part selected');
     expect(screen.getByRole('button', { name: 'Measure on tiles' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Draw box on tiles' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'New Crop on tiles' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Other' })).toBeDisabled();
 
     unmount();
@@ -977,7 +1394,7 @@ describe('InspectionWorkbenchPanel', () => {
 
   test('switches center pane between inspector images and selected image metadata', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
-    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT2" />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Basic Part').length).toBeGreaterThan(0);
@@ -995,7 +1412,7 @@ describe('InspectionWorkbenchPanel', () => {
 
   test('deletes annotations from the main annotations list', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
-    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT2" />);
 
     await waitFor(() => expect(screen.getByTestId('annotation-list')).toHaveTextContent('seed-basic'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete annotation seed-basic' }));
@@ -1055,14 +1472,14 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => expect(screen.getAllByText('Analyze Output Part').length).toBeGreaterThan(0));
     const composite = screen.getByTestId('inspection-overlay-composite');
     const viewBoard = document.querySelector('.view-board');
-    expect(screen.getByLabelText('Inspection tile columns')).toHaveAttribute('max', '2');
-    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('2');
+    expect(screen.getByLabelText('Inspection tile columns')).toHaveAttribute('max', '1');
+    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('1');
     fireEvent.change(screen.getByLabelText('Inspection tile columns'), { target: { value: '1' } });
     expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('1');
     expect(screen.getByLabelText('Inspection tile columns value')).toHaveValue(1);
     fireEvent.change(screen.getByLabelText('Inspection tile columns value'), { target: { value: '2' } });
-    expect(screen.getByLabelText('Inspection tile columns')).toHaveValue('2');
-    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('2');
+    expect(screen.getByLabelText('Inspection tile columns')).toHaveValue('1');
+    expect(viewBoard.style.getPropertyValue('--inspection-tile-columns')).toBe('1');
     expect(screen.getByText('Watershed From Seeds :: Segmentation Overlay')).toBeInTheDocument();
     expect(within(composite).getByAltText('front source')).toHaveAttribute('src', '/api/images/source-image-1/content');
     expect(within(composite).getByAltText('front overlay')).toHaveAttribute('src', '/api/images/overlay-image-1/content');
@@ -1076,6 +1493,90 @@ describe('InspectionWorkbenchPanel', () => {
       expect(screen.queryByText('Watershed From Seeds :: Segmentation Overlay')).not.toBeInTheDocument();
     });
     expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/analyze/overlays/overlay-image-1', { method: 'DELETE' });
+  });
+
+
+  test('keeps black-hat Analyze overlays attached to a single inspection tile when switching parts', async () => {
+    mockWorkbenchFetch({
+      user: 'black-hat-output',
+      batches: [{ id: 'batch-blackhat', name: 'Batch Black Hat' }],
+      parts: [
+        {
+          id: 'part-blackhat-1',
+          batch_id: 'batch-blackhat',
+          serial_number: 'SN-BLACKHAT-1',
+          display_name: 'Black Hat Overlay Part',
+          review_state: 'in_review',
+          metadata: {
+            configured_views: ['front'],
+            modalities: ['visual'],
+            view_images: { front: 'blackhat-source.png' },
+            source_images: [
+              { filename: 'blackhat-source.png', image_id: 'blackhat-source-image', side: 'front', modality: 'visual', overlay: false },
+            ],
+            analysis_outputs: [
+              {
+                filename: 'blackhat-source_blackhat_overlay.png',
+                image_id: 'blackhat-overlay-image',
+                label: 'Black-Hat Analysis :: Morphology Overlay',
+                overlay: true,
+                analysis_output: true,
+                side: 'front',
+                modality: 'analyze-overlay',
+                overlay_base_image_id: 'blackhat-source-image',
+                overlay_base_filename: 'blackhat-source.png',
+              },
+            ],
+          },
+        },
+        {
+          id: 'part-normal-2',
+          batch_id: 'batch-blackhat',
+          serial_number: 'SN-NORMAL-2',
+          display_name: 'Normal Part',
+          review_state: 'unreviewed',
+          metadata: {
+            configured_views: ['front'],
+            modalities: ['visual'],
+            view_images: { front: 'normal-source.png' },
+            source_images: [
+              { filename: 'normal-source.png', image_id: 'normal-source-image', side: 'front', modality: 'visual', overlay: false },
+            ],
+          },
+        },
+      ],
+      workspaceState: { selected_batch_id: 'batch-blackhat', selected_part_id: 'part-blackhat-1' },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getByText('Morphology Overlay :: Black-Hat Analysis')).toBeInTheDocument());
+    const viewBoard = document.querySelector('.view-board');
+    expect(within(viewBoard).getAllByTestId('inspection-overlay-composite')).toHaveLength(1);
+    expect(within(viewBoard).queryByAltText('front view')).not.toBeInTheDocument();
+    expect(within(viewBoard).getAllByAltText('front source')).toHaveLength(1);
+    expect(within(viewBoard).getAllByAltText('front overlay')).toHaveLength(1);
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
+
+    fireEvent.click(screen.getByText('Normal Part'));
+    await waitFor(() => expect(within(viewBoard).getByAltText('front view')).toHaveAttribute('src', '/api/images/normal-source-image/content'));
+    expect(within(viewBoard).queryByTestId('inspection-overlay-composite')).not.toBeInTheDocument();
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
+
+    fireEvent.click(screen.getByText('Black Hat Overlay Part'));
+    await waitFor(() => expect(within(viewBoard).getByText('Morphology Overlay :: Black-Hat Analysis')).toBeInTheDocument());
+    expect(within(viewBoard).getAllByTestId('inspection-overlay-composite')).toHaveLength(1);
+    expect(within(viewBoard).queryByAltText('front view')).not.toBeInTheDocument();
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
+
+    const blackHatFrontToggle = screen.getByLabelText('Black Hat Overlay Part view toggles').querySelector('button');
+    fireEvent.click(blackHatFrontToggle);
+    fireEvent.click(screen.getByText('Normal Part'));
+    fireEvent.click(screen.getByText('Black Hat Overlay Part'));
+    await waitFor(() => expect(within(viewBoard).getAllByTestId('inspection-overlay-composite')).toHaveLength(1));
+    expect(within(viewBoard).queryByAltText('front view')).not.toBeInTheDocument();
+    expect(viewBoard.querySelectorAll('.view-cell')).toHaveLength(1);
   });
 
   test('shows measurement instructions and persists geometry calibration payload when creating a line', async () => {
@@ -1228,6 +1729,28 @@ describe('InspectionWorkbenchPanel', () => {
     expect(global.fetch.mock.calls.some((call) => call[0].includes('/annotations') && call[1]?.method === 'POST')).toBe(false);
   });
 
+  test('asks for calibration before allowing tile measurement boxes when calibration is missing', async () => {
+    mockWorkbenchFetch({ ...scenarioByUser[0], metadataDict: {} });
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
+
+    const tileImage = screen.getByAltText('front view');
+    Object.defineProperty(tileImage, 'naturalWidth', { configurable: true, value: 400 });
+    Object.defineProperty(tileImage, 'naturalHeight', { configurable: true, value: 200 });
+    tileImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box on tiles' }));
+    fireEvent.mouseDown(tileImage, { clientX: 50, clientY: 30, button: 0 });
+    fireEvent.mouseMove(tileImage, { clientX: 170, clientY: 90 });
+    fireEvent.mouseUp(tileImage, { clientX: 210, clientY: 130, button: 0 });
+
+    expect(await screen.findByRole('dialog', { name: 'Measurement calibration required' })).toBeInTheDocument();
+    expect(screen.getByText('No Calibration Set')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set Calibration' })).toBeInTheDocument();
+    expect(screen.getByLabelText('tile measurement overlay')).not.toHaveTextContent('0.00 mm');
+    expect(global.fetch.mock.calls.some((call) => call[0].includes('/annotations') && call[1]?.method === 'POST')).toBe(false);
+  });
+
   test('renders measurement line and length text in both tile and fullscreen overlays', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
@@ -1283,22 +1806,125 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('4.20 mm');
   });
 
-  test('draws and labels bounding boxes in the fullscreen view', async () => {
+  test('crops bounding box annotations into child images assigned to the workbench', async () => {
+    const originalImage = global.Image;
+    const originalCreateElement = document.createElement.bind(document);
+    global.Image = class MockImage {
+      constructor() {
+        this.naturalWidth = 400;
+        this.naturalHeight = 200;
+        this.width = 400;
+        this.height = 200;
+      }
+
+      set src(value) {
+        this._src = value;
+        setTimeout(() => this.onload?.(), 0);
+      }
+
+      get src() {
+        return this._src;
+      }
+    };
+    const drawImage = jest.fn();
+    const toBlob = jest.fn((callback) => callback(new Blob(['crop-bytes'], { type: 'image/png' })));
+    jest.spyOn(document, 'createElement').mockImplementation((tagName, ...args) => {
+      if (tagName === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => ({ drawImage }),
+          toBlob,
+        };
+      }
+      return originalCreateElement(tagName, ...args);
+    });
+
+    mockWorkbenchFetch({
+      ...scenarioByUser[0],
+      parts: [{
+        ...scenarioByUser[0].parts[0],
+        metadata: {
+          ...scenarioByUser[0].parts[0].metadata,
+          annotations: [{
+            id: 'box-crop-a',
+            image_id: 'part-basic-1-image-1',
+            defect_class: 'Scratch',
+            modality: 'visual',
+            comment: 'Scratch box',
+            bbox: { x: 25, y: 40, width: 80, height: 50 },
+            geometry: { imageWidth: 400, imageHeight: 200, box: { x: 25, y: 40, width: 80, height: 50, imageWidth: 400, imageHeight: 200 } },
+            measurements: { width_px: 80, height_px: 50 },
+            created_by: 'inspector@example.com',
+            created_at: '2026-04-01T09:15:00Z',
+          }],
+        },
+      }],
+    });
+
+    try {
+      render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Crop annotation Scratch box' })).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'Crop annotation Scratch box' }));
+
+      await waitFor(() => expect(drawImage).toHaveBeenCalled());
+      expect(drawImage).toHaveBeenCalledWith(expect.any(Object), 25, 40, 80, 50, 0, 0, 80, 50);
+      await waitFor(() => expect(global.fetch.mock.calls.some((call) => call[0] === '/api/projects/proj-1/images' && call[1]?.method === 'POST')).toBe(true));
+      const uploadCall = global.fetch.mock.calls.find((call) => call[0] === '/api/projects/proj-1/images' && call[1]?.method === 'POST');
+      const uploadedFile = uploadCall[1].body.get('file');
+      const uploadedMetadata = JSON.parse(uploadCall[1].body.get('metadata'));
+      expect(uploadedFile.name).toBe('25_40_child of front-basic.png.png');
+      expect(uploadedMetadata).toEqual(expect.objectContaining({
+        crop_child_image: true,
+        parent_image_id: 'part-basic-1-image-1',
+        parent_image_filename: 'front-basic.png',
+        crop_annotation_id: 'box-crop-a',
+        crop_title: 'Child of front-basic.png',
+      }));
+      expect(uploadedMetadata.crop_bbox).toEqual(expect.objectContaining({ x: 25, y: 40, width: 80, height: 50 }));
+      expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj-1/parts/image-assignments', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ filename: '25_40_child of front-basic.png.png', to_part_id: 'part-basic-1' }),
+      }));
+      await waitFor(() => expect(screen.getByAltText('crop view')).toBeInTheDocument());
+    } finally {
+      document.createElement.mockRestore();
+      global.Image = originalImage;
+    }
+  });
+
+  test('preserves fullscreen zoom while drawing repeated bounding boxes', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
-	    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
-	    fireEvent.click(screen.getByAltText('front view'));
-	    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
-	    expect(screen.getByText(/Press and drag to draw a bounding box/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
+    fireEvent.click(screen.getByAltText('front view'));
 
-	    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
-	    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 500 });
-	    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 250 });
-	    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 250, right: 500, bottom: 250 });
-	    fireEvent.mouseDown(fullscreenImage, { clientX: 80, clientY: 40, button: 0 });
-	    fireEvent.mouseMove(fullscreenImage, { clientX: 180, clientY: 100 });
-	    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 5.00 mm'));
-	    fireEvent.mouseUp(fullscreenImage, { clientX: 230, clientY: 120, button: 0 });
+    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
+    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 500 });
+    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 250 });
+    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 250, right: 500, bottom: 250 });
+
+    fireEvent.wheel(fullscreenImage, { deltaY: -80, clientX: 250, clientY: 125 });
+    const zoomLayer = document.querySelector('.inspection-fullscreen-image-zoom-layer');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+    expect(zoomLayer.style.transformOrigin).toBe('50% 50%');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Measure' }));
+    expect(screen.getByRole('button', { name: 'Measure' })).toHaveClass('active');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+    fireEvent.click(screen.getByRole('button', { name: 'Measure' }));
+    expect(screen.getByRole('button', { name: 'Measure' })).not.toHaveClass('active');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+    expect(screen.getByText(/Press and drag to draw a bounding box/i)).toBeInTheDocument();
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+    expect(zoomLayer.style.transformOrigin).toBe('50% 50%');
+
+    fireEvent.mouseDown(fullscreenImage, { clientX: 80, clientY: 40, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, { clientX: 180, clientY: 100 });
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 5.00 mm'));
+    fireEvent.mouseUp(fullscreenImage, { clientX: 230, clientY: 120, button: 0 });
 
     await waitFor(() => {
       const postCall = global.fetch.mock.calls.find((call) => {
@@ -1311,28 +1937,106 @@ describe('InspectionWorkbenchPanel', () => {
       expect(body.image_id).toBe('part-basic-1-image-1');
       expect(body.bbox).toEqual(expect.objectContaining({ x: 80, y: 40, width: 150, height: 80 }));
     });
-	    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 7.50 mm'));
-	    expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Height 4.00 mm');
-	    expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('Width 7.50 mm');
-	    expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active');
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 7.50 mm'));
+    expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Height 4.00 mm');
+    expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('Width 7.50 mm');
+    expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active');
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
 
-    const topLeftCorner = await screen.findByLabelText('Reposition topLeft corner for Drawn bounding box');
-    fireEvent.click(topLeftCorner, { clientX: 80, clientY: 40 });
-    expect(screen.getByTestId('fullscreen-measurement-zoom-lens')).toBeInTheDocument();
-    fireEvent.click(fullscreenImage, { clientX: 100, clientY: 60 });
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
+    fireEvent.mouseDown(fullscreenImage, { clientX: 260, clientY: 130, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, { clientX: 320, clientY: 170 });
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 3.00 mm'));
+    fireEvent.mouseUp(fullscreenImage, { clientX: 340, clientY: 180, button: 0 });
 
     await waitFor(() => {
-      const patchCall = global.fetch.mock.calls.find((call) => {
-        if (!call[0].includes('/annotations/annotation-1') || call[1]?.method !== 'PATCH') return false;
+      const boxPostCalls = global.fetch.mock.calls.filter((call) => {
+        if (!call[0].includes('/annotations') || call[1]?.method !== 'POST') return false;
         const body = JSON.parse(call[1].body);
         return body.geometry?.box;
       });
-      expect(patchCall).toBeDefined();
-      const body = JSON.parse(patchCall[1].body);
-      expect(body.bbox).toEqual(expect.objectContaining({ x: 90, y: 50, width: 140, height: 70 }));
-      expect(body.measurements).toEqual(expect.objectContaining({ width_mm: 7, height_mm: 3.5 }));
+      expect(boxPostCalls).toHaveLength(2);
+      const secondBody = JSON.parse(boxPostCalls[1][1].body);
+      expect(secondBody.bbox).toEqual(expect.objectContaining({ x: 260, y: 130, width: 80, height: 50 }));
     });
-	  });
+    expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active'));
+  });
+
+
+  test('maps fullscreen zoomed-and-panned pointer tip pixels to bounding box geometry', async () => {
+    mockWorkbenchFetch(scenarioByUser[0]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
+    fireEvent.click(screen.getByAltText('front view'));
+
+    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
+    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 500 });
+    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 250 });
+    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 250, right: 500, bottom: 250 });
+
+    fireEvent.wheel(fullscreenImage, { deltaY: -80, clientX: 250, clientY: 125 });
+    fireEvent.mouseDown(fullscreenImage, { clientX: 250, clientY: 125, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, { clientX: 290, clientY: 155 });
+    fireEvent.mouseUp(fullscreenImage, { clientX: 290, clientY: 155, button: 0 });
+
+    const zoomLayer = document.querySelector('.inspection-fullscreen-image-zoom-layer');
+    expect(zoomLayer.style.transform).toBe('translate(40px, 30px) scale(1.15)');
+    expect(zoomLayer.style.transformOrigin).toBe('50% 50%');
+
+    // Simulate the browser's post-transform image bounds so the event client
+    // coordinate represents the exact pixel beneath the rendered pointer tip on
+    // the zoomed, panned image.
+    const transformedRect = {
+      left: 2.5,
+      top: 11.25,
+      width: 575,
+      height: 287.5,
+      right: 577.5,
+      bottom: 298.75,
+    };
+    fullscreenImage.getBoundingClientRect = () => transformedRect;
+    const clientForNaturalPixel = (x, y) => ({
+      clientX: transformedRect.left + ((x / 500) * transformedRect.width),
+      clientY: transformedRect.top + ((y / 250) * transformedRect.height),
+    });
+
+    const pointerTipStart = clientForNaturalPixel(130, 65);
+    const pointerTipEnd = clientForNaturalPixel(330, 185);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+    fireEvent.mouseDown(fullscreenImage, { ...pointerTipStart, button: 0 });
+    fireEvent.mouseMove(fullscreenImage, pointerTipEnd);
+    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 10.00 mm'));
+    fireEvent.mouseUp(fullscreenImage, { ...pointerTipEnd, button: 0 });
+
+    await waitFor(() => {
+      const postCall = global.fetch.mock.calls.find((call) => {
+        if (!call[0].includes('/annotations') || call[1]?.method !== 'POST') return false;
+        const body = JSON.parse(call[1].body);
+        return body.geometry?.box;
+      });
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall[1].body);
+      expect(body.geometry.box).toEqual(expect.objectContaining({
+        x: 130,
+        y: 65,
+        width: 200,
+        height: 120,
+        imageWidth: 500,
+        imageHeight: 250,
+      }));
+      expect(body.bbox).toEqual(expect.objectContaining({ x: 130, y: 65, width: 200, height: 120 }));
+      expect(body.measurements).toEqual(expect.objectContaining({
+        width_px: 200,
+        height_px: 120,
+        width_mm: 10,
+        height_mm: 6,
+      }));
+    });
+  });
 
   test('shares source-image annotations across Analyze overlays and saves overlay measurements to the source image', async () => {
     mockWorkbenchFetch({
@@ -1397,7 +2101,7 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
-  test('highlights, repositions, and deletes fullscreen measurement endpoints', async () => {
+  test('highlights, repositions, and deletes fullscreen measurement endpoints (PT2 lens)', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
       parts: [{
@@ -1424,21 +2128,19 @@ describe('InspectionWorkbenchPanel', () => {
     Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 200 });
     fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
 
-    fireEvent.mouseMove(fullscreenImage, { clientX: 282, clientY: 160 });
+    fireEvent.click(screen.getByText('Endpoint check'));
     const endpointDot = await screen.findByLabelText('Reposition end endpoint for Endpoint check');
     expect(screen.getByLabelText('Reposition start endpoint for Endpoint check')).toBeInTheDocument();
     fireEvent.click(endpointDot, { clientX: 282, clientY: 160 });
-    expect(screen.getByTestId('fullscreen-measurement-zoom-lens')).toBeInTheDocument();
-    fireEvent.wheel(fullscreenImage, { deltaY: -80, clientX: 282, clientY: 160 });
-    expect(screen.getByTestId('fullscreen-measurement-zoom-lens').style.backgroundSize).toBe('4400px 2200px');
-    fireEvent.click(endpointDot, { clientX: 280, clientY: 160 });
+    expect(screen.queryByTestId('fullscreen-measurement-zoom-lens')).not.toBeInTheDocument();
+        fireEvent.click(endpointDot, { clientX: 280, clientY: 160 });
 
     await waitFor(() => {
       const patchCall = global.fetch.mock.calls.find((call) => call[0].includes('/annotations/measurement-endpoint-a') && call[1]?.method === 'PATCH');
       expect(patchCall).toBeDefined();
       const body = JSON.parse(patchCall[1].body);
-      expect(body.geometry.line).toEqual(expect.objectContaining({ x2: 281, y2: 160 }));
-      expect(body.measurements.length_px).toBeCloseTo(197.89, 2);
+      expect(body.geometry.line).toEqual(expect.objectContaining({ x2: 280, y2: 160 }));
+      expect(body.measurements.length_px).toBeCloseTo(196.98, 2);
     });
 
     fireEvent.mouseMove(fullscreenImage, { clientX: 100, clientY: 80 });
@@ -1474,7 +2176,7 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
-  test('renders transparent line and endpoint overlay inside fine-tune zoom lens', async () => {
+  test('does not render fine-tune zoom lens overlay while editing endpoints', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
       parts: [{
@@ -1501,18 +2203,14 @@ describe('InspectionWorkbenchPanel', () => {
     Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 200 });
     fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
 
-    fireEvent.mouseMove(fullscreenImage, { clientX: 260, clientY: 120 });
+    fireEvent.click(screen.getByText('Lens overlay check'));
     const endDot = await screen.findByLabelText('Reposition end endpoint for Lens overlay check');
     fireEvent.click(endDot, { clientX: 260, clientY: 120 });
 
-    const zoomOverlay = screen.getByLabelText('Measurement fine-tune overlay');
-    expect(zoomOverlay).toBeInTheDocument();
-    expect(zoomOverlay.querySelector('g')).toHaveAttribute('opacity', '0.45');
-    expect(zoomOverlay.querySelectorAll('line')).toHaveLength(1);
-    expect(zoomOverlay.querySelectorAll('circle')).toHaveLength(2);
+    expect(screen.queryByLabelText('Measurement fine-tune overlay')).not.toBeInTheDocument();
   });
 
-  test('commits endpoint using zoom-lens tracked pointer position for pixel-accurate registration', async () => {
+  test('commits endpoint using the clicked image position after annotation-column selection', async () => {
     mockWorkbenchFetch({
       ...scenarioByUser[0],
       parts: [{
@@ -1539,7 +2237,7 @@ describe('InspectionWorkbenchPanel', () => {
     Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 200 });
     fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
 
-    fireEvent.mouseMove(fullscreenImage, { clientX: 280, clientY: 160 });
+    fireEvent.click(screen.getByText('Lens commit check'));
     const endDot = await screen.findByLabelText('Reposition end endpoint for Lens commit check');
     fireEvent.click(endDot, { clientX: 280, clientY: 160 });
 
@@ -1550,8 +2248,135 @@ describe('InspectionWorkbenchPanel', () => {
       const patchCall = global.fetch.mock.calls.find((call) => call[0].includes('/annotations/measurement-lens-commit-a') && call[1]?.method === 'PATCH');
       expect(patchCall).toBeDefined();
       const body = JSON.parse(patchCall[1].body);
-      expect(body.geometry.line).toEqual(expect.objectContaining({ x2: 300, y2: 165 }));
+      expect(body.geometry.line).toEqual(expect.objectContaining({ x2: 120, y2: 45 }));
     });
+  });
+
+  test('assigned overlays render with source images by default and hide only from inspection checkboxes', async () => {
+    const views = ['front', 'back'];
+    const parts = [1, 2, 3].map((partNumber) => {
+      const sourceImages = views.flatMap((view) => {
+        const baseFilename = `part-${partNumber}-${view}.png`;
+        const baseImageId = `part-${partNumber}-${view}-source`;
+        return [
+          {
+            filename: baseFilename,
+            image_id: baseImageId,
+            side: view,
+            modality: 'visual',
+            overlay: false,
+          },
+          {
+            filename: `part-${partNumber}-${view}-overlay.png`,
+            image_id: `part-${partNumber}-${view}-overlay`,
+            side: view,
+            modality: 'overlay',
+            overlay: true,
+            overlay_base_image_id: baseImageId,
+            overlay_base_filename: baseFilename,
+          },
+        ];
+      });
+      return {
+        id: `part-overlay-${partNumber}`,
+        batch_id: 'batch-overlay',
+        serial_number: `SN-OVERLAY-${partNumber}`,
+        display_name: `Overlay Part ${partNumber}`,
+        review_state: 'in_review',
+        metadata: {
+          configured_views: views,
+          modalities: ['visual', 'overlay'],
+          view_images: {
+            front: `part-${partNumber}-front.png`,
+            back: `part-${partNumber}-back.png`,
+          },
+          source_images: sourceImages,
+        },
+      };
+    });
+
+    mockWorkbenchFetch({
+      user: 'assigned-overlays',
+      batches: [{ id: 'batch-overlay', name: 'Batch Overlay' }],
+      parts,
+      workspaceState: {
+        selected_batch_id: 'batch-overlay',
+        selected_part_id: 'part-overlay-1',
+        inspector: { image_enabled: true, modalities: ['visual'], view_name: 'front' },
+      },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getAllByText('Overlay Part 1').length).toBeGreaterThan(0));
+    expect(screen.getByText('Overlay Part 2')).toBeInTheDocument();
+    expect(screen.getByText('Overlay Part 3')).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getAllByTestId('inspection-overlay-composite')).toHaveLength(2));
+    expect(screen.getAllByAltText('front source')).toHaveLength(1);
+    expect(screen.getAllByAltText('front overlay')).toHaveLength(1);
+    expect(screen.getByText('overlay for part-1-front.png')).toBeInTheDocument();
+    expect(screen.getByText('overlay for part-1-back.png')).toBeInTheDocument();
+    expect(screen.getAllByAltText('back source')).toHaveLength(1);
+    expect(screen.getAllByAltText('back overlay')).toHaveLength(1);
+    expect(screen.queryByAltText('front view')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Overlays'));
+    await waitFor(() => expect(screen.queryByTestId('inspection-overlay-composite')).not.toBeInTheDocument());
+    expect(screen.getAllByAltText('front view')).toHaveLength(1);
+    expect(screen.getAllByAltText('back view')).toHaveLength(1);
+    expect(screen.getByLabelText('Source images')).toBeChecked();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'OVERLAY' })[0]);
+    expect(screen.queryByTestId('inspection-overlay-composite')).not.toBeInTheDocument();
+    expect(screen.getAllByAltText('front view')).toHaveLength(1);
+    expect(screen.getAllByAltText('back view')).toHaveLength(1);
+    expect(screen.getByLabelText('Overlays')).not.toBeChecked();
+
+    fireEvent.click(screen.getByLabelText('Overlays'));
+    await waitFor(() => expect(screen.getAllByTestId('inspection-overlay-composite')).toHaveLength(2));
+  });
+
+  test('part summary modality buttons toggle matching images in the view window', async () => {
+    mockWorkbenchFetch({
+      user: 'modality-toggle',
+      batches: [{ id: 'batch-modal', name: 'Batch Modal' }],
+      parts: [
+        {
+          id: 'part-modal-1',
+          batch_id: 'batch-modal',
+          serial_number: 'SN-MODAL-1',
+          display_name: 'Modal Part',
+          review_state: 'in_review',
+          metadata: {
+            configured_views: ['front'],
+            modalities: ['visual', 'thermal'],
+            view_images: { front: 'modal-front-visual.png' },
+            source_images: [
+              { filename: 'modal-front-visual.png', image_id: 'modal-visual-image', side: 'front', modality: 'visual', overlay: false },
+              { filename: 'modal-front-thermal.png', image_id: 'modal-thermal-image', side: 'front', modality: 'thermal', overlay: true },
+            ],
+          },
+        },
+      ],
+      workspaceState: { inspector: { image_enabled: true, modalities: ['visual'], view_name: 'front' } },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getAllByText('Modal Part').length).toBeGreaterThan(0));
+    expect(screen.getAllByAltText('front view')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'THERMAL' }));
+    await waitFor(() => expect(screen.getAllByAltText('front view')).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'VISUAL' }));
+    await waitFor(() => expect(screen.getAllByAltText('front view')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'FRONT' }));
+    await waitFor(() => expect(screen.queryByAltText('front view')).not.toBeInTheDocument());
   });
 
   test('does not duplicate original front and back images from source_images when view_images exists', async () => {
@@ -1586,6 +2411,114 @@ describe('InspectionWorkbenchPanel', () => {
     expect(screen.getAllByAltText('back view')).toHaveLength(1);
     expect(screen.queryByText('IMAGE 1')).not.toBeInTheDocument();
     expect(screen.queryByText('IMAGE 2')).not.toBeInTheDocument();
+  });
+
+  test.each([
+    {
+      extension: 'png',
+      label: 'PNG 8-bit',
+      bitDepth: 8,
+      dtype: 'uint8',
+      lowRange: { min: 12, max: 96 },
+      highRange: { min: 64, max: 240 },
+      editValue: 180,
+    },
+    {
+      extension: 'png',
+      label: 'PNG 16-bit',
+      bitDepth: 16,
+      dtype: 'uint16',
+      lowRange: { min: 1024, max: 4096 },
+      highRange: { min: 2048, max: 12000 },
+      editValue: 8000,
+    },
+    {
+      extension: 'tif',
+      label: 'TIFF 8-bit',
+      bitDepth: 8,
+      dtype: 'uint8',
+      lowRange: { min: 12, max: 96 },
+      highRange: { min: 64, max: 240 },
+      editValue: 180,
+    },
+    {
+      extension: 'tif',
+      label: 'TIFF 16-bit',
+      bitDepth: 16,
+      dtype: 'uint16',
+      lowRange: { min: 1024, max: 4096 },
+      highRange: { min: 2048, max: 12000 },
+      editValue: 8000,
+    },
+  ])('uses loaded $label value range for PT3 display window controls', async ({
+    extension,
+    label,
+    bitDepth,
+    dtype,
+    lowRange,
+    highRange,
+    editValue,
+  }) => {
+    const expectedDomain = `${lowRange.min}-${highRange.max}`;
+    mockWorkbenchFetch({
+      user: `pt3-${extension}-${bitDepth}-window`,
+      batches: [{ id: `batch-${extension}-${bitDepth}`, name: `Batch ${label}` }],
+      parts: [
+        {
+          id: `part-${extension}-${bitDepth}-1`,
+          batch_id: `batch-${extension}-${bitDepth}`,
+          serial_number: `SN-${extension.toUpperCase()}-${bitDepth}-1`,
+          display_name: `${label} Part`,
+          review_state: 'in_review',
+          metadata: {
+            voxel_dtype: dtype,
+            volume_shape: { axial: 2, coronal: 2, sagittal: 2 },
+            source_images: [
+              {
+                filename: `slice-low.${extension}`,
+                image_id: `slice-low-${extension}-${bitDepth}-id`,
+                metadata: {
+                  slice_index: 0,
+                  pixel_dtype: dtype,
+                  bit_depth: bitDepth,
+                  pixel_value_range: lowRange,
+                },
+              },
+              {
+                filename: `slice-high.${extension}`,
+                image_id: `slice-high-${extension}-${bitDepth}-id`,
+                metadata: {
+                  slice_index: 1,
+                  pixel_dtype: dtype,
+                  bit_depth: bitDepth,
+                  pixel_value_range: highRange,
+                },
+              },
+            ],
+          },
+        },
+      ],
+      workspaceState: { selected_part_id: `part-${extension}-${bitDepth}-1` },
+      hotkeys: { accept_classification: 'a', reject_classification: 'r', toggle_shortcut_help: 'h' },
+    });
+
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByText(`${label} Part`)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('3D view'), { target: { value: 'stack' } });
+
+    expect(screen.getByText(`${expectedDomain} loaded image range`)).toBeInTheDocument();
+    expect(screen.getByLabelText('Display window minimum handle')).toHaveAttribute('min', String(lowRange.min));
+    expect(screen.getByLabelText('Display window maximum handle')).toHaveAttribute('max', String(highRange.max));
+    expect(screen.getAllByTestId('mpr-preview-axial')[0].querySelector('.mpr-slice-canvas')).toHaveAttribute(
+      'data-display-domain',
+      expectedDomain,
+    );
+
+    fireEvent.change(screen.getByLabelText('Display window maximum handle'), {
+      target: { value: String(editValue) },
+    });
+    expect(screen.getByLabelText('Display window maximum')).toHaveValue(editValue);
   });
 
   test('defaults PT3 to focused four-quadrant MPR with modal access and wheel controls', async () => {
@@ -1758,8 +2691,8 @@ describe('InspectionWorkbenchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /ML Helper/i }));
     expect(screen.getByLabelText('ML helper options')).toHaveTextContent('OpenCV');
     fireEvent.change(screen.getByLabelText('Method family'), { target: { value: 'sam' } });
-    expect(screen.getByLabelText('Segment function')).toHaveValue('ml.sam.segment_anything');
-    fireEvent.change(screen.getByLabelText('Variant'), { target: { value: 'sam_vit_b' } });
+    expect(screen.getByLabelText('Segment function')).toHaveValue('segmentation.sam.placeholder');
+    fireEvent.change(screen.getByLabelText('Integration'), { target: { value: 'placeholder' } });
     const beforeMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
     fireEvent.mouseDown(stage, { clientX: 220, clientY: 110, button: 0 });
     await waitFor(() => expect(screen.getByText(/Selected ML region 2/i)).toBeInTheDocument());
@@ -1768,8 +2701,8 @@ describe('InspectionWorkbenchPanel', () => {
     const afterFirstMlCalls = global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length;
     expect(afterFirstMlCalls).toBe(beforeMlCalls + 1);
     const mlPayload = JSON.parse(global.fetch.mock.calls.find((call) => call[0].includes('/slice-segmentation'))[1].body);
-    expect(mlPayload.method_id).toBe('ml.sam.segment_anything');
-    expect(mlPayload.parameters.variant).toBe('sam_vit_b');
+    expect(mlPayload.method_id).toBe('segmentation.sam.placeholder');
+    expect(mlPayload.parameters.integration_mode).toBe('placeholder');
 
     fireEvent.mouseDown(stage, { clientX: 221, clientY: 111, button: 0 });
     expect(global.fetch.mock.calls.filter((call) => call[0].includes('/slice-segmentation')).length).toBe(afterFirstMlCalls);

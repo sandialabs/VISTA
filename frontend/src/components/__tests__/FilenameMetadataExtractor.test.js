@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import FilenameMetadataExtractor from '../FilenameMetadataExtractor';
+import FilenameMetadataExtractor, { applyOverlayIndicatorMetadata, buildConfiguredFilenameFields } from '../FilenameMetadataExtractor';
 
 const makeFile = (name) => new File([''], name, { type: 'image/png' });
 
@@ -12,6 +12,58 @@ const renderExtractor = (props = {}) => {
   };
   return render(<FilenameMetadataExtractor {...defaultProps} />);
 };
+
+
+
+describe('filename configuration helpers', () => {
+  test('maps arbitrary custom hierarchy and image descriptor labels to metadata keys', () => {
+    const fields = buildConfiguredFilenameFields({
+      hierarchy_levels: [
+        { id: 'other', label: 'Work Cell', abbreviation: 'WC' },
+        { id: 'drawing_number', label: 'Drawing', abbreviation: 'D' },
+      ],
+      image_descriptors: [
+        { id: 'other', label: 'Capture Version', abbreviation: 'v' },
+        { id: 'image_identifier', label: 'Image Identifier', abbreviation: 'IMG' },
+      ],
+    });
+
+    expect(fields.map((field) => field.key)).toEqual([
+      'work_cell',
+      'design_number',
+      'capture_version',
+      'image_identifier',
+      'overlay',
+    ]);
+  });
+
+  test('derives overlay truth and base filename from configured overlay specifier', () => {
+    const metadata = applyOverlayIndicatorMetadata(
+      'D100_LOT1_SET2_SN3_front_visual_v1_overlay.png',
+      {
+        design_number: 'D100',
+        lot_number: 'LOT1',
+        set_number: 'SET2',
+        serial_number: 'SN3',
+        side: 'front',
+        modality: 'visual',
+        version: 'v1',
+        overlay_role: 'overlay',
+      },
+      ['D100', 'LOT1', 'SET2', 'SN3', 'front', 'visual', 'v1', 'overlay'],
+      ['design_number', 'lot_number', 'set_number', 'serial_number', 'side', 'modality', 'version', 'overlay_role'],
+      'simple',
+      '_',
+      { overlay_indicator: { enabled: true, field_key: 'overlay_role', values: ['overlay'], remove_from_base_filename: true } },
+    );
+
+    expect(metadata).toEqual(expect.objectContaining({
+      overlay: true,
+      version: 'v1',
+      overlay_base_filename: 'D100_LOT1_SET2_SN3_front_visual_v1.png',
+    }));
+  });
+});
 
 describe('FilenameMetadataExtractor', () => {
   describe('Initial render', () => {

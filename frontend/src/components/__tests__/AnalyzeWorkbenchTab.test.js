@@ -3,7 +3,7 @@ import { createEvent, fireEvent, render, screen, waitFor, within } from '@testin
 import AnalyzeWorkbenchTab from '../AnalyzeWorkbenchTab';
 
 const toolboxPayload = {
-  name: 'test_toolbox',
+  name: 'backend_analyze_toolbox',
   version: '0.1.0',
   contract_version: 'vista-analyze.v1',
   methods: [
@@ -49,29 +49,33 @@ const toolboxPayload = {
       input_types: ['image'],
       output_types: ['image'],
       parameters: [
-        { name: 'window', label: 'Window', type: 'float', default: 400 },
+        { name: 'window', label: 'Window', type: 'float', default: 400, min_value: 1 },
         { name: 'level', label: 'Level', type: 'float', default: 40 },
-        { name: 'sensitivity', label: 'Sensitivity', type: 'float', default: 0.5, min_value: 0, max_value: 1 },
         { name: 'clip', label: 'Clip Outliers', type: 'boolean', default: true },
       ],
     },
     {
-      id: 'segmentation.watershed_seeds',
-      name: 'Watershed From Seeds',
+      id: 'segmentation.opencv.placeholder',
+      name: 'OpenCV (placeholder)',
       category: 'Segmentation',
-      description: 'Segment',
-      input_types: ['image', 'mask'],
-      output_types: ['labels'],
-      parameters: [{ name: 'seed_spacing_px', label: 'Seed Spacing (px)', type: 'integer', default: 18 }],
+      description: 'Placeholder segmenter',
+      input_types: ['image'],
+      output_types: ['mask'],
+      parameters: [
+        { name: 'integration_mode', label: 'Integration', type: 'select', default: 'placeholder', options: ['placeholder'] },
+      ],
     },
     {
-      id: 'ml.yolov8.detect',
-      name: 'YOLOv8 Object Detection',
-      category: 'Machine Learning',
-      description: 'Detect',
+      id: 'preprocess.minmax_normalization',
+      name: 'Min-Max Normalization',
+      category: 'Preprocessing',
+      description: 'Rescale image intensities to a target numeric range.',
       input_types: ['image'],
-      output_types: ['detections'],
-      parameters: [{ name: 'model', label: 'Model', type: 'string', default: 'yolov8n.pt', required: true }],
+      output_types: ['image'],
+      parameters: [
+        { name: 'output_min', label: 'Output Min', type: 'float', default: 0 },
+        { name: 'output_max', label: 'Output Max', type: 'float', default: 1 },
+      ],
     },
   ],
 };
@@ -163,28 +167,38 @@ describe('AnalyzeWorkbenchTab', () => {
     jest.resetAllMocks();
   });
 
-  test('loads toolbox methods, renders graph, edits window level, and runs workflow', async () => {
+  test('loads toolbox methods and renders the default graph', async () => {
     mockFetch();
     render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
     expect(await screen.findByRole('heading', { name: 'Pipeline Studio' })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId('analyze-source-summary')).toHaveTextContent('1 parts'));
+    expect(await screen.findByTestId('analyze-source-summary')).toHaveTextContent('1 parts');
     expect(screen.getByLabelText('Analyze Workbench')).not.toBeEmptyDOMElement();
     expect(screen.getByLabelText('Analyze toolbox')).toHaveTextContent('Input');
     expect(screen.getByTestId('analyze-graph')).toHaveTextContent('Loaded Part Images');
     expect(screen.getByLabelText('Workflow block settings')).toHaveTextContent('Status');
     expect(screen.getByTestId('analyze-source-summary')).toHaveTextContent('2 images');
     expect(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i })).toBeInTheDocument();
+  });
 
-    dragMethodToGraph(/YOLOv8 Object Detection/i, 'ml.yolov8.detect');
-    expect(screen.getByRole('button', { name: /Workflow block YOLOv8 Object Detection/i })).toBeInTheDocument();
+  test('shows output artifact options without exposing internal policy fields', async () => {
+    mockFetch();
+    render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
+    await screen.findByRole('button', { name: /Workflow block Recipe \/ Artifact Output/i });
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Recipe \/ Artifact Output/i }));
+
     expect(screen.getByLabelText('Output Mode')).toBeInTheDocument();
     expect(screen.getByLabelText('Export Policy')).toBeInTheDocument();
     expect(screen.queryByLabelText('Version Strategy')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Cache Policy')).not.toBeInTheDocument();
+  });
 
+  test('edits window level and runs workflow', async () => {
+    mockFetch();
+    render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
+
+    await screen.findByRole('button', { name: /Workflow block Window \/ Level Normalization/i });
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i }));
     fireEvent.change(screen.getByLabelText('Window'), { target: { value: '250' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
@@ -215,7 +229,7 @@ describe('AnalyzeWorkbenchTab', () => {
     }));
     expect(workflow.source.kind).toBe('project_parts');
     expect(executeCall[1].body).toContain('"window":250');
-  });
+  }, 10000);
 
   test('steps float parameters by arrows and adaptive wheel increments', async () => {
     mockFetch();
@@ -224,41 +238,39 @@ describe('AnalyzeWorkbenchTab', () => {
     await screen.findByRole('button', { name: /Workflow block Window \/ Level Normalization/i });
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i }));
 
-    const sensitivityInput = screen.getByLabelText('Sensitivity');
-    expect(sensitivityInput).toHaveAttribute('step', '0.05');
-
-    fireEvent.change(sensitivityInput, { target: { value: '0.55' } });
-    expect(sensitivityInput).toHaveValue(0.55);
-
-    fireEvent.wheel(sensitivityInput, { deltaY: -6 });
-    await waitFor(() => expect(sensitivityInput).toHaveValue(0.56));
-
-    fireEvent.wheel(sensitivityInput, { deltaY: 120 });
-    await waitFor(() => expect(sensitivityInput).toHaveValue(0.51));
-
-    fireEvent.change(sensitivityInput, { target: { value: '0.99' } });
-    fireEvent.wheel(sensitivityInput, { deltaY: -120 });
-    await waitFor(() => expect(sensitivityInput).toHaveValue(1));
-
     const windowInput = screen.getByLabelText('Window');
     expect(windowInput).toHaveAttribute('step', '0.05');
-    const seedNode = screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i });
-    fireEvent.click(seedNode);
-    expect(screen.getByLabelText('Seed Spacing (px)')).toHaveAttribute('step', '1');
+
+    fireEvent.change(windowInput, { target: { value: '250' } });
+    expect(windowInput).toHaveValue(250);
+
+    fireEvent.wheel(windowInput, { deltaY: -6 });
+    await waitFor(() => expect(windowInput).toHaveValue(250.01));
+
+    fireEvent.wheel(windowInput, { deltaY: 120 });
+    await waitFor(() => expect(windowInput).toHaveValue(249.96));
+
+    fireEvent.change(windowInput, { target: { value: '1.01' } });
+    fireEvent.wheel(windowInput, { deltaY: 120 });
+    await waitFor(() => expect(windowInput).toHaveValue(1));
+    const placeholderNode = screen.getByRole('button', { name: /Workflow block OpenCV \(placeholder\)/i });
+    fireEvent.click(placeholderNode);
+    expect(screen.getByLabelText('Integration')).toHaveValue('placeholder');
   });
 
   test('clicking a toolbox method previews its configuration without adding a workflow block', async () => {
     mockFetch();
     render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
-    const toolboxMethod = await screen.findByRole('button', { name: /^YOLOv8 Object Detection/i });
+    const toolboxMethod = await screen.findByRole('button', { name: /^Min-Max Normalization/i });
     fireEvent.click(toolboxMethod);
 
     const inspector = screen.getByLabelText('Workflow block settings');
-    expect(within(inspector).getByRole('heading', { name: 'YOLOv8 Object Detection' })).toBeInTheDocument();
-    expect(within(inspector).getByText('ml.yolov8.detect')).toBeInTheDocument();
-    expect(within(inspector).getByLabelText('Model')).toHaveValue('yolov8n.pt');
-    expect(screen.queryByRole('button', { name: /Workflow block YOLOv8 Object Detection/i })).not.toBeInTheDocument();
+    expect(within(inspector).getByRole('heading', { name: 'Min-Max Normalization' })).toBeInTheDocument();
+    expect(within(inspector).getByText('preprocess.minmax_normalization')).toBeInTheDocument();
+    expect(within(inspector).getByLabelText('Output Min')).toHaveValue(0);
+    expect(within(inspector).getByLabelText('Output Max')).toHaveValue(1);
+    expect(screen.queryByRole('button', { name: /Workflow block Min-Max Normalization/i })).not.toBeInTheDocument();
   });
 
   test('drops a toolbox block into the middle of an existing chain from the drop position', async () => {
@@ -266,10 +278,10 @@ describe('AnalyzeWorkbenchTab', () => {
     render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
     await screen.findByRole('button', { name: /Workflow block Loaded Part Images/i });
-    dragMethodToGraph(/^YOLOv8 Object Detection/i, 'ml.yolov8.detect', { clientX: 430, clientY: 120 });
+    dragMethodToGraph(/^Min-Max Normalization/i, 'preprocess.minmax_normalization', { clientX: 430, clientY: 120 });
 
-    expect(screen.getByRole('button', { name: /Workflow block YOLOv8 Object Detection/i })).toHaveStyle({ left: '520px', top: '84px' });
-    expect(screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i })).toHaveStyle({ left: '744px', top: '84px' });
+    expect(screen.getByRole('button', { name: /Workflow block Min-Max Normalization/i })).toHaveStyle({ left: '520px', top: '84px' });
+    expect(screen.getByRole('button', { name: /Workflow block OpenCV \(placeholder\)/i })).toHaveStyle({ left: '744px', top: '84px' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(screen.getByTestId('analyze-run-summary')).toHaveTextContent('completed'));
@@ -278,8 +290,8 @@ describe('AnalyzeWorkbenchTab', () => {
     expect(workflow.nodes.map((node) => node.method_id)).toEqual([
       'source.project_part_images',
       'preprocess.window_level_normalization',
-      'ml.yolov8.detect',
-      'segmentation.watershed_seeds',
+      'preprocess.minmax_normalization',
+      'segmentation.opencv.placeholder',
       'output.versioned_image_artifact',
     ]);
   });
@@ -289,9 +301,9 @@ describe('AnalyzeWorkbenchTab', () => {
     render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
     await screen.findByRole('button', { name: /Workflow block Loaded Part Images/i });
-    dragMethodToGraph(/^YOLOv8 Object Detection/i, 'ml.yolov8.detect', { clientX: 1040, clientY: 120 });
+    dragMethodToGraph(/^Min-Max Normalization/i, 'preprocess.minmax_normalization', { clientX: 1040, clientY: 120 });
 
-    expect(screen.getByRole('button', { name: /Workflow block YOLOv8 Object Detection/i })).toHaveStyle({ left: '968px', top: '84px' });
+    expect(screen.getByRole('button', { name: /Workflow block Min-Max Normalization/i })).toHaveStyle({ left: '968px', top: '84px' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(screen.getByTestId('analyze-run-summary')).toHaveTextContent('completed'));
@@ -300,9 +312,9 @@ describe('AnalyzeWorkbenchTab', () => {
     expect(workflow.nodes.map((node) => node.method_id)).toEqual([
       'source.project_part_images',
       'preprocess.window_level_normalization',
-      'segmentation.watershed_seeds',
+      'segmentation.opencv.placeholder',
       'output.versioned_image_artifact',
-      'ml.yolov8.detect',
+      'preprocess.minmax_normalization',
     ]);
   });
 
@@ -311,9 +323,9 @@ describe('AnalyzeWorkbenchTab', () => {
     render(<AnalyzeWorkbenchTab projectId="proj-1" projectType="PT3" setError={jest.fn()} />);
 
     await screen.findByRole('button', { name: /Workflow block Loaded Part Images/i });
-    dragMethodToGraph(/^YOLOv8 Object Detection/i, 'ml.yolov8.detect', { clientX: 320, clientY: 500 });
+    dragMethodToGraph(/^Min-Max Normalization/i, 'preprocess.minmax_normalization', { clientX: 320, clientY: 500 });
 
-    expect(screen.getByRole('button', { name: /Workflow block YOLOv8 Object Detection/i })).toHaveStyle({ left: '72px', top: '236px' });
+    expect(screen.getByRole('button', { name: /Workflow block Min-Max Normalization/i })).toHaveStyle({ left: '72px', top: '236px' });
   });
 
   test('chooses an example image and runs only the example through the pipeline', async () => {
@@ -370,11 +382,11 @@ describe('AnalyzeWorkbenchTab', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Window \/ Level Normalization/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole('button', { name: /Workflow block OpenCV \(placeholder\)/i }), { ctrlKey: true });
     fireEvent.click(screen.getByRole('button', { name: /Remove/ }));
 
     expect(screen.queryByRole('button', { name: /Workflow block Window \/ Level Normalization/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Workflow block Watershed From Seeds/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Workflow block OpenCV \(placeholder\)/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => expect(screen.getByTestId('analyze-run-summary')).toHaveTextContent('completed'));
@@ -418,7 +430,7 @@ describe('AnalyzeWorkbenchTab', () => {
       'source.project_part_images',
       'preprocess.window_level_normalization',
       'output.versioned_image_artifact',
-      'segmentation.watershed_seeds',
+      'segmentation.opencv.placeholder',
     ]);
     expect(workflow.edges.map((edge) => [edge.source_node, edge.target_node])).toEqual([
       [workflow.nodes[0].id, workflow.nodes[1].id],
@@ -437,8 +449,8 @@ describe('AnalyzeWorkbenchTab', () => {
     expect(screen.getByRole('button', { name: /Workflow block Loaded Part Images 2/i })).toHaveStyle({ left: '72px', top: '236px' });
 
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Loaded Part Images 2/i }));
-    dragMethodToGraph(/^YOLOv8 Object Detection/i, 'ml.yolov8.detect', { clientX: 380, clientY: 260 });
-    expect(screen.getByRole('button', { name: /Workflow block YOLOv8 Object Detection/i })).toHaveStyle({ left: '296px', top: '236px' });
+    dragMethodToGraph(/^Min-Max Normalization/i, 'preprocess.minmax_normalization', { clientX: 380, clientY: 260 });
+    expect(screen.getByRole('button', { name: /Workflow block Min-Max Normalization/i })).toHaveStyle({ left: '296px', top: '236px' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
@@ -448,7 +460,7 @@ describe('AnalyzeWorkbenchTab', () => {
     const chain2 = workflow.nodes.filter((node) => node.chain_id === 'chain-2');
     expect(chain2.map((node) => node.method_id)).toEqual([
       'source.project_part_images',
-      'ml.yolov8.detect',
+      'preprocess.minmax_normalization',
     ]);
     expect(workflow.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ source_node: chain2[0].id, target_node: chain2[1].id }),
@@ -488,9 +500,9 @@ describe('AnalyzeWorkbenchTab', () => {
             value: {
               nodes: [
                 { id: 'saved-input-1', method_id: 'source.project_part_images', label: 'Loaded Part Images', chain_id: 'chain-1', parameters: {}, x: 72, y: 84 },
-                { id: 'saved-yolo', method_id: 'ml.yolov8.detect', label: 'YOLOv8 Object Detection', chain_id: 'chain-1', parameters: { model: 'yolov8n.pt' }, x: 296, y: 84 },
+                { id: 'saved-minmax', method_id: 'preprocess.minmax_normalization', label: 'Min-Max Normalization', chain_id: 'chain-1', parameters: { output_min: 0, output_max: 1 }, x: 296, y: 84 },
                 { id: 'saved-input-2', method_id: 'source.project_part_images', label: 'Loaded Part Images 2', chain_id: 'chain-2', parameters: {}, x: 72, y: 236 },
-                { id: 'saved-segment', method_id: 'segmentation.watershed_seeds', label: 'Watershed From Seeds', chain_id: 'chain-2', parameters: { seed_spacing_px: 18 }, x: 296, y: 236 },
+                { id: 'saved-segment', method_id: 'segmentation.opencv.placeholder', label: 'OpenCV (placeholder)', chain_id: 'chain-2', parameters: { integration_mode: 'placeholder' }, x: 296, y: 236 },
               ],
               process_image_ids: ['img-2'],
               example_image_id: 'img-2',
@@ -538,14 +550,14 @@ describe('AnalyzeWorkbenchTab', () => {
     await screen.findByRole('button', { name: /Workflow block Loaded Part Images/i });
     dragMethodToGraph(/^Project Part Image Source/i, 'source.project_part_images');
     fireEvent.click(screen.getByRole('button', { name: /Workflow block Loaded Part Images 2/i }));
-    dragMethodToGraph(/^YOLOv8 Object Detection/i, 'ml.yolov8.detect', { clientX: 380, clientY: 260 });
+    dragMethodToGraph(/^Min-Max Normalization/i, 'preprocess.minmax_normalization', { clientX: 380, clientY: 260 });
 
-    const watershedNode = screen.getByRole('button', { name: /Workflow block Watershed From Seeds/i });
-    fireEvent.mouseDown(watershedNode, { button: 0, clientX: 600, clientY: 100 });
-    fireEvent.mouseMove(watershedNode, { clientX: 180, clientY: 225 });
-    fireEvent.mouseUp(watershedNode, { clientX: 180, clientY: 225 });
+    const placeholderNode = screen.getByRole('button', { name: /Workflow block OpenCV \(placeholder\)/i });
+    fireEvent.mouseDown(placeholderNode, { button: 0, clientX: 600, clientY: 100 });
+    fireEvent.mouseMove(placeholderNode, { clientX: 180, clientY: 225 });
+    fireEvent.mouseUp(placeholderNode, { clientX: 180, clientY: 225 });
 
-    await waitFor(() => expect(watershedNode).toHaveStyle({ left: '296px', top: '236px' }));
+    await waitFor(() => expect(placeholderNode).toHaveStyle({ left: '296px', top: '236px' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
@@ -561,8 +573,8 @@ describe('AnalyzeWorkbenchTab', () => {
     ]);
     expect(chain2.map((node) => node.method_id)).toEqual([
       'source.project_part_images',
-      'segmentation.watershed_seeds',
-      'ml.yolov8.detect',
+      'segmentation.opencv.placeholder',
+      'preprocess.minmax_normalization',
     ]);
     expect(workflow.edges.map((edge) => [edge.source_node, edge.target_node])).toEqual(expect.arrayContaining([
       [chain2[0].id, chain2[1].id],

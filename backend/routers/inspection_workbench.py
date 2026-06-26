@@ -25,14 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
-TOOLBOX_IMPORT_ERROR: Optional[Exception] = None
-try:
-    from test_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow
-except ModuleNotFoundError as exc:
-    TOOLBOX_IMPORT_ERROR = exc
-    WorkflowGraph = None
-    WorkflowImageInput = None
-    execute_image_workflow = None
+from backend.analyze_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow
+from backend.metadata.nsipro_parsers import get_nsipro_parser, parse_nsipro_text
 
 
 router = APIRouter(tags=["Inspection Workbench"])
@@ -73,28 +67,11 @@ WORKSPACE_INSPECTOR_DEFAULTS = {
 TEST_DATA_ROOT = Path(__file__).resolve().parents[2] / "test" / "data"
 PT3_TEST_STACK_ROOT = TEST_DATA_ROOT / "3D" / "geometric"
 SLICE_SEGMENTATION_METHOD_IDS = {
-    "threshold.otsu",
-    "threshold.manual",
-    "segmentation.connected_components",
-    "segmentation.watershed_seeds",
-    "ml.yolov8.segment",
-    "ml.yolo.ultralytics",
-    "ml.sam.segment_anything",
-    "ml.mask2former.universal_segment",
-    "ml.oneformer.universal_segment",
+    "segmentation.yolo.placeholder",
+    "segmentation.anomalib.placeholder",
+    "segmentation.sam.placeholder",
+    "segmentation.opencv.placeholder",
 }
-
-
-def _require_toolbox() -> None:
-    if TOOLBOX_IMPORT_ERROR is None:
-        return
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail=(
-            "Inspection slice segmentation is unavailable because dependency 'test_toolbox' "
-            f"could not be imported. Original error: {TOOLBOX_IMPORT_ERROR}"
-        ),
-    )
 
 
 async def _get_project_with_access_check(
@@ -323,6 +300,11 @@ def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
             "manual_phase_selection_enabled": False,
             "manual_phase": "data_ingestion",
         },
+        "metadata_parsers": {
+            "nsipro": {
+                "parser_id": "default",
+            },
+        },
         "project_owner": {
             "name": "",
             "email": "",
@@ -333,6 +315,19 @@ def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
         },
         "interface_layout": {
             "default_model": None,
+        },
+        "file_naming_scheme": {
+            "hierarchy_levels": [
+                {"id": "drawing_number", "label": "Drawing Number", "abbreviation": "D"},
+                {"id": "part_number", "label": "Part Number", "abbreviation": "P"},
+                {"id": "lot_number", "label": "Lot Number", "abbreviation": "L"},
+                {"id": "serial_number", "label": "Serial Number", "abbreviation": "S"},
+                {"id": "revision", "label": "Revision", "abbreviation": "R"},
+            ],
+            "image_descriptors": [
+                {"id": "view", "label": "View", "abbreviation": "V"},
+                {"id": "modality", "label": "Modality", "abbreviation": "M"},
+            ],
         },
     }
 
@@ -348,23 +343,6 @@ def _decode_slice_image_payload(value: str) -> bytes:
 
 
 def _slice_segmentation_workflow(method_id: str, parameters: dict):
-    if WorkflowGraph is None:
-        _require_toolbox()
-    if method_id in {"threshold.otsu", "threshold.manual"}:
-        return WorkflowGraph(
-            name=f"Inspection slice segmentation {method_id}",
-            source={"kind": "manual_selection", "image_count": 1, "part_count": 1},
-            output={"mode": "metadata_only", "artifact_policy": "metadata_only"},
-            nodes=[
-                {"id": "input", "method_id": "source.project_part_images"},
-                {"id": "threshold", "method_id": method_id, "parameters": parameters or {}},
-                {"id": "segment", "method_id": "segmentation.connected_components", "parameters": {"min_area_px": 1}},
-            ],
-            edges=[
-                {"source_node": "input", "target_node": "threshold"},
-                {"source_node": "threshold", "target_node": "segment"},
-            ],
-        )
     return WorkflowGraph(
         name=f"Inspection slice segmentation {method_id}",
         source={"kind": "manual_selection", "image_count": 1, "part_count": 1},
@@ -468,11 +446,28 @@ def _prune_config_to_source_shape(*, persisted_config: dict, source_config: dict
     if not isinstance(source_config, dict):
         return persisted_config
     pruned = dict(persisted_config)
-    for optional_key in ("phase_settings", "project_owner", "current_user", "interface_layout"):
+    for optional_key in ("phase_settings", "metadata_parsers", "project_owner", "current_user", "interface_layout"):
         if optional_key not in source_config:
             pruned.pop(optional_key, None)
     return pruned
 
+
+
+def _dump_project_configuration_payload(config: schemas.InspectionProjectConfiguration) -> dict:
+    dumped = config.model_dump(exclude_unset=True)
+    metadata_parsers = dumped.get("metadata_parsers")
+    nsipro_dump = metadata_parsers.get("nsipro") if isinstance(metadata_parsers, dict) else None
+    nsipro_config = getattr(getattr(config, "metadata_parsers", None), "nsipro", None)
+    fields_set = getattr(nsipro_config, "model_fields_set", set())
+    if isinstance(nsipro_dump, dict):
+        for optional_key, default_value in (
+            ("parser_version", None),
+            ("parser_hash", None),
+            ("strict_version_match", False),
+        ):
+            if optional_key not in fields_set and nsipro_dump.get(optional_key) == default_value:
+                nsipro_dump.pop(optional_key, None)
+    return dumped
 
 def _strip_optional_default_sections(config: dict) -> dict:
     if not isinstance(config, dict):
@@ -483,6 +478,8 @@ def _strip_optional_default_sections(config: dict) -> dict:
         "manual_phase": "data_ingestion",
     }:
         pruned.pop("phase_settings", None)
+    if pruned.get("metadata_parsers") == {"nsipro": {"parser_id": "default"}}:
+        pruned.pop("metadata_parsers", None)
     if pruned.get("project_owner") == {"name": "", "email": ""}:
         pruned.pop("project_owner", None)
     if pruned.get("current_user") == {"username": "", "sso_authenticated": False}:
@@ -495,6 +492,14 @@ def _strip_optional_default_sections(config: dict) -> dict:
 def _project_type_interface_layout_metadata_key(project_type: str) -> str:
     return f"{PROJECT_TYPE_INTERFACE_LAYOUT_KEY_PREFIX}:{project_type}"
 
+
+
+def _load_nsipro_metadata_fixture(root: Path) -> Optional[dict]:
+    nsipro_files = sorted(root.glob("*.nsipro"))
+    if not nsipro_files:
+        return None
+    nsipro_path = nsipro_files[0]
+    return parse_nsipro_text(nsipro_path.read_text(encoding="utf-8"), nsipro_path.name)
 
 def _metadata_from_hierarchy_filename(path: Path) -> Optional[dict]:
     tokens = path.stem.split("_")
@@ -663,6 +668,64 @@ def _rebuild_part_image_maps(metadata: dict) -> dict:
     }
 
 
+def _metadata_for_overlay_assignment(image: models.DataInstance) -> dict:
+    image_metadata = image.metadata_json if isinstance(image.metadata_json, dict) else {}
+    return {
+        "filename": image.filename,
+        "image_id": str(image.id),
+        "side": str(image_metadata.get("side") or "").strip().lower(),
+        "modality": str(image_metadata.get("modality") or "overlay").strip().lower() or "overlay",
+        "overlay": True,
+        "content_type": image.content_type,
+    }
+
+
+def _record_matches_filename(record: object, filename: str) -> bool:
+    return isinstance(record, dict) and str(record.get("filename") or "").strip() == filename
+
+
+def _record_matches_image_identity(record: object, *, filename: str = "", image_id: uuid.UUID | str | None = None) -> bool:
+    if not isinstance(record, dict):
+        return False
+    if image_id and str(record.get("image_id") or "").strip() == str(image_id):
+        return True
+    if image_id:
+        return False
+    return str(record.get("filename") or "").strip() == filename
+
+
+async def _get_active_project_image_by_id(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    image_id: uuid.UUID,
+) -> models.DataInstance | None:
+    result = await db.execute(
+        select(models.DataInstance).where(
+            models.DataInstance.project_id == project_id,
+            models.DataInstance.id == image_id,
+            models.DataInstance.deleted_at.is_(None),
+        )
+    )
+    return result.scalars().first()
+
+
+async def _get_active_project_image_by_filename(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    filename: str,
+) -> models.DataInstance | None:
+    result = await db.execute(
+        select(models.DataInstance).where(
+            models.DataInstance.project_id == project_id,
+            models.DataInstance.filename == filename,
+            models.DataInstance.deleted_at.is_(None),
+        )
+    )
+    return result.scalars().first()
+
+
 async def _create_test_image_if_missing(
     *,
     project_id: uuid.UUID,
@@ -727,13 +790,320 @@ async def _create_test_image_if_missing(
     return image, True
 
 
+
+def _dict_or_empty(candidate: object) -> dict:
+    return candidate if isinstance(candidate, dict) else {}
+
+
+def _resolve_configured_nsipro_parser(project_config: dict):
+    nsipro_config = _dict_or_empty(_dict_or_empty(project_config.get("metadata_parsers")).get("nsipro"))
+    parser = get_nsipro_parser(nsipro_config.get("parser_id"))
+    expected_version = str(nsipro_config.get("parser_version") or parser.version).strip()
+    expected_hash = str(nsipro_config.get("parser_hash") or parser.parser_hash).strip()
+    strict = bool(
+        nsipro_config.get("strict")
+        or nsipro_config.get("strict_mode")
+        or nsipro_config.get("strict_version_match")
+        or nsipro_config.get("strict_parser_match")
+    )
+    return parser, expected_version, expected_hash, strict
+
+
+async def _load_project_configuration_for_ingest(*, db: AsyncSession, project_id: uuid.UUID, project_type: str | None) -> dict:
+    metadata = await crud.get_project_metadata_by_key(
+        db=db,
+        project_id=project_id,
+        key=PROJECT_CONFIGURATION_KEY,
+    )
+    default_config = _default_project_configuration(project_type)
+    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else {}
+    return {**default_config, **raw_config}
+
+
+def _candidate_metadata_reference_keys(metadata: dict) -> list[str]:
+    keys: list[str] = []
+    raw_ref = metadata.get("associated_metadata_ref")
+    if isinstance(raw_ref, str) and raw_ref.strip():
+        keys.append(raw_ref.strip())
+    associated = metadata.get("associated_metadata")
+    if isinstance(associated, dict):
+        for candidate_key in ("project_metadata_key", "key"):
+            value = associated.get(candidate_key)
+            if isinstance(value, str) and value.strip():
+                keys.append(value.strip())
+    return list(dict.fromkeys(keys))
+
+
+def _extract_stored_nsipro_text(bundle: dict) -> str:
+    for key in ("text", "raw_text", "raw", "raw_payload", "raw_content", "file_content", "content"):
+        value = bundle.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def _validate_nsipro_parser_contract(
+    *,
+    bundle: dict,
+    reference: dict,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> None:
+    if not strict:
+        return
+    observed_parser_id = str(
+        reference.get("parser_id")
+        or bundle.get("parser_id")
+        or configured_parser.id
+    ).strip()
+    observed_version = str(
+        reference.get("parser_version")
+        or bundle.get("parser_version")
+        or expected_version
+    ).strip()
+    observed_hash = str(
+        reference.get("parser_hash")
+        or bundle.get("parser_hash")
+        or expected_hash
+    ).strip()
+    mismatches = []
+    if observed_parser_id != configured_parser.id:
+        mismatches.append(f"parser_id expected {configured_parser.id!r} got {observed_parser_id!r}")
+    if observed_version != expected_version:
+        mismatches.append(f"parser_version expected {expected_version!r} got {observed_version!r}")
+    if observed_hash != expected_hash:
+        mismatches.append("parser_hash mismatch")
+    if mismatches:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=".nsipro parser contract mismatch: " + "; ".join(mismatches),
+        )
+
+
+def _normalize_nsipro_bundle_payload(
+    *,
+    bundle: dict,
+    reference: dict,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> dict | None:
+    if str(bundle.get("file_type") or "").strip().lower() not in {"nsipro", ".nsipro"}:
+        return None
+    _validate_nsipro_parser_contract(
+        bundle=bundle,
+        reference=reference,
+        configured_parser=configured_parser,
+        expected_version=expected_version,
+        expected_hash=expected_hash,
+        strict=strict,
+    )
+
+    raw_text = _extract_stored_nsipro_text(bundle)
+    if raw_text:
+        parsed = parse_nsipro_text(raw_text, str(bundle.get("source_filename") or bundle.get("filename") or ""), configured_parser.id)
+    else:
+        metadata = bundle.get("metadata")
+        if not isinstance(metadata, dict):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Associated .nsipro metadata does not contain parsed metadata or raw text.",
+            )
+        parsed = {
+            "parser": bundle.get("parser") or reference.get("parser") or "nsipro-stored-metadata",
+            "parser_id": configured_parser.id,
+            "parser_version": expected_version,
+            "parser_hash": expected_hash,
+            "source_filename": bundle.get("source_filename") or bundle.get("filename") or reference.get("source_filename"),
+            "metadata": metadata,
+            "warnings": list(bundle.get("warnings") or []),
+        }
+    return {
+        "parser": parsed.get("parser"),
+        "parser_id": parsed.get("parser_id") or configured_parser.id,
+        "parser_version": parsed.get("parser_version") or expected_version,
+        "parser_hash": parsed.get("parser_hash") or expected_hash,
+        "source_filename": parsed.get("source_filename") or bundle.get("source_filename") or bundle.get("filename"),
+        "content_hash": bundle.get("content_hash") or reference.get("content_hash"),
+        "metadata": parsed.get("metadata") if isinstance(parsed.get("metadata"), dict) else {},
+        "warnings": list(parsed.get("warnings") or []),
+    }
+
+
+async def _resolve_associated_nsipro_payload(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    metadata: dict,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> dict | None:
+    for metadata_key in _candidate_metadata_reference_keys(metadata):
+        project_metadata = await crud.get_project_metadata_by_key(db=db, project_id=project_id, key=metadata_key)
+        bundle = project_metadata.value if project_metadata and isinstance(project_metadata.value, dict) else None
+        if not bundle:
+            continue
+        payload = _normalize_nsipro_bundle_payload(
+            bundle=bundle,
+            reference=_dict_or_empty(metadata.get("associated_metadata")),
+            configured_parser=configured_parser,
+            expected_version=expected_version,
+            expected_hash=expected_hash,
+            strict=strict,
+        )
+        if payload:
+            return payload
+    return None
+
+
+def _combine_metadata_source_values(source_payloads: list[dict]) -> dict:
+    combined: dict = {}
+    collisions: dict = {}
+    for source in source_payloads:
+        source_key = str(source.get("key") or "").strip()
+        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+        for key, value in metadata.items():
+            if key in combined and combined[key] != value:
+                collisions.setdefault(key, []).append({"source_key": source_key, "value": value})
+                continue
+            combined[key] = value
+    if collisions:
+        combined["metadata_source_collisions"] = collisions
+    return combined
+
+
+async def _normalize_ingest_part_metadata(
+    *,
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    metadata: dict | None,
+    configured_parser,
+    expected_version: str,
+    expected_hash: str,
+    strict: bool,
+) -> dict | None:
+    if metadata is None:
+        return None
+    if not isinstance(metadata, dict):
+        return metadata
+
+    normalized = {**metadata}
+    top_level_payload = await _resolve_associated_nsipro_payload(
+        db=db,
+        project_id=project_id,
+        metadata=normalized,
+        configured_parser=configured_parser,
+        expected_version=expected_version,
+        expected_hash=expected_hash,
+        strict=strict,
+    )
+    if top_level_payload:
+        normalized["nsipro_metadata"] = top_level_payload["metadata"]
+        normalized["nsipro_payload"] = top_level_payload
+
+    source_images = normalized.get("source_images")
+    if isinstance(source_images, list):
+        normalized_source_images = []
+        for record in source_images:
+            if not isinstance(record, dict):
+                normalized_source_images.append(record)
+                continue
+            normalized_record = {**record}
+            record_payload = await _resolve_associated_nsipro_payload(
+                db=db,
+                project_id=project_id,
+                metadata=normalized_record,
+                configured_parser=configured_parser,
+                expected_version=expected_version,
+                expected_hash=expected_hash,
+                strict=strict,
+            )
+            if record_payload:
+                normalized_record["nsipro_payload"] = record_payload
+                normalized.setdefault("nsipro_metadata", record_payload["metadata"])
+            normalized_source_images.append(normalized_record)
+        normalized["source_images"] = normalized_source_images
+    return normalized
+
+
+def _source_image_match_key(record: dict) -> str:
+    image_id = str(record.get("image_id") or "").strip()
+    if image_id:
+        return f"image_id:{image_id}"
+    filename = str(record.get("filename") or "").strip()
+    return f"filename:{filename}" if filename else ""
+
+
+def _metadata_contains_nsipro_payload(metadata: object) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    if isinstance(metadata.get("nsipro_metadata"), dict) or isinstance(metadata.get("nsipro_payload"), dict):
+        return True
+    source_images = metadata.get("source_images")
+    if isinstance(source_images, list):
+        return any(
+            isinstance(record, dict)
+            and (isinstance(record.get("nsipro_metadata"), dict) or isinstance(record.get("nsipro_payload"), dict))
+            for record in source_images
+        )
+    return False
+
+
+def _merge_existing_part_nsipro_metadata(existing_metadata: object, incoming_metadata: object) -> dict:
+    current = existing_metadata if isinstance(existing_metadata, dict) else {}
+    incoming = incoming_metadata if isinstance(incoming_metadata, dict) else {}
+    patch: dict = {}
+    for key in ("nsipro_metadata", "nsipro_payload", "associated_metadata_ref", "associated_metadata"):
+        if key in incoming:
+            patch[key] = incoming[key]
+
+    incoming_source_images = incoming.get("source_images")
+    if isinstance(incoming_source_images, list):
+        current_source_images = current.get("source_images") if isinstance(current.get("source_images"), list) else []
+        merged_source_images = [dict(record) if isinstance(record, dict) else record for record in current_source_images]
+        index_by_key = {
+            _source_image_match_key(record): index
+            for index, record in enumerate(merged_source_images)
+            if isinstance(record, dict) and _source_image_match_key(record)
+        }
+        changed = False
+        for incoming_record in incoming_source_images:
+            if not isinstance(incoming_record, dict):
+                continue
+            record_key = _source_image_match_key(incoming_record)
+            if record_key and record_key in index_by_key and isinstance(merged_source_images[index_by_key[record_key]], dict):
+                existing_record = merged_source_images[index_by_key[record_key]]
+                next_record = {**existing_record, **incoming_record}
+                if next_record != existing_record:
+                    merged_source_images[index_by_key[record_key]] = next_record
+                    changed = True
+            elif _metadata_contains_nsipro_payload(incoming_record):
+                merged_source_images.append(incoming_record)
+                changed = True
+        if changed:
+            patch["source_images"] = merged_source_images
+    return patch
+
 async def _bulk_ingest_project_parts(
     *,
     project_id: uuid.UUID,
     payload: schemas.InspectionBulkIngestPayload,
     db: AsyncSession,
     current_user: schemas.User,
+    project_type: str | None = None,
 ):
+    project_config = await _load_project_configuration_for_ingest(
+        db=db,
+        project_id=project_id,
+        project_type=project_type,
+    )
+    configured_parser, expected_version, expected_hash, strict_parser_match = _resolve_configured_nsipro_parser(project_config)
+
     existing_batches = await crud.list_inspection_batches(db=db, project_id=project_id)
     batches_by_name = {batch.name: batch for batch in existing_batches}
     existing_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
@@ -784,9 +1154,39 @@ async def _bulk_ingest_project_parts(
                         }
                     )
                     continue
+                normalized_existing_metadata = await _normalize_ingest_part_metadata(
+                    db=db,
+                    project_id=project_id,
+                    metadata=ingest_part.metadata_json,
+                    configured_parser=configured_parser,
+                    expected_version=expected_version,
+                    expected_hash=expected_hash,
+                    strict=strict_parser_match,
+                )
+                if _metadata_contains_nsipro_payload(normalized_existing_metadata):
+                    metadata_patch = _merge_existing_part_nsipro_metadata(existing_part.metadata_json, normalized_existing_metadata)
+                    if metadata_patch:
+                        updated_part = await crud.update_inspection_part_metadata(
+                            db=db,
+                            project_id=project_id,
+                            part_id=existing_part.id,
+                            metadata_patch=metadata_patch,
+                            updated_by=current_user.email,
+                        )
+                        if updated_part:
+                            parts_by_serial[serial_number] = updated_part
                 counters["parts_skipped_existing"] += 1
                 continue
 
+            normalized_metadata = await _normalize_ingest_part_metadata(
+                db=db,
+                project_id=project_id,
+                metadata=ingest_part.metadata_json,
+                configured_parser=configured_parser,
+                expected_version=expected_version,
+                expected_hash=expected_hash,
+                strict=strict_parser_match,
+            )
             created_part = await crud.create_inspection_part(
                 db=db,
                 project_id=project_id,
@@ -794,7 +1194,7 @@ async def _bulk_ingest_project_parts(
                     batch_id=target_batch_id,
                     serial_number=serial_number,
                     display_name=ingest_part.display_name,
-                    metadata=ingest_part.metadata_json,
+                    metadata=normalized_metadata,
                     review_state=ingest_part.review_state,
                 ),
                 created_by=current_user.email,
@@ -849,12 +1249,13 @@ async def _resolve_project_type_interface_layout_default(
     *,
     project_type: str,
 ) -> Optional[dict]:
-    metadata_key = _project_type_interface_layout_metadata_key(project_type)
+    normalized_project_type = _normalize_project_type(project_type)
+    metadata_key = _project_type_interface_layout_metadata_key(normalized_project_type)
     stmt = (
         select(models.ProjectMetadata.value)
         .join(models.Project, models.Project.id == models.ProjectMetadata.project_id)
         .where(
-            models.Project.project_type == project_type,
+            models.Project.project_type == normalized_project_type,
             models.ProjectMetadata.key == metadata_key,
         )
         .order_by(models.ProjectMetadata.updated_at.desc())
@@ -898,6 +1299,25 @@ async def list_inspection_batches(
 ):
     await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
     return await crud.list_inspection_batches(db=db, project_id=project_id)
+
+
+@router.delete("/projects/{project_id}/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_inspection_batch(
+    project_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    deleted = await crud.delete_inspection_batch(
+        db=db,
+        project_id=project_id,
+        batch_id=batch_id,
+        deleted_by=current_user.email,
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection batch not found")
+    return None
 
 
 @router.patch("/projects/{project_id}/batches/{batch_id}", response_model=schemas.InspectionBatch)
@@ -974,6 +1394,86 @@ async def list_inspection_parts(
     return [_serialize_inspection_part(part) for part in parts]
 
 
+@router.put("/projects/{project_id}/parts/{part_id}/metadata-sources", response_model=schemas.InspectionPart)
+async def update_inspection_part_metadata_sources(
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    payload: schemas.InspectionPartMetadataSourcesUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+
+    parser, expected_version, expected_hash, strict_parser_match = _resolve_configured_nsipro_parser(
+        await _load_project_configuration_for_ingest(db=db, project_id=project_id, project_type=project.project_type)
+    )
+    source_refs: list[dict] = []
+    source_payloads: list[dict] = []
+    nsipro_sources: list[dict] = []
+    for key in payload.metadata_source_keys:
+        project_metadata = await crud.get_project_metadata_by_key(db=db, project_id=project_id, key=key)
+        if project_metadata is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metadata source '{key}' not found")
+        value = project_metadata.value if isinstance(project_metadata.value, dict) else {"value": project_metadata.value}
+        reference = {"project_metadata_key": key, "key": key}
+        nsipro_payload = _normalize_nsipro_bundle_payload(
+            bundle=value,
+            reference=reference,
+            configured_parser=parser,
+            expected_version=expected_version,
+            expected_hash=expected_hash,
+            strict=strict_parser_match,
+        )
+        source_refs.append({
+            "project_metadata_key": key,
+            "filename": value.get("filename") or value.get("source_filename"),
+            "file_type": value.get("file_type"),
+            "parser": value.get("parser"),
+            "parser_id": value.get("parser_id"),
+        })
+        source_payloads.append({
+            "key": key,
+            "metadata": (
+                nsipro_payload.get("metadata")
+                if nsipro_payload
+                else value.get("metadata") if isinstance(value.get("metadata"), dict)
+                else value
+            ),
+        })
+        if nsipro_payload:
+            nsipro_sources.append({"key": key, **nsipro_payload})
+
+    current_metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+    metadata_patch = {
+        "associated_metadata_refs": payload.metadata_source_keys,
+        "associated_metadata_sources": source_refs,
+        "project_metadata_source_values": source_payloads,
+        "project_metadata_combined": _combine_metadata_source_values(source_payloads) if source_payloads else {},
+        "nsipro_metadata_sources": nsipro_sources,
+        "nsipro_metadata": _combine_metadata_source_values(nsipro_sources) if nsipro_sources else {},
+    }
+    if payload.metadata_source_keys:
+        metadata_patch["associated_metadata_ref"] = payload.metadata_source_keys[0]
+        metadata_patch["associated_metadata"] = source_refs[0] if source_refs else {}
+    elif "associated_metadata_ref" in current_metadata or "associated_metadata" in current_metadata:
+        metadata_patch["associated_metadata_ref"] = None
+        metadata_patch["associated_metadata"] = None
+
+    updated = await crud.update_inspection_part_metadata(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        metadata_patch=metadata_patch,
+        updated_by=current_user.email,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    return _serialize_inspection_part(updated)
+
+
 @router.patch("/projects/{project_id}/parts/{part_id}", response_model=schemas.InspectionPart)
 async def update_inspection_part_review_state(
     project_id: uuid.UUID,
@@ -995,6 +1495,25 @@ async def update_inspection_part_review_state(
     return _serialize_inspection_part(updated)
 
 
+@router.delete("/projects/{project_id}/parts/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_inspection_part(
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    deleted = await crud.delete_inspection_part(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        deleted_by=current_user.email,
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    return None
+
+
 @router.post(
     "/projects/{project_id}/parts/image-assignments",
     response_model=schemas.InspectionPartImageAssignmentResponse,
@@ -1006,12 +1525,15 @@ async def assign_image_to_part(
     current_user: schemas.User = Depends(get_current_user),
 ):
     await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    target_part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=payload.to_part_id)
-    if not target_part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target part not found")
+    target_part = None
+    if payload.to_part_id:
+        target_part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=payload.to_part_id)
+        if not target_part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target part not found")
 
     all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
     filename = payload.filename.strip()
+    payload_image_id = payload.image_id
     source_entry = None
     from_part_id = None
 
@@ -1022,11 +1544,11 @@ async def assign_image_to_part(
             continue
         retained = []
         for record in source_images:
-            if isinstance(record, dict) and str(record.get("filename") or "").strip() == filename:
+            if _record_matches_image_identity(record, filename=filename, image_id=payload_image_id):
                 source_entry = {
                     **record,
-                    "filename": filename,
-                    "image_id": record.get("image_id") or None,
+                    "filename": str(record.get("filename") or filename).strip(),
+                    "image_id": record.get("image_id") or (str(payload_image_id) if payload_image_id else None),
                 }
                 from_part_id = part.id
                 continue
@@ -1042,16 +1564,13 @@ async def assign_image_to_part(
             )
 
     if source_entry is None:
-        image_result = await db.execute(
-            select(models.DataInstance).where(
-                models.DataInstance.project_id == project_id,
-                models.DataInstance.filename == filename,
-                models.DataInstance.deleted_at.is_(None),
-            )
-        )
-        image = image_result.scalars().first()
+        if payload_image_id:
+            image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=payload_image_id)
+        else:
+            image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=filename)
         if not image:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+        filename = image.filename
         image_metadata = image.metadata_json if isinstance(image.metadata_json, dict) else {}
         source_entry = {
             "filename": filename,
@@ -1062,29 +1581,192 @@ async def assign_image_to_part(
             "slice_axis": image_metadata.get("slice_axis"),
             "slice_index": image_metadata.get("slice_index"),
         }
+        for metadata_key in (
+            "crop_child_image",
+            "parent_image_id",
+            "parent_image_filename",
+            "crop_annotation_id",
+            "crop_title",
+            "crop_subtitle",
+            "crop_bbox",
+            "pixel_dtype",
+            "voxel_dtype",
+            "bit_depth",
+            "bits_per_sample",
+            "pixel_value_range",
+            "data_value_range",
+            "voxel_value_range",
+            "scalar_range",
+            "value_range",
+            "intensity_range",
+            "display_range",
+            "signed",
+        ):
+            if metadata_key in image_metadata:
+                source_entry[metadata_key] = image_metadata.get(metadata_key)
+        if any(key in image_metadata for key in ("pixel_value_range", "value_range", "intensity_range", "pixel_dtype", "voxel_dtype", "bit_depth")):
+            source_entry["metadata"] = {
+                key: image_metadata.get(key)
+                for key in (
+                    "pixel_dtype",
+                    "voxel_dtype",
+                    "bit_depth",
+                    "bits_per_sample",
+                    "pixel_value_range",
+                    "data_value_range",
+                    "voxel_value_range",
+                    "scalar_range",
+                    "value_range",
+                    "intensity_range",
+                    "display_range",
+                    "signed",
+                )
+                if key in image_metadata
+            }
 
-    target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
-    target_source_images = target_metadata.get("source_images")
-    target_source_images = target_source_images if isinstance(target_source_images, list) else []
-    target_source_images = [
-        record for record in target_source_images
-        if not (isinstance(record, dict) and str(record.get("filename") or "").strip() == filename)
-    ]
-    target_source_images.append(source_entry)
-    normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
-    await crud.update_inspection_part_metadata(
-        db=db,
-        project_id=project_id,
-        part_id=target_part.id,
-        metadata_patch=normalized_target,
-        updated_by=current_user.email,
-    )
+    if target_part:
+        target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
+        target_source_images = target_metadata.get("source_images")
+        target_source_images = target_source_images if isinstance(target_source_images, list) else []
+        target_source_images = [
+            record for record in target_source_images
+            if not _record_matches_image_identity(record, filename=filename, image_id=payload_image_id)
+        ]
+        target_source_images.append(source_entry)
+        normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
+        await crud.update_inspection_part_metadata(
+            db=db,
+            project_id=project_id,
+            part_id=target_part.id,
+            metadata_patch=normalized_target,
+            updated_by=current_user.email,
+        )
 
     return schemas.InspectionPartImageAssignmentResponse(
         project_id=project_id,
         filename=filename,
         from_part_id=from_part_id,
         to_part_id=payload.to_part_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/parts/overlay-assignments",
+    response_model=schemas.InspectionOverlayAssignmentResponse,
+)
+async def assign_overlay_to_base_image(
+    project_id: uuid.UUID,
+    payload: schemas.InspectionOverlayAssignmentRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    overlay_filename = payload.overlay_filename.strip()
+    overlay_image_id = payload.overlay_image_id
+    base_filename = payload.base_filename.strip() if payload.base_filename else None
+    base_image_id = payload.base_image_id
+    if base_filename == "":
+        base_filename = None
+    if base_filename and overlay_filename == base_filename and (not overlay_image_id or not base_image_id or overlay_image_id == base_image_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Overlay image cannot be assigned to itself")
+
+    if overlay_image_id:
+        overlay_image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=overlay_image_id)
+    else:
+        overlay_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=overlay_filename)
+    if not overlay_image:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overlay image not found")
+    overlay_filename = overlay_image.filename
+
+    all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
+    from_part_id = None
+    overlay_entry = None
+
+    for part in all_parts:
+        metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+        source_images = metadata.get("source_images")
+        if not isinstance(source_images, list):
+            continue
+        retained = []
+        removed = False
+        for record in source_images:
+            if _record_matches_image_identity(record, filename=overlay_filename, image_id=overlay_image_id):
+                overlay_entry = {**record, "filename": str(record.get("filename") or overlay_filename).strip(), "image_id": record.get("image_id") or str(overlay_image.id)}
+                from_part_id = part.id
+                removed = True
+                continue
+            retained.append(record)
+        if removed:
+            normalized = _rebuild_part_image_maps({**metadata, "source_images": retained})
+            await crud.update_inspection_part_metadata(
+                db=db,
+                project_id=project_id,
+                part_id=part.id,
+                metadata_patch=normalized,
+                updated_by=current_user.email,
+            )
+
+    if overlay_entry is None:
+        overlay_entry = _metadata_for_overlay_assignment(overlay_image)
+    overlay_entry = {**overlay_entry, "overlay": True}
+
+    target_part = None
+    base_entry = None
+    if base_filename:
+        if base_image_id:
+            base_image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=base_image_id)
+        else:
+            base_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=base_filename)
+        if not base_image:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base image not found")
+        base_filename = base_image.filename
+        for part in all_parts:
+            metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+            source_images = metadata.get("source_images")
+            if not isinstance(source_images, list):
+                continue
+            for record in source_images:
+                if _record_matches_image_identity(record, filename=base_filename, image_id=base_image_id) and not bool(record.get("overlay")):
+                    target_part = part
+                    base_entry = record
+                    break
+            if target_part:
+                break
+        if not target_part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base image is not assigned to an inspection part")
+
+        base_image_id = str(base_entry.get("image_id") or base_image.id)
+        overlay_entry = {
+            **overlay_entry,
+            "overlay": True,
+            "side": str(base_entry.get("side") or overlay_entry.get("side") or "").strip().lower(),
+            "modality": str(overlay_entry.get("modality") or "overlay").strip().lower() or "overlay",
+            "overlay_base_filename": base_filename,
+            "overlay_base_image_id": base_image_id,
+        }
+        target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
+        target_source_images = target_metadata.get("source_images")
+        target_source_images = target_source_images if isinstance(target_source_images, list) else []
+        target_source_images = [
+            record for record in target_source_images
+            if not _record_matches_image_identity(record, filename=overlay_filename, image_id=overlay_image_id)
+        ]
+        target_source_images.append(overlay_entry)
+        normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
+        await crud.update_inspection_part_metadata(
+            db=db,
+            project_id=project_id,
+            part_id=target_part.id,
+            metadata_patch=normalized_target,
+            updated_by=current_user.email,
+        )
+
+    return schemas.InspectionOverlayAssignmentResponse(
+        project_id=project_id,
+        overlay_filename=overlay_filename,
+        base_filename=base_filename,
+        from_part_id=from_part_id,
+        to_part_id=target_part.id if target_part else None,
     )
 
 
@@ -1119,6 +1801,56 @@ async def assign_part_to_batch(
         to_batch_id=payload.to_batch_id,
     )
 
+
+@router.patch("/projects/{project_id}/parts/{part_id}/source-images/{image_ref:path}", response_model=schemas.InspectionPart)
+async def update_inspection_part_source_image(
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    image_ref: str,
+    payload: schemas.InspectionPartSourceImageUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+):
+    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+    source_images = metadata.get("source_images")
+    if not isinstance(source_images, list):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source image not found")
+    target_ref = str(image_ref or "").strip()
+    updated_images = []
+    found = False
+    for record in source_images:
+        if not isinstance(record, dict):
+            updated_images.append(record)
+            continue
+        record_refs = {
+            str(record.get("image_id") or "").strip(),
+            str(record.get("filename") or "").strip(),
+        }
+        if target_ref and target_ref in record_refs:
+            found = True
+            next_record = dict(record)
+            if payload.crop_subtitle is not None:
+                next_record["crop_subtitle"] = payload.crop_subtitle.strip()
+            updated_images.append(next_record)
+        else:
+            updated_images.append(record)
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source image not found")
+    normalized = _rebuild_part_image_maps({**metadata, "source_images": updated_images})
+    updated = await crud.update_inspection_part_metadata(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        metadata_patch=normalized,
+        updated_by=current_user.email,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    return _serialize_inspection_part(updated)
 
 @router.patch("/projects/{project_id}/parts/{part_id}/manual-flag", response_model=schemas.InspectionPart)
 async def update_inspection_part_manual_flag(
@@ -1207,7 +1939,6 @@ async def segment_inspection_slice(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    _require_toolbox()
     await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
 
     part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
@@ -1590,6 +2321,7 @@ async def get_project_configuration(
 @router.put(
     "/projects/{project_id}/configuration",
     response_model=schemas.InspectionProjectConfigurationResponse,
+    response_model_exclude_unset=True,
 )
 async def update_project_configuration(
     project_id: uuid.UUID,
@@ -1603,7 +2335,7 @@ async def update_project_configuration(
         metadata=schemas.ProjectMetadataCreate(
             project_id=project_id,
             key=PROJECT_CONFIGURATION_KEY,
-            value=payload.config.model_dump(exclude_unset=True),
+            value=_dump_project_configuration_payload(payload.config),
         ),
         created_by=current_user.email,
     )
@@ -1764,6 +2496,7 @@ async def load_project_test_data(
         if not PT3_TEST_STACK_ROOT.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PT3 test stack not found")
         volume_info = load_slice_stack(PT3_TEST_STACK_ROOT)
+        nsipro_metadata = _load_nsipro_metadata_fixture(PT3_TEST_STACK_ROOT)
         for index, file_path in enumerate(sorted(PT3_TEST_STACK_ROOT.glob("*.png"))):
             metadata = {
                 "source": "vista-test-data",
@@ -1772,7 +2505,11 @@ async def load_project_test_data(
                 "slice_index": index,
                 "slice_axis": "Z",
                 "axis_labels": ["XY", "XZ", "YZ"],
+                "overlay": False,
+                "modality": "volume-slice",
             }
+            if nsipro_metadata:
+                metadata["selected_metadata_file"] = nsipro_metadata["source_filename"]
             image, created = await _create_test_image_if_missing(
                 project_id=project_id,
                 file_path=file_path,
@@ -1782,8 +2519,65 @@ async def load_project_test_data(
                 allow_metadata_only=True,
             )
             images_created += 1 if created else 0
-            uploaded_records.append({"filename": file_path.name, "image_id": str(image.id), "metadata": metadata})
+            uploaded_records.append({
+                "filename": file_path.name,
+                "image_id": str(image.id),
+                "metadata": metadata,
+                **metadata,
+            })
 
+            overlay_path = PT3_TEST_STACK_ROOT / "overlays" / f"{file_path.stem}_overlay.png"
+            if overlay_path.exists():
+                overlay_metadata = {
+                    "source": "vista-test-data",
+                    "project_type": "PT3",
+                    "volume_stack_id": "PT3_SYNTH_MPR_001",
+                    "slice_index": index,
+                    "slice_axis": "Z",
+                    "axis_labels": ["XY", "XZ", "YZ"],
+                    "overlay": True,
+                    "modality": "segmentation",
+                    "overlay_base_filename": file_path.name,
+                    "overlay_base_image_id": str(image.id),
+                }
+                if nsipro_metadata:
+                    overlay_metadata["selected_metadata_file"] = nsipro_metadata["source_filename"]
+                overlay_image, overlay_created = await _create_test_image_if_missing(
+                    project_id=project_id,
+                    file_path=overlay_path,
+                    metadata=overlay_metadata,
+                    db=db,
+                    current_user=current_user,
+                    allow_metadata_only=True,
+                )
+                images_created += 1 if overlay_created else 0
+                uploaded_records.append({
+                    "filename": overlay_path.name,
+                    "image_id": str(overlay_image.id),
+                    "metadata": overlay_metadata,
+                    **overlay_metadata,
+                })
+
+        part_metadata = {
+            "source": "vista-test-data",
+            "volume_stack_id": "PT3_SYNTH_MPR_001",
+            "volume_shape": {
+                "axial": volume_info.shape[0],
+                "coronal": volume_info.shape[1],
+                "sagittal": volume_info.shape[2],
+            },
+            "mpr": {
+                "volume_shape": {
+                    "axial": volume_info.shape[0],
+                    "coronal": volume_info.shape[1],
+                    "sagittal": volume_info.shape[2],
+                },
+                "axis_labels": ["XY", "XZ", "YZ"],
+            },
+            "source_images": uploaded_records,
+        }
+        if nsipro_metadata:
+            part_metadata["nsipro_metadata"] = nsipro_metadata
         ingest_payload = schemas.InspectionBulkIngestPayload(
             batches=[
                 schemas.InspectionIngestBatchRecord(
@@ -1793,24 +2587,7 @@ async def load_project_test_data(
                         schemas.InspectionIngestPartRecord(
                             serial_number="SN3D0001",
                             display_name="PT3 synthetic MPR stack",
-                            metadata={
-                                "source": "vista-test-data",
-                                "volume_stack_id": "PT3_SYNTH_MPR_001",
-                                "volume_shape": {
-                                    "axial": volume_info.shape[0],
-                                    "coronal": volume_info.shape[1],
-                                    "sagittal": volume_info.shape[2],
-                                },
-                                "mpr": {
-                                    "volume_shape": {
-                                        "axial": volume_info.shape[0],
-                                        "coronal": volume_info.shape[1],
-                                        "sagittal": volume_info.shape[2],
-                                    },
-                                    "axis_labels": ["XY", "XZ", "YZ"],
-                                },
-                                "source_images": uploaded_records,
-                            },
+                            metadata=part_metadata,
                         )
                     ],
                 )
@@ -1820,7 +2597,7 @@ async def load_project_test_data(
         fixture_paths = sorted(
             path
             for path in TEST_DATA_ROOT.iterdir()
-            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".txt"}
         )
         if not fixture_paths:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PT1/PT2 test data not found")
@@ -1845,6 +2622,7 @@ async def load_project_test_data(
         payload=ingest_payload,
         db=db,
         current_user=current_user,
+        project_type=project.project_type,
     )
     return {
         "project_id": project_id,
@@ -1865,10 +2643,11 @@ async def bulk_ingest_project_parts(
     db: AsyncSession = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
+    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
     return await _bulk_ingest_project_parts(
         project_id=project_id,
         payload=payload,
         db=db,
         current_user=current_user,
+        project_type=project.project_type,
     )

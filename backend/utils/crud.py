@@ -249,6 +249,37 @@ async def create_project(db: AsyncSession, project: schemas.ProjectCreate, creat
     return db_project
 
 
+async def get_project_dashboard_counts(
+    db: AsyncSession,
+    project_ids: List[uuid.UUID],
+) -> Dict[uuid.UUID, Dict[str, int]]:
+    """Return active image and inspection part counts for dashboard project cards."""
+    counts = {project_id: {"image_count": 0, "part_count": 0} for project_id in project_ids}
+    if not project_ids:
+        return counts
+
+    image_rows = await db.execute(
+        select(models.DataInstance.project_id, func.count(models.DataInstance.id))
+        .where(
+            models.DataInstance.project_id.in_(project_ids),
+            models.DataInstance.deleted_at.is_(None),
+        )
+        .group_by(models.DataInstance.project_id)
+    )
+    for project_id, count in image_rows:
+        counts[project_id]["image_count"] = count
+
+    part_rows = await db.execute(
+        select(models.InspectionPart.project_id, func.count(models.InspectionPart.id))
+        .where(models.InspectionPart.project_id.in_(project_ids))
+        .group_by(models.InspectionPart.project_id)
+    )
+    for project_id, count in part_rows:
+        counts[project_id]["part_count"] = count
+
+    return counts
+
+
 async def archive_project(db: AsyncSession, project_id: uuid.UUID, archived_by: Optional[str] = None) -> Optional[models.Project]:
     """Archive a project, making it read-only and hidden by default."""
     from datetime import datetime, timezone
@@ -376,6 +407,54 @@ async def update_inspection_batch(
     return db_batch
 
 
+async def delete_inspection_batch(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    deleted_by: Optional[str] = None,
+) -> bool:
+    batch = await db.execute(
+        select(models.InspectionBatch).where(
+            models.InspectionBatch.id == batch_id,
+            models.InspectionBatch.project_id == project_id,
+        )
+    )
+    db_batch = batch.scalars().first()
+    if not db_batch:
+        return False
+
+    parts_result = await db.execute(
+        select(models.InspectionPart.id).where(
+            models.InspectionPart.project_id == project_id,
+            models.InspectionPart.batch_id == batch_id,
+        )
+    )
+    moved_part_ids = [part_id for part_id in parts_result.scalars().all()]
+    if moved_part_ids:
+        await db.execute(
+            update(models.InspectionPart)
+            .where(
+                models.InspectionPart.project_id == project_id,
+                models.InspectionPart.batch_id == batch_id,
+            )
+            .values(batch_id=None)
+        )
+
+    await db.delete(db_batch)
+    await db.commit()
+    log_db_operation(
+        "DELETE",
+        "inspection_batches",
+        batch_id,
+        deleted_by or "system",
+        {
+            "project_id": str(project_id),
+            "parts_moved_to_unassigned": len(moved_part_ids),
+        },
+    )
+    return True
+
+
 async def create_inspection_part(
     db: AsyncSession,
     project_id: uuid.UUID,
@@ -497,6 +576,124 @@ async def update_inspection_part_metadata(
         {"project_id": str(project_id), "metadata_keys": sorted(metadata_patch.keys())},
     )
     return part
+
+
+async def remove_image_from_inspection_parts(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    filename: Optional[str] = None,
+    image_id: Optional[uuid.UUID] = None,
+    updated_by: Optional[str] = None,
+) -> int:
+    """Remove image references from all project inspection-part metadata."""
+    normalized_filename = str(filename or "").strip()
+    normalized_image_id = str(image_id) if image_id else ""
+    if not normalized_filename and not normalized_image_id:
+        return 0
+
+    parts = await list_inspection_parts(db=db, project_id=project_id)
+    updated_count = 0
+    for part in parts:
+        metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
+        source_images = metadata.get("source_images")
+        if not isinstance(source_images, list):
+            continue
+
+        retained = []
+        changed = False
+        for record in source_images:
+            if not isinstance(record, dict):
+                retained.append(record)
+                continue
+            record_filename = str(record.get("filename") or "").strip()
+            record_image_id = str(record.get("image_id") or "")
+            matches_filename = normalized_filename and record_filename == normalized_filename
+            matches_image_id = normalized_image_id and record_image_id == normalized_image_id
+            if matches_filename or matches_image_id:
+                changed = True
+                continue
+            retained.append(record)
+
+        if changed:
+            configured_views = set()
+            modalities = set()
+            view_images = {}
+            overlay_images = {}
+            normalized_source_images = []
+            for retained_record in retained:
+                if not isinstance(retained_record, dict):
+                    continue
+                retained_filename = str(retained_record.get("filename") or "").strip()
+                if not retained_filename:
+                    continue
+                side = str(retained_record.get("side") or "").strip().lower()
+                modality = str(retained_record.get("modality") or "").strip().lower()
+                overlay = bool(retained_record.get("overlay"))
+                normalized_record = {
+                    **retained_record,
+                    "filename": retained_filename,
+                    "side": side,
+                    "modality": modality,
+                    "overlay": overlay,
+                }
+                normalized_source_images.append(normalized_record)
+                if side:
+                    configured_views.add(side)
+                if modality:
+                    modalities.add(modality)
+                if side and overlay and modality:
+                    overlay_images.setdefault(side, {})[modality] = retained_filename
+                elif side and not overlay and side not in view_images:
+                    view_images[side] = retained_filename
+
+            part.metadata_json = {
+                **metadata,
+                "source_images": normalized_source_images,
+                "configured_views": sorted(configured_views),
+                "modalities": sorted(modalities),
+                "view_images": view_images,
+                "overlay_images": overlay_images,
+            }
+            updated_count += 1
+
+    if updated_count:
+        await db.commit()
+        log_db_operation(
+            "UPDATE",
+            "inspection_parts",
+            project_id,
+            updated_by or "system",
+            {
+                "action": "remove_image_references",
+                "filename": normalized_filename,
+                "image_id": normalized_image_id,
+                "parts_updated": updated_count,
+            },
+        )
+    return updated_count
+
+
+async def delete_inspection_part(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    part_id: uuid.UUID,
+    deleted_by: Optional[str] = None,
+) -> bool:
+    part = await get_inspection_part(db=db, project_id=project_id, part_id=part_id)
+    if not part:
+        return False
+
+    await db.delete(part)
+    await db.commit()
+    log_db_operation(
+        "DELETE",
+        "inspection_parts",
+        part_id,
+        deleted_by or "system",
+        {"project_id": str(project_id)},
+    )
+    return True
 
 # DataInstance CRUD operations
 async def get_data_instance(db: AsyncSession, image_id: uuid.UUID) -> Optional[models.DataInstance]:

@@ -106,3 +106,29 @@ def test_deleted_image_cannot_be_restored_after_force(client):
         r = client.post(f"/api/projects/{pid}/images/{image_id}/restore")
         # Expect 409 or 400 once logic added; allow 404 for now
         assert r.status_code in (409, 400, 404)
+
+
+def test_soft_delete_image_removes_inspection_part_references(client):
+    pid = _create_project(client)
+    img = _upload_image(client, pid, filename="part-ref.png")
+    part_r = client.post(
+        f"/api/projects/{pid}/parts",
+        json={"serial_number": "SN-IMG-DEL", "display_name": "Image delete part"},
+    )
+    assert part_r.status_code == 201, part_r.text
+    part_id = part_r.json()["id"]
+    assign_r = client.post(
+        f"/api/projects/{pid}/parts/image-assignments",
+        json={"filename": img["filename"], "to_part_id": part_id},
+    )
+    assert assign_r.status_code == 200, assign_r.text
+
+    del_r = client.request("DELETE", f"/api/projects/{pid}/images/{img['id']}", json={"reason": "unload removes references"})
+    assert del_r.status_code == 200, del_r.text
+
+    parts_r = client.get(f"/api/projects/{pid}/parts")
+    assert parts_r.status_code == 200
+    metadata = parts_r.json()[0]["metadata"]
+    assert metadata["source_images"] == []
+    assert metadata["view_images"] == {}
+    assert metadata["overlay_images"] == {}

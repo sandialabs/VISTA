@@ -90,6 +90,10 @@ VISTA is a full-stack application for managing, classifying, and collaborating o
 └── podman-compose.yml      # Development infrastructure
 ```
 
+### Implementation Recipes
+
+- [Replace the default `.nsipro` parser](nsipro-default-parser-replacement-recipe.md) when a deployment uses one custom `.nsipro` data extraction function as the default parser.
+
 ## Getting Started
 
 ### Prerequisites

@@ -76,47 +76,39 @@ const SEGMENTATION_HELPER_TOOLS = [
 const SEGMENTATION_POINT_MARKER_TOOLS = new Set(['polygon', 'circle', 'rectangle']);
 const SEGMENTATION_ML_METHOD_GROUPS = [
   {
-    id: 'opencv',
-    label: 'OpenCV',
-    methods: [
-      { id: 'segmentation.connected_components', label: 'Connected Components' },
-      { id: 'threshold.otsu', label: 'Otsu Threshold' },
-      { id: 'segmentation.watershed_seeds', label: 'Watershed Seeds' },
-    ],
-  },
-  {
     id: 'yolo',
     label: 'YOLO',
     methods: [
-      { id: 'ml.yolov8.segment', label: 'YOLOv8 Segment' },
-      { id: 'ml.yolo.ultralytics', label: 'Ultralytics Configurable' },
+      { id: 'segmentation.yolo.placeholder', label: 'YOLO (placeholder)' },
+    ],
+  },
+  {
+    id: 'anomalib',
+    label: 'Anomalib',
+    methods: [
+      { id: 'segmentation.anomalib.placeholder', label: 'Anomalib (placeholder)' },
     ],
   },
   {
     id: 'sam',
     label: 'SAM',
     methods: [
-      { id: 'ml.sam.segment_anything', label: 'Segment Anything' },
-      { id: 'ml.mask2former.universal_segment', label: 'Mask2Former' },
-      { id: 'ml.oneformer.universal_segment', label: 'OneFormer' },
+      { id: 'segmentation.sam.placeholder', label: 'SAM (placeholder)' },
+    ],
+  },
+  {
+    id: 'opencv',
+    label: 'OpenCV',
+    methods: [
+      { id: 'segmentation.opencv.placeholder', label: 'OpenCV (placeholder)' },
     ],
   },
 ];
 const DEFAULT_SEGMENTATION_ML_PARAMETERS = {
-  'segmentation.connected_components': { min_area_px: 12 },
-  'threshold.otsu': {},
-  'segmentation.watershed_seeds': { seed_spacing_px: 18, compactness: 0.01 },
-  'ml.yolov8.segment': { model: 'yolov8n-seg.pt', confidence: 0.25 },
-  'ml.yolo.ultralytics': { family: 'yolo11', task: 'segment', size: 'n', model: '', confidence: 0.25, iou: 0.45 },
-  'ml.sam.segment_anything': {
-    variant: 'sam2.1_hiera_large',
-    prompt_mode: 'automatic',
-    prompt_json: {},
-    min_mask_region_area: 8,
-    max_foreground_fraction: 0.85,
-  },
-  'ml.mask2former.universal_segment': { checkpoint: 'facebook/mask2former-swin-large-ade-semantic', task: 'semantic' },
-  'ml.oneformer.universal_segment': { checkpoint: 'shi-labs/oneformer_ade20k_swin_large', task: 'semantic' },
+  'segmentation.yolo.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
+  'segmentation.anomalib.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
+  'segmentation.sam.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
+  'segmentation.opencv.placeholder': { integration_mode: 'placeholder', function_path: '', fastapi_url: '', mode: 'default', prompts: {}, options: {} },
 };
 
 function SegmentationToolIcon({ icon }) {
@@ -216,46 +208,31 @@ function SegmentationToolIcon({ icon }) {
   );
 }
 const SEGMENTATION_ML_PARAMETER_FIELDS = {
-  'segmentation.connected_components': [
-    { name: 'min_area_px', label: 'Min area', type: 'number', min: 0, step: 1 },
+  'segmentation.yolo.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
-  'segmentation.watershed_seeds': [
-    { name: 'seed_spacing_px', label: 'Seed spacing', type: 'number', min: 1, step: 1 },
-    { name: 'compactness', label: 'Compactness', type: 'number', min: 0, step: 0.01 },
+  'segmentation.anomalib.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
-  'ml.yolov8.segment': [
-    { name: 'model', label: 'Model', type: 'text' },
-    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
+  'segmentation.sam.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
-  'ml.yolo.ultralytics': [
-    { name: 'family', label: 'Family', type: 'select', options: ['yolov8', 'yolo11', 'custom'] },
-    { name: 'task', label: 'Task', type: 'select', options: ['detect', 'segment'] },
-    { name: 'size', label: 'Size', type: 'select', options: ['n', 's', 'm', 'l', 'x'] },
-    { name: 'model', label: 'Custom model', type: 'text' },
-    { name: 'confidence', label: 'Confidence', type: 'number', min: 0, max: 1, step: 0.05 },
-    { name: 'iou', label: 'IoU', type: 'number', min: 0, max: 1, step: 0.05 },
-  ],
-  'ml.sam.segment_anything': [
-    { name: 'variant', label: 'Variant', type: 'select', options: ['sam2.1_hiera_tiny', 'sam2.1_hiera_small', 'sam2.1_hiera_base_plus', 'sam2.1_hiera_large', 'sam_vit_b', 'sam_vit_l', 'sam_vit_h'] },
-    { name: 'prompt_mode', label: 'Prompt', type: 'select', options: ['automatic', 'box', 'points'] },
-    { name: 'min_mask_region_area', label: 'Min region', type: 'number', min: 1, step: 1 },
-    { name: 'max_foreground_fraction', label: 'Max foreground', type: 'number', min: 0.05, max: 0.98, step: 0.01 },
-  ],
-  'ml.mask2former.universal_segment': [
-    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['facebook/mask2former-swin-large-ade-semantic', 'facebook/mask2former-swin-large-ade-panoptic', 'facebook/mask2former-swin-tiny-ade-semantic'] },
-    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
-  ],
-  'ml.oneformer.universal_segment': [
-    { name: 'checkpoint', label: 'Checkpoint', type: 'select', options: ['shi-labs/oneformer_ade20k_swin_large', 'shi-labs/oneformer_coco_swin_large', 'shi-labs/oneformer_coco_dinat_large'] },
-    { name: 'task', label: 'Task', type: 'select', options: ['semantic', 'instance', 'panoptic'] },
+  'segmentation.opencv.placeholder': [
+    { name: 'integration_mode', label: 'Integration', type: 'select', options: ['placeholder', 'local_import', 'fastapi'] },
+    { name: 'function_path', label: 'Function path', type: 'text' },
+    { name: 'fastapi_url', label: 'FastAPI URL', type: 'text' },
+    { name: 'mode', label: 'Mode', type: 'text' },
   ],
 };
-const MEASUREMENT_ENDPOINT_HOVER_RATIO = 0.01;
-const MEASUREMENT_LOCAL_ZOOM_DIAMETER_RATIO = 0.5;
-const MEASUREMENT_LOCAL_ZOOM_SCALE = 10;
-const MEASUREMENT_LOCAL_ZOOM_MIN_SCALE = 2;
-const MEASUREMENT_LOCAL_ZOOM_MAX_SCALE = 25;
-const MEASUREMENT_LOCAL_ZOOM_POINTER_SENSITIVITY = 0.5;
 const FULLSCREEN_IMAGE_ZOOM_MIN = 1;
 const FULLSCREEN_IMAGE_ZOOM_MAX = 8;
 const RESIZABLE_COLUMN_MIN_PX = 220;
@@ -282,6 +259,110 @@ const IMAGE_RENDER_CATEGORIES = [
   { id: 'source', label: 'Source images' },
   { id: 'overlay', label: 'Overlays' },
 ];
+
+const NSIPRO_METADATA_PATTERN = /nsi[\s_-]*pro|\.nsipro/i;
+
+function isPlainMetadataObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isNsiproMetadataKey(key) {
+  return NSIPRO_METADATA_PATTERN.test(String(key || ''));
+}
+
+function isNsiproMetadataString(value) {
+  return typeof value === 'string' && NSIPRO_METADATA_PATTERN.test(value);
+}
+
+function formatMetadataPath(parentPath, key) {
+  if (typeof key === 'number') return `${parentPath}[${key}]`;
+  return parentPath ? `${parentPath}.${key}` : String(key);
+}
+
+
+function collectMetadataLeafEntries(value, path = 'metadata') {
+  if (Array.isArray(value)) {
+    if (!value.length) return [{ path, value }];
+    return value.flatMap((entry, index) => collectMetadataLeafEntries(entry, formatMetadataPath(path, index)));
+  }
+  if (isPlainMetadataObject(value)) {
+    const entries = Object.entries(value);
+    if (!entries.length) return [{ path, value }];
+    return entries.flatMap(([key, entryValue]) => collectMetadataLeafEntries(entryValue, formatMetadataPath(path, key)));
+  }
+  return [{ path, value }];
+}
+
+function collectNsiproMetadataEntries(value, path = 'metadata', inNsiproContext = false) {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => collectNsiproMetadataEntries(
+      entry,
+      formatMetadataPath(path, index),
+      inNsiproContext
+    ));
+  }
+  if (isPlainMetadataObject(value)) {
+    return Object.entries(value).flatMap(([key, entryValue]) => {
+      const nextPath = formatMetadataPath(path, key);
+      const keyStartsNsiproContext = isNsiproMetadataKey(key);
+      const valueIsNsiproReference = isNsiproMetadataString(entryValue);
+      const shouldFlattenNsiproObject = keyStartsNsiproContext && (
+        isPlainMetadataObject(entryValue) || Array.isArray(entryValue)
+      );
+
+      if (shouldFlattenNsiproObject) {
+        return collectNsiproMetadataEntries(entryValue, nextPath, true);
+      }
+
+      return collectNsiproMetadataEntries(
+        entryValue,
+        nextPath,
+        inNsiproContext || keyStartsNsiproContext || valueIsNsiproReference
+      );
+    });
+  }
+  if (inNsiproContext || isNsiproMetadataString(value)) {
+    return [{ path, value }];
+  }
+  return [];
+}
+
+function omitNsiproMetadata(value, key = '') {
+  if (isNsiproMetadataKey(key) || isNsiproMetadataString(value)) return undefined;
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => omitNsiproMetadata(entry))
+      .filter((entry) => entry !== undefined);
+  }
+  if (isPlainMetadataObject(value)) {
+    return Object.entries(value).reduce((acc, [entryKey, entryValue]) => {
+      const nextValue = omitNsiproMetadata(entryValue, entryKey);
+      if (nextValue !== undefined) acc[entryKey] = nextValue;
+      return acc;
+    }, {});
+  }
+  return value;
+}
+
+function getPartMetadataBreakout(part) {
+  const metadata = isPlainMetadataObject(part?.metadata) ? part.metadata : {};
+  return {
+    nsiproEntries: collectNsiproMetadataEntries(metadata),
+    otherMetadata: omitNsiproMetadata(metadata) || {},
+  };
+}
+
+function formatMetadataValue(value) {
+  if (value === null) return 'null';
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (err) {
+    return String(value);
+  }
+}
 function hasDroppedMetadataField(part, field) {
   const metadata = part?.metadata;
   if (!metadata || typeof metadata !== 'object') return false;
@@ -665,6 +746,80 @@ function getAnnotationListValue(annotation) {
   return '-';
 }
 
+
+function isBoundingBoxAnnotation(annotation) {
+  const bbox = annotation?.bbox || annotation?.geometry?.box || annotation;
+  if (!bbox || typeof bbox !== 'object') return false;
+  return ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(Number(bbox[key])))
+    && Number(bbox.width) > 0
+    && Number(bbox.height) > 0;
+}
+
+function getAnnotationCropBox(annotation) {
+  const bbox = annotation?.bbox || annotation?.geometry?.box || annotation || {};
+  const geometry = annotation?.geometry || {};
+  const x = Number(bbox.x);
+  const y = Number(bbox.y);
+  const width = Number(bbox.width);
+  const height = Number(bbox.height);
+  const imageWidth = Number(geometry.imageWidth || bbox.imageWidth || geometry.box?.imageWidth || annotation?.imageWidth);
+  const imageHeight = Number(geometry.imageHeight || bbox.imageHeight || geometry.box?.imageHeight || annotation?.imageHeight);
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  return {
+    x,
+    y,
+    width,
+    height,
+    imageWidth: Number.isFinite(imageWidth) && imageWidth > 0 ? imageWidth : null,
+    imageHeight: Number.isFinite(imageHeight) && imageHeight > 0 ? imageHeight : null,
+  };
+}
+
+function formatCropCoordinate(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0';
+  return String(Math.round(numeric * 100) / 100).replace(/\.0+$/, '');
+}
+
+function sanitizeCropFilename(value) {
+  return String(value || 'image')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180) || 'image';
+}
+
+function getCropImageTitle(_annotation, parentImageName) {
+  return `Child of ${parentImageName || 'image'}`;
+}
+
+function getCropUploadFilename(annotation, parentImageName) {
+  const box = getAnnotationCropBox(annotation);
+  const title = `${formatCropCoordinate(box?.x)}_${formatCropCoordinate(box?.y)}_child of ${parentImageName || 'image'}`;
+  return `${sanitizeCropFilename(title)}.png`;
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Failed to load source image for crop'));
+    image.src = src;
+  });
+}
+
+function canvasToBlob(canvas, type = 'image/png') {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('Failed to create cropped image'));
+      }
+    }, type);
+  });
+}
+
 function getMeasurementLabelViewBoxPosition(line, fontSize = 20) {
   const x = ((Number(line.x1) + Number(line.x2)) / (2 * Number(line.imageWidth))) * 1000;
   const y = ((Number(line.y1) + Number(line.y2)) / (2 * Number(line.imageHeight))) * 1000 - 6;
@@ -750,6 +905,28 @@ function getModalities(part) {
   return DEFAULT_MODALITIES;
 }
 
+function getPartSummaryModalities(part, imageRefs = getPartImageRefs(part)) {
+  const loadedModalities = new Set();
+  imageRefs.forEach((entry) => {
+    const modality = String(entry?.modality || '').trim().toLowerCase();
+    if (!modality || modality === 'analyze-overlay') return;
+    loadedModalities.add(modality);
+  });
+  const configuredModalities = getModalities(part);
+  if (loadedModalities.size === 0) {
+    return imageRefs.length > 0 && configuredModalities.length === 1
+      ? [configuredModalities[0]]
+      : [];
+  }
+  const orderedConfiguredModalities = configuredModalities.filter((modality) =>
+    loadedModalities.has(String(modality || '').trim().toLowerCase()),
+  );
+  const orderedLoadedModalities = Array.from(loadedModalities).filter((modality) =>
+    !orderedConfiguredModalities.some((configured) => String(configured || '').trim().toLowerCase() === modality),
+  );
+  return [...orderedConfiguredModalities, ...orderedLoadedModalities];
+}
+
 function getMprDimensions(part) {
   const raw = part?.metadata?.volume_shape || part?.metadata?.mpr?.volume_shape || {};
   const dimensions = MPR_AXES.reduce((acc, axis) => {
@@ -760,13 +937,26 @@ function getMprDimensions(part) {
   return dimensions;
 }
 
+function getProjectImageRecord(projectImageLookup = {}, entry = {}) {
+  const imageId = entry?.image_id ? String(entry.image_id) : '';
+  const filename = String(entry?.filename || '');
+  return (imageId && projectImageLookup[imageId]) || (filename && projectImageLookup[filename]) || null;
+}
+
+function getVolumeEntryImageId(entry, projectImageLookup = {}) {
+  const imageId = entry?.image_id ? String(entry.image_id) : '';
+  if (imageId) return imageId;
+  return getProjectImageRecord(projectImageLookup, entry)?.id || '';
+}
+
 function getVolumeSourceImages(part, projectImageLookup = {}) {
   const sourceImages = part?.metadata?.source_images;
   if (!Array.isArray(sourceImages)) return [];
   return sourceImages
+    .filter((entry) => entry && !entry.overlay)
     .map((entry, index) => {
       const filename = String(entry?.filename || '');
-      const imageId = entry?.image_id || projectImageLookup[filename]?.id;
+      const imageId = getVolumeEntryImageId(entry, projectImageLookup);
       if (!imageId) return null;
       const sliceIndex = Number(entry?.metadata?.slice_index ?? entry?.slice_index ?? index);
       return {
@@ -778,6 +968,41 @@ function getVolumeSourceImages(part, projectImageLookup = {}) {
     })
     .filter(Boolean)
     .sort((left, right) => left.sliceIndex - right.sliceIndex || left.filename.localeCompare(right.filename));
+}
+
+function getVolumeOverlayStacks(part, projectImageLookup = {}) {
+  const sourceImages = part?.metadata?.source_images;
+  if (!Array.isArray(sourceImages)) return [];
+  const baseRecords = sourceImages.filter((entry) => entry && !entry.overlay);
+  const baseIds = new Set(baseRecords.map((entry) => getVolumeEntryImageId(entry, projectImageLookup)).filter(Boolean));
+  const baseFilenames = new Set(baseRecords.map((entry) => String(entry?.filename || '')).filter(Boolean));
+  const overlays = sourceImages.filter((entry) => {
+    if (!entry?.overlay) return false;
+    const baseImageId = String(entry.overlay_base_image_id || '');
+    const baseFilename = String(entry.overlay_base_filename || '');
+    return (baseImageId && baseIds.has(baseImageId)) || (baseFilename && baseFilenames.has(baseFilename)) || (!baseImageId && !baseFilename && baseRecords.length === 1);
+  });
+  const stacksByOverlayImage = new Map();
+  overlays.forEach((entry, index) => {
+    const imageId = getVolumeEntryImageId(entry, projectImageLookup);
+    if (!imageId) return;
+    const filename = String(entry?.filename || '');
+    const sliceIndex = Number(entry?.metadata?.slice_index ?? entry?.slice_index ?? index);
+    const key = imageId;
+    if (!stacksByOverlayImage.has(key)) stacksByOverlayImage.set(key, []);
+    stacksByOverlayImage.get(key).push({
+      id: String(imageId),
+      filename,
+      sliceIndex: Number.isFinite(sliceIndex) ? sliceIndex : index,
+      url: `/api/images/${encodeURIComponent(String(imageId))}/content`,
+      overlayBaseImageId: String(entry.overlay_base_image_id || ''),
+      overlayBaseFilename: String(entry.overlay_base_filename || ''),
+    });
+  });
+  return Array.from(stacksByOverlayImage.entries()).map(([id, stack]) => ({
+    id,
+    stack: stack.sort((left, right) => left.sliceIndex - right.sliceIndex || left.filename.localeCompare(right.filename)),
+  }));
 }
 
 function getNumericRangeFromCandidate(candidate) {
@@ -816,22 +1041,8 @@ function getDisplayDomainFromBitDepth(value, signed = false) {
   return { min: 0, max: (2 ** bits) - 1, step: 1, label: `${bits}-bit` };
 }
 
-function getDisplayDomainFromMetadata(metadata) {
+function getExplicitDisplayDomainFromMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
-  const dtypeDomain = getDisplayDomainFromDtype(
-    metadata.voxel_dtype
-      ?? metadata.pixel_dtype
-      ?? metadata.data_dtype
-      ?? metadata.dtype
-      ?? metadata.pixel_type
-      ?? metadata.data_type,
-  );
-  if (dtypeDomain) return dtypeDomain;
-  const bitDepthDomain = getDisplayDomainFromBitDepth(
-    metadata.bit_depth ?? metadata.bits_allocated ?? metadata.bits_per_sample,
-    metadata.signed === true || String(metadata.pixel_representation || '').toLowerCase() === 'signed',
-  );
-  if (bitDepthDomain) return bitDepthDomain;
   const explicitRange = [
     metadata.data_value_range,
     metadata.voxel_value_range,
@@ -846,25 +1057,77 @@ function getDisplayDomainFromMetadata(metadata) {
     return {
       ...explicitRange,
       step: Number.isInteger(explicitRange.min) && Number.isInteger(explicitRange.max) ? 1 : Math.max(0.001, span / 1000),
-      label: 'metadata range',
+      label: 'loaded image range',
     };
   }
   return null;
 }
 
+function getDisplayDomainFromMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const explicitRangeDomain = getExplicitDisplayDomainFromMetadata(metadata);
+  if (explicitRangeDomain) return explicitRangeDomain;
+  const dtypeDomain = getDisplayDomainFromDtype(
+    metadata.voxel_dtype
+      ?? metadata.pixel_dtype
+      ?? metadata.data_dtype
+      ?? metadata.dtype
+      ?? metadata.pixel_type
+      ?? metadata.data_type,
+  );
+  if (dtypeDomain) return dtypeDomain;
+  const bitDepthDomain = getDisplayDomainFromBitDepth(
+    metadata.bit_depth ?? metadata.bits_allocated ?? metadata.bits_per_sample,
+    metadata.signed === true || String(metadata.pixel_representation || '').toLowerCase() === 'signed',
+  );
+  if (bitDepthDomain) return bitDepthDomain;
+  return null;
+}
+
+function combineDisplayDomains(domains) {
+  const validDomains = domains.filter(Boolean);
+  if (validDomains.length === 0) return null;
+  const min = Math.min(...validDomains.map((domain) => Number(domain.min)));
+  const max = Math.max(...validDomains.map((domain) => Number(domain.max)));
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return null;
+  const integerSteps = validDomains.every((domain) => Number(domain.step) === 1);
+  return {
+    min,
+    max,
+    step: integerSteps && Number.isInteger(min) && Number.isInteger(max) ? 1 : Math.max(0.001, (max - min) / 1000),
+    label: 'loaded image range',
+  };
+}
+
+function getSourceImageDisplayDomain(source, projectImageLookup = {}, explicitOnly = false) {
+  const metadataCandidates = [source?.metadata, source];
+  const filename = String(source?.filename || '');
+  const imageId = String(source?.image_id || '');
+  const imageRecord = projectImageLookup[imageId] || projectImageLookup[filename];
+  metadataCandidates.push(getImageMetadata(imageRecord));
+  for (const metadata of metadataCandidates) {
+    const domain = explicitOnly ? getExplicitDisplayDomainFromMetadata(metadata) : getDisplayDomainFromMetadata(metadata);
+    if (domain) return domain;
+  }
+  return null;
+}
+
 function getPartDisplayValueDomain(part, projectImageLookup = {}) {
+  const partExplicitDomain = getExplicitDisplayDomainFromMetadata(part?.metadata);
+  if (partExplicitDomain) return partExplicitDomain;
+
+  const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
+  const sourceExplicitDomain = combineDisplayDomains(
+    sourceImages.map((source) => getSourceImageDisplayDomain(source, projectImageLookup, true)),
+  );
+  if (sourceExplicitDomain) return sourceExplicitDomain;
+
   const partDomain = getDisplayDomainFromMetadata(part?.metadata);
   if (partDomain) return partDomain;
 
-  const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
   for (const source of sourceImages) {
-    const sourceDomain = getDisplayDomainFromMetadata(source?.metadata) || getDisplayDomainFromMetadata(source);
+    const sourceDomain = getSourceImageDisplayDomain(source, projectImageLookup);
     if (sourceDomain) return sourceDomain;
-    const filename = String(source?.filename || '');
-    const imageId = String(source?.image_id || '');
-    const imageRecord = projectImageLookup[imageId] || projectImageLookup[filename];
-    const imageDomain = getDisplayDomainFromMetadata(getImageMetadata(imageRecord));
-    if (imageDomain) return imageDomain;
   }
 
   return DEFAULT_DISPLAY_VALUE_DOMAIN;
@@ -928,6 +1191,13 @@ function getShellImageLayers(part, projectImageLookup = {}) {
     .filter(Boolean);
 }
 
+function getAssignedOverlayDisplayLabel(record) {
+  if (record?.analysis_output || record?.analysis_source_image_id) return '';
+  const baseName = String(record?.overlay_base_filename || record?.overlay_base_image_id || '').trim();
+  if (!baseName) return '';
+  return `overlay for ${safeDecodeFilename(baseName)}`;
+}
+
 function getAnalyzeOverlayDisplayLabel(label) {
   const parts = String(label || 'Analyze Overlay')
     .split('::')
@@ -940,17 +1210,27 @@ function getAnalyzeOverlayDisplayLabel(label) {
 function getPartImageRefs(part) {
   const refs = [];
   const seen = new Set();
+  const sourceImages = Array.isArray(part?.metadata?.source_images) ? part.metadata.source_images : [];
+  const sourceImageByFilename = sourceImages.reduce((acc, record) => {
+    const filename = String(record?.filename || '');
+    if (filename && !acc[filename]) acc[filename] = record;
+    return acc;
+  }, {});
+  const getRecordModality = (record) => String(record?.modality || record?.metadata?.modality || '').toLowerCase();
   const imagesByView = part?.metadata?.view_images;
   if (imagesByView && typeof imagesByView === 'object') {
     Object.entries(imagesByView).forEach(([viewName, imageRef]) => {
       const ref = String(imageRef || '');
       if (!ref || seen.has(ref)) return;
+      const sourceRecord = sourceImageByFilename[ref] || {};
       seen.add(ref);
       refs.push({
         id: `${part.id}-view-${viewName}`,
         viewName: String(viewName || '').toLowerCase(),
+        modality: getRecordModality(sourceRecord),
         label: String(viewName || 'image').toUpperCase(),
         imageRef: ref,
+        imageId: sourceRecord.image_id ? String(sourceRecord.image_id) : '',
         overlay: false,
       });
     });
@@ -969,31 +1249,38 @@ function getPartImageRefs(part) {
     if (!record || typeof record !== 'object') return;
     if (record.overlay_delete_candidate || record.delete_candidate) return;
     const overlay = forceOverlay || record.overlay === true || record.analysis_output === true;
-    if (!overlay && hasViewRefs) return;
+    const cropChild = record.crop_child_image === true || record.cropChildImage === true;
+    const cropSubtitle = String(record.crop_subtitle || record.cropSubtitle || '').trim();
+    if (!overlay && hasViewRefs && !cropChild) return;
     const imageRef = String(record.image_id || record.filename || '');
     if (!imageRef || seen.has(imageRef)) return;
     seen.add(imageRef);
-    const label = overlay
-      ? getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || 'Analyze Overlay')
-      : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
+    const modality = getRecordModality(record);
+    const label = cropChild
+      ? String(record.crop_title || record.filename || `CROP ${index + 1}`)
+      : overlay
+        ? (getAssignedOverlayDisplayLabel(record) || getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay'))
+        : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
     refs.push({
       id: `${part.id}-${overlay ? 'analysis' : 'source'}-${index}`,
       viewName: String(record.side || record.modality || (overlay ? 'overlay' : 'image')).toLowerCase(),
+      modality,
       label,
       imageRef,
       filename: String(record.filename || ''),
       imageId: record.image_id ? String(record.image_id) : '',
       overlay,
+      cropChild,
+      cropSubtitle,
+      parentImageId: record.parent_image_id ? String(record.parent_image_id) : '',
+      parentImageFilename: record.parent_image_filename ? String(record.parent_image_filename) : '',
       overlayBaseImageId: record.overlay_base_image_id ? String(record.overlay_base_image_id) : '',
       overlayBaseFilename: record.overlay_base_filename ? String(record.overlay_base_filename) : '',
     });
   };
-  const sourceImages = part?.metadata?.source_images;
-  if (Array.isArray(sourceImages)) {
-    sourceImages.forEach((record, index) => {
-      pushRecord(record, index, isAnalyzeOutputRecord(record));
-    });
-  }
+  sourceImages.forEach((record, index) => {
+    pushRecord(record, index, isAnalyzeOutputRecord(record));
+  });
   const analysisOutputs = part?.metadata?.analysis_outputs;
   if (Array.isArray(analysisOutputs)) {
     analysisOutputs.forEach((record, index) => {
@@ -1001,6 +1288,21 @@ function getPartImageRefs(part) {
     });
   }
   return refs;
+}
+
+function isDeletedProjectImageRecord(record) {
+  return Boolean(record?.deleted_at || record?.deletedAt || record?.is_deleted || record?.deleted);
+}
+
+function isInspectionImageRefLoaded(entry, projectImageLookup = {}) {
+  const candidates = [
+    entry?.imageId,
+    entry?.imageRef,
+    entry?.filename,
+  ].map((value) => String(value || '').trim()).filter(Boolean);
+  const records = candidates.map((candidate) => projectImageLookup[candidate]).filter(Boolean);
+  if (records.length === 0) return true;
+  return records.some((record) => !isDeletedProjectImageRecord(record));
 }
 
 function resolveProjectImageId(projectImageLookup, ...candidates) {
@@ -1457,7 +1759,7 @@ function getSegmentationMlMethods(groupId) {
 }
 
 function getDefaultSegmentationMlMethod(groupId) {
-  return getSegmentationMlMethods(groupId)[0]?.id || 'segmentation.connected_components';
+  return getSegmentationMlMethods(groupId)[0]?.id || 'segmentation.opencv.placeholder';
 }
 
 function getDefaultSegmentationMlParameters(methodId) {
@@ -1525,6 +1827,45 @@ function useMprVolumeCache(imageStack, dimensions) {
   }, [cacheKey, dimensions, imageStack]);
 
   return cacheState;
+}
+
+function useMprVolumeCaches(imageStacks, dimensions) {
+  const cacheKeys = useMemo(() => (Array.isArray(imageStacks) ? imageStacks : []).map((stack) => getMprVolumeCacheKey(stack.stack || stack)), [imageStacks]);
+  const [cacheStates, setCacheStates] = useState([]);
+
+  useEffect(() => {
+    const stacks = Array.isArray(imageStacks) ? imageStacks : [];
+    if (stacks.length === 0) {
+      setCacheStates([]);
+      return undefined;
+    }
+    if (typeof window !== 'undefined' && /jsdom/i.test(window.navigator?.userAgent || '')) {
+      setCacheStates(cacheKeys.map((key) => ({ key, status: 'idle', cache: null })));
+      return undefined;
+    }
+
+    let cancelled = false;
+    setCacheStates(cacheKeys.map((key) => ({ key, status: key ? 'loading' : 'idle', cache: key ? (mprVolumeCacheStore.get(key) || null) : null })));
+    Promise.all(stacks.map(async (stackEntry, index) => {
+      const stack = stackEntry.stack || stackEntry;
+      const key = cacheKeys[index];
+      if (!key || stack.length === 0) return { key: '', status: 'idle', cache: null };
+      const cached = mprVolumeCacheStore.get(key);
+      if (cached) return { key, status: 'ready', cache: cached };
+      const cache = await buildMprVolumeCache(key, stack, dimensions);
+      if (!cache) return { key, status: 'error', cache: null };
+      rememberMprVolumeCache(key, cache);
+      return { key, status: 'ready', cache };
+    })).then((states) => {
+      if (!cancelled) setCacheStates(states);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKeys, dimensions, imageStacks]);
+
+  return cacheStates;
 }
 
 function applyDisplayWindowToCanvasContext(ctx, width, height, displayWindow, displayDomain) {
@@ -1713,7 +2054,7 @@ function DisplayWindowControl({ displayWindow, displayDomain, onChange }) {
   );
 }
 
-function MprSliceCanvas({ axis, volumeCache, volumeCacheStatus, slicePosition, dimensions, displayWindow, displayDomain }) {
+function MprSliceCanvas({ axis, volumeCache, overlayCaches = [], volumeCacheStatus, slicePosition, dimensions, displayWindow, displayDomain }) {
   const canvasRef = useRef(null);
   const relevantSlicePosition = slicePosition[axis];
 
@@ -1740,8 +2081,17 @@ function MprSliceCanvas({ axis, volumeCache, volumeCacheStatus, slicePosition, d
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(sliceCanvas, 0, 0, canvas.width, canvas.height);
     applyDisplayWindowToCanvasContext(ctx, canvas.width, canvas.height, displayWindow, displayDomain);
+    overlayCaches.forEach((overlayCache) => {
+      const overlaySliceCanvas = getCachedMprSliceCanvas(axis, slicePosition, dimensions, overlayCache);
+      if (!overlaySliceCanvas) return;
+      ctx.save();
+      ctx.globalAlpha = 0.45;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(overlaySliceCanvas, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    });
     return undefined;
-  }, [axis, dimensions, displayDomain, displayWindow, relevantSlicePosition, slicePosition, volumeCache]);
+  }, [axis, dimensions, displayDomain, displayWindow, overlayCaches, relevantSlicePosition, slicePosition, volumeCache]);
 
   return (
     <canvas
@@ -2025,6 +2375,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [mprReconstructionMode, setMprReconstructionMode] = useState(MPR_RECONSTRUCTION_MODES.orientation);
   const [mprProjectionMirror, setMprProjectionMirror] = useState(DEFAULT_MPR_PROJECTION_MIRROR);
   const [activeWorkbenchModal, setActiveWorkbenchModal] = useState(null);
+  const [activeMetadataTab, setActiveMetadataTab] = useState('nsipro');
   const [segmentationHelperOpen, setSegmentationHelperOpen] = useState(false);
   const [segmentationHelperAxis, setSegmentationHelperAxis] = useState('axial');
   const [segmentationSegments, setSegmentationSegments] = useState(() => [createDefaultSegment(0)]);
@@ -2038,8 +2389,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [segmentationDraftShape, setSegmentationDraftShape] = useState(null);
   const [segmentationPointerPreview, setSegmentationPointerPreview] = useState(null);
   const [segmentationMlGroup, setSegmentationMlGroup] = useState('opencv');
-  const [segmentationMlMethod, setSegmentationMlMethod] = useState('segmentation.connected_components');
-  const [segmentationMlParameters, setSegmentationMlParameters] = useState(() => getDefaultSegmentationMlParameters('segmentation.connected_components'));
+  const [segmentationMlMethod, setSegmentationMlMethod] = useState('segmentation.opencv.placeholder');
+  const [segmentationMlParameters, setSegmentationMlParameters] = useState(() => getDefaultSegmentationMlParameters('segmentation.opencv.placeholder'));
   const [segmentationMlStatus, setSegmentationMlStatus] = useState('');
   const [segmentationMlLoading, setSegmentationMlLoading] = useState(false);
   const [displayWindow, setDisplayWindow] = useState({ min: 0, max: 255 });
@@ -2089,14 +2440,12 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [fullscreenImageModal, setFullscreenImageModal] = useState(null);
   const [fullscreenMeasureActive, setFullscreenMeasureActive] = useState(false);
   const [fullscreenBoxActive, setFullscreenBoxActive] = useState(false);
+  const [fullscreenCropActive, setFullscreenCropActive] = useState(false);
   const [fullscreenMeasurements, setFullscreenMeasurements] = useState([]);
   const [fullscreenCalibrationPromptVisible, setFullscreenCalibrationPromptVisible] = useState(false);
-  const [fullscreenHoveredEndpoint, setFullscreenHoveredEndpoint] = useState(null);
+  const [tileCalibrationPromptImageId, setTileCalibrationPromptImageId] = useState(null);
   const [fullscreenEditingEndpoint, setFullscreenEditingEndpoint] = useState(null);
-  const [fullscreenHoveredBoxCorner, setFullscreenHoveredBoxCorner] = useState(null);
   const [fullscreenEditingBoxCorner, setFullscreenEditingBoxCorner] = useState(null);
-  const [fullscreenZoomLens, setFullscreenZoomLens] = useState(null);
-  const [fullscreenZoomScale, setFullscreenZoomScale] = useState(MEASUREMENT_LOCAL_ZOOM_SCALE);
   const [fullscreenImageZoom, setFullscreenImageZoom] = useState({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
   const [fullscreenImagePanning, setFullscreenImagePanning] = useState(false);
   const [sessionCalibrationByImageId, setSessionCalibrationByImageId] = useState({});
@@ -2117,6 +2466,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const [mprAnnotationPreview, setMprAnnotationPreview] = useState(null);
   const [fullscreenAnnotationPreview, setFullscreenAnnotationPreview] = useState(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+  const [fullscreenBoundsEditAnnotationId, setFullscreenBoundsEditAnnotationId] = useState(null);
+  const [croppingAnnotationId, setCroppingAnnotationId] = useState(null);
   const [viewportWidth, setViewportWidth] = useState(() => (
     typeof window === 'undefined' ? Number.POSITIVE_INFINITY : window.innerWidth
   ));
@@ -2355,18 +2706,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     );
   }, [projectConfiguration, projectImageLookup, projectMetadata, sessionCalibrationByImageId]);
 
-  const handleFullscreenCalibrationChange = useCallback((calibration) => {
-    if (!fullscreenImageModal?.imageId || !isValidCalibration(calibration)) return;
-    const imageId = String(fullscreenImageModal.imageId);
-    setSessionCalibrationByImageId((prev) => ({ ...prev, [imageId]: calibration }));
-    setProjectMetadata((prev) => ({
-      ...(prev && typeof prev === 'object' ? prev : {}),
-      calibration_default: prev?.calibration_default || calibration,
-    }));
-    setFullscreenCalibrationPromptVisible(false);
-    setFullscreenMeasureActive(true);
-  }, [fullscreenImageModal?.imageId]);
-
 
   async function saveInspectionColumnWidths(columnWidths) {
     const nextConfig = {
@@ -2527,17 +2866,38 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   }, [selectedPart, selectedViewName]);
   const selectedPartImageRefs = useMemo(() => {
     if (!selectedPart?.metadata || typeof selectedPart.metadata !== 'object') return [];
-    return getPartImageRefs(selectedPart);
-  }, [selectedPart]);
+    return getPartImageRefs(selectedPart).filter((entry) => isInspectionImageRefLoaded(entry, projectImageLookup));
+  }, [projectImageLookup, selectedPart]);
   const visibleSelectedPartImageRefs = useMemo(() => {
     const hidden = new Set(hiddenViewNames.map((name) => String(name).toLowerCase()));
-    return selectedPartImageRefs.filter((entry) => {
+    const enabled = new Set(enabledModalities.map((name) => String(name).toLowerCase()));
+    const categoryFiltered = selectedPartImageRefs.filter((entry) => {
       const category = entry.overlay ? 'overlay' : 'source';
       if (!renderCategories.includes(category)) return false;
-      return !hidden.has(String(entry.viewName || '').toLowerCase());
+      if (hidden.has(String(entry.viewName || '').toLowerCase())) return false;
+      if (entry.overlay && (entry.overlayBaseImageId || entry.overlayBaseFilename)) return true;
+      const modality = String(entry.modality || '').toLowerCase();
+      return !modality || modality === 'analyze-overlay' || enabled.has(modality);
     });
-  }, [hiddenViewNames, renderCategories, selectedPartImageRefs]);
-  const tileColumnMax = Math.max(1, selectedPartImageRefs.length || visibleSelectedPartImageRefs.length || 1);
+    if (!renderCategories.includes('overlay')) return categoryFiltered;
+    const overlayBaseIdentities = new Set();
+    categoryFiltered.forEach((entry) => {
+      if (!entry.overlay) return;
+      [entry.overlayBaseImageId, entry.overlayBaseFilename]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .forEach((value) => overlayBaseIdentities.add(value));
+    });
+    if (overlayBaseIdentities.size === 0) return categoryFiltered;
+    return categoryFiltered.filter((entry) => {
+      if (entry.overlay) return true;
+      return ![entry.imageId, entry.imageRef, entry.filename]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .some((value) => overlayBaseIdentities.has(value));
+    });
+  }, [enabledModalities, hiddenViewNames, renderCategories, selectedPartImageRefs]);
+  const tileColumnMax = Math.max(1, visibleSelectedPartImageRefs.length || selectedPartImageRefs.length || 1);
   const normalizedTileColumnCount = Math.round(clampRange(
     tileColumnCount,
     1,
@@ -2552,6 +2912,42 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     const key = String(imageId || '');
     return annotationSourceImageIdLookup[key] || key;
   }, [annotationSourceImageIdLookup]);
+  const applySessionCalibration = useCallback((imageId, calibration) => {
+    if (!imageId || !isValidCalibration(calibration)) return false;
+    const key = String(imageId);
+    setSessionCalibrationByImageId((prev) => ({ ...prev, [key]: calibration }));
+    setProjectMetadata((prev) => ({
+      ...(prev && typeof prev === 'object' ? prev : {}),
+      calibration_default: prev?.calibration_default || calibration,
+    }));
+    return true;
+  }, []);
+
+  const handleFullscreenCalibrationChange = useCallback((calibration) => {
+    if (!applySessionCalibration(fullscreenImageModal?.imageId, calibration)) return;
+    setFullscreenCalibrationPromptVisible(false);
+    setFullscreenMeasureActive(true);
+  }, [applySessionCalibration, fullscreenImageModal?.imageId]);
+
+  const handleTileCalibrationChange = useCallback((calibration) => {
+    if (!applySessionCalibration(tileCalibrationPromptImageId, calibration)) return;
+    setTileCalibrationPromptImageId(null);
+  }, [applySessionCalibration, tileCalibrationPromptImageId]);
+
+  const requireCalibrationForAnnotation = useCallback((imageId, { surface = 'tile', toolMode = annotationToolMode } = {}) => {
+    if (toolMode === 'crop') return true;
+    const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
+    if (getCalibrationForImage(annotationImageId)) return true;
+    if (surface === 'fullscreen') {
+      setFullscreenCalibrationPromptVisible(true);
+      setFullscreenMeasureActive(false);
+      setFullscreenBoxActive(false);
+    } else {
+      setTileCalibrationPromptImageId(annotationImageId ? String(annotationImageId) : null);
+    }
+    return false;
+  }, [annotationToolMode, getAnnotationSourceImageIdForImage, getCalibrationForImage]);
+
   const selectedImageRecord = useMemo(() => {
     if (!selectedImageRef) return null;
     return projectImageLookup[selectedImageRef] || null;
@@ -2560,7 +2956,15 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     () => getVolumeSourceImages(selectedPart, projectImageLookup),
     [projectImageLookup, selectedPart],
   );
+  const volumeOverlayStacks = useMemo(
+    () => getVolumeOverlayStacks(selectedPart, projectImageLookup),
+    [projectImageLookup, selectedPart],
+  );
   const volumeCacheState = useMprVolumeCache(volumeImageStack, mprDimensions);
+  const volumeOverlayCacheStates = useMprVolumeCaches(volumeOverlayStacks, mprDimensions);
+  const activeVolumeOverlayCaches = renderCategories.includes('overlay')
+    ? volumeOverlayCacheStates.map((state) => state.cache).filter(Boolean)
+    : [];
   const shellImageLayers = useMemo(
     () => getShellImageLayers(selectedPart, projectImageLookup),
     [projectImageLookup, selectedPart],
@@ -2660,7 +3064,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   }, [selectedPartImageRefs, selectedImageRef]);
 
   useEffect(() => {
-    if (!selectedPart || !['PT2', 'PT3'].includes(projectType)) return;
+    if (!selectedPart || projectType !== 'PT3') return;
     const savedMpr = workspaceHydration?.mpr || {};
     const savedSlice = savedMpr?.slice_position || {};
     const savedViewport = savedMpr?.viewport_transform || {};
@@ -2766,12 +3170,16 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   useEffect(() => {
     if (!annotations.length) {
       setSelectedAnnotationId(null);
+      setFullscreenBoundsEditAnnotationId(null);
       return;
     }
     if (!annotations.some((annotation) => annotation.id === selectedAnnotationId)) {
       setSelectedAnnotationId(annotations[0].id);
     }
-  }, [annotations, selectedAnnotationId]);
+    if (fullscreenBoundsEditAnnotationId && !annotations.some((annotation) => String(annotation.id) === String(fullscreenBoundsEditAnnotationId))) {
+      setFullscreenBoundsEditAnnotationId(null);
+    }
+  }, [annotations, selectedAnnotationId, fullscreenBoundsEditAnnotationId]);
 
   useEffect(() => {
     if (loading || !workspaceStateLoaded) return;
@@ -2787,7 +3195,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
               part_filter: partFilter,
               sort_mode: sortMode,
               selected_part_id: selectedPart?.id || '',
-              mpr: ['PT2', 'PT3'].includes(projectType)
+              mpr: projectType === 'PT3'
                 ? {
                   slice_position: slicePosition,
                   viewport_transform: viewportTransform,
@@ -3448,6 +3856,17 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       : [...prev, key]));
   };
 
+  const toggleModalityVisibility = (modality) => {
+    const key = String(modality || '').toLowerCase();
+    if (!key) return;
+    setEnabledModalities((prev) => {
+      const normalized = prev.map((entry) => String(entry).toLowerCase());
+      return normalized.includes(key)
+        ? prev.filter((entry) => String(entry).toLowerCase() !== key)
+        : [...prev, key];
+    });
+  };
+
   const toggleMprProjectionMirror = (axis) => {
     setMprProjectionMirror((prev) => ({
       ...prev,
@@ -3539,6 +3958,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     setAnnotationToolMode((prev) => (prev === mode ? '' : mode));
     setTileAnnotationDraft(null);
     setTileAnnotationPreview(null);
+    setTileCalibrationPromptImageId(null);
     tileAnnotationDraftRef.current = null;
     setMprAnnotationDraft(null);
     setMprAnnotationPreview(null);
@@ -3872,12 +4292,162 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       setAnnotations((prev) => prev.filter((item) => String(item.id) !== String(lineId)));
       setFullscreenMeasurements((prev) => prev.filter((item) => String(item.id) !== String(lineId)));
       setSelectedAnnotationId((prev) => (String(prev) === String(lineId) ? null : prev));
-      setFullscreenHoveredEndpoint((prev) => (String(prev?.lineId) === String(lineId) ? null : prev));
+      setFullscreenBoundsEditAnnotationId((prev) => (String(prev) === String(lineId) ? null : prev));
       setFullscreenEditingEndpoint((prev) => (String(prev?.lineId) === String(lineId) ? null : prev));
-      setFullscreenHoveredBoxCorner((prev) => (String(prev?.boxId) === String(lineId) ? null : prev));
       setFullscreenEditingBoxCorner((prev) => (String(prev?.boxId) === String(lineId) ? null : prev));
     } catch (err) {
       setError(err.message || 'Failed to delete measurement annotation');
+    }
+  };
+
+  const createCropChildImage = async ({ parentImageId, cropBox, cropAnnotationId = '', title = '' }) => {
+    if (!selectedPart?.id || !parentImageId || !isFiniteAnnotationBox(cropBox)) return null;
+    const parentImage = projectImageLookup[parentImageId] || {};
+    const parentFilename = parentImage.filename || parentImageId || 'image';
+    const cropFilename = getCropUploadFilename(cropBox, parentFilename);
+    const cropTitle = title || getCropImageTitle(cropBox, parentFilename);
+    setError(null);
+    try {
+      const sourceImage = await loadImageElement(`/api/images/${encodeURIComponent(String(parentImageId))}/content`);
+      const naturalWidth = Number(sourceImage.naturalWidth || sourceImage.width || cropBox.imageWidth || 0);
+      const naturalHeight = Number(sourceImage.naturalHeight || sourceImage.height || cropBox.imageHeight || 0);
+      if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
+        throw new Error('Source image dimensions are unavailable for crop');
+      }
+      const sourceWidth = cropBox.imageWidth || naturalWidth;
+      const sourceHeight = cropBox.imageHeight || naturalHeight;
+      const scaleX = naturalWidth / sourceWidth;
+      const scaleY = naturalHeight / sourceHeight;
+      const sx = Math.max(0, Math.min(naturalWidth - 1, cropBox.x * scaleX));
+      const sy = Math.max(0, Math.min(naturalHeight - 1, cropBox.y * scaleY));
+      const sw = Math.max(1, Math.min(naturalWidth - sx, cropBox.width * scaleX));
+      const sh = Math.max(1, Math.min(naturalHeight - sy, cropBox.height * scaleY));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(sw));
+      canvas.height = Math.max(1, Math.round(sh));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Unable to prepare crop canvas');
+      context.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const blob = await canvasToBlob(canvas, 'image/png');
+      const metadata = {
+        crop_child_image: true,
+        parent_image_id: String(parentImageId),
+        parent_image_filename: parentFilename,
+        crop_annotation_id: cropAnnotationId ? String(cropAnnotationId) : '',
+        crop_title: cropTitle,
+        crop_subtitle: '',
+        crop_bbox: {
+          x: cropBox.x,
+          y: cropBox.y,
+          width: cropBox.width,
+          height: cropBox.height,
+          imageWidth: cropBox.imageWidth || naturalWidth,
+          imageHeight: cropBox.imageHeight || naturalHeight,
+        },
+        part_id: String(selectedPart.id),
+        serial_number: selectedPart.serial_number || '',
+        modality: 'visual',
+        side: 'crop',
+      };
+      const formData = new FormData();
+      formData.append('file', blob, cropFilename);
+      formData.append('metadata', JSON.stringify(metadata));
+      const uploadResp = await fetch(`/api/projects/${projectId}/images`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!uploadResp.ok) throw new Error(`Failed to upload cropped image (${uploadResp.status})`);
+      const createdImage = await uploadResp.json();
+      const assignResp = await fetch(`/api/projects/${projectId}/parts/image-assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: createdImage.filename || cropFilename, to_part_id: selectedPart.id }),
+      });
+      if (!assignResp.ok) throw new Error(`Failed to add crop to inspection workbench (${assignResp.status})`);
+      const sourceEntry = {
+        filename: createdImage.filename || cropFilename,
+        image_id: String(createdImage.id || ''),
+        side: 'crop',
+        modality: 'visual',
+        overlay: false,
+        crop_child_image: true,
+        parent_image_id: String(parentImageId),
+        parent_image_filename: parentFilename,
+        crop_annotation_id: cropAnnotationId ? String(cropAnnotationId) : '',
+        crop_title: cropTitle,
+        crop_subtitle: '',
+        crop_bbox: metadata.crop_bbox,
+      };
+      setProjectImageLookup((prev) => ({
+        ...prev,
+        [sourceEntry.filename]: createdImage,
+        [sourceEntry.image_id]: createdImage,
+      }));
+      setParts((prev) => prev.map((part) => {
+        if (String(part.id) !== String(selectedPart.id)) return part;
+        const existingSourceImages = Array.isArray(part.metadata?.source_images) ? part.metadata.source_images : [];
+        const withoutDuplicate = existingSourceImages.filter((record) => String(record?.image_id || record?.filename || '') !== String(sourceEntry.image_id));
+        return {
+          ...part,
+          metadata: {
+            ...(part.metadata || {}),
+            source_images: [...withoutDuplicate, sourceEntry],
+          },
+        };
+      }));
+      setSelectedImageRef(sourceEntry.image_id || sourceEntry.filename);
+      return sourceEntry;
+    } catch (err) {
+      setError(err.message || 'Failed to create crop child image');
+      return null;
+    }
+  };
+
+  const cropBoxAnnotation = async (annotation) => {
+    if (!selectedPart?.id || !annotation?.id || !isBoundingBoxAnnotation(annotation)) return;
+    const cropBox = getAnnotationCropBox(annotation);
+    if (!cropBox) return;
+    const annotationImageId = getAnnotationSourceImageIdForImage(annotation.image_id || annotation.imageId || annotation?.geometry?.image_id);
+    if (!annotationImageId) throw new Error('Annotation source image is unavailable for crop');
+    setCroppingAnnotationId(annotation.id);
+    try {
+      await createCropChildImage({
+        parentImageId: annotationImageId,
+        cropBox,
+        cropAnnotationId: annotation.id,
+        title: getCropImageTitle(annotation, (projectImageLookup[annotationImageId] || {}).filename || annotationImageId || 'image'),
+      });
+    } finally {
+      setCroppingAnnotationId(null);
+    }
+  };
+
+  const updateCropChildSubtitle = async (entry, subtitle) => {
+    if (!selectedPart?.id || !entry?.cropChild) return;
+    const imageKey = String(entry.imageId || entry.imageRef || entry.filename || '');
+    setParts((prev) => prev.map((part) => {
+      if (String(part.id) !== String(selectedPart.id)) return part;
+      const sourceImages = Array.isArray(part.metadata?.source_images) ? part.metadata.source_images : [];
+      return {
+        ...part,
+        metadata: {
+          ...(part.metadata || {}),
+          source_images: sourceImages.map((record) => {
+            const recordKey = String(record?.image_id || record?.filename || '');
+            return recordKey === imageKey ? { ...record, crop_subtitle: subtitle } : record;
+          }),
+        },
+      };
+    }));
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/parts/${selectedPart.id}/source-images/${encodeURIComponent(imageKey)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ crop_subtitle: subtitle }),
+      });
+      if (!resp.ok) throw new Error(`Failed to save crop subtitle (${resp.status})`);
+    } catch (err) {
+      setError(err.message || 'Failed to save crop subtitle');
     }
   };
 
@@ -3969,7 +4539,15 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     const annotationCount = Array.isArray(part?.metadata?.annotations) ? part.metadata.annotations.length : 0;
                     const isSelected = part.id === selectedPart?.id;
                     const viewImages = part?.metadata?.view_images || {};
-                    const imageEntries = Object.entries(viewImages);
+                    const imageEntries = Object.entries(viewImages)
+                      .filter(([viewName, imageRef]) => isInspectionImageRefLoaded({
+                        imageRef: String(imageRef || ''),
+                        filename: String(imageRef || ''),
+                        viewName,
+                      }, projectImageLookup));
+                    const partImageRefs = getPartImageRefs(part)
+                      .filter((entry) => isInspectionImageRefLoaded(entry, projectImageLookup));
+                    const partModalities = getPartSummaryModalities(part, partImageRefs);
                     return (
                       <article
                         key={part.id}
@@ -3989,24 +4567,56 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                             Defects: {defectCount} • Annotations: {annotationCount}
                           </div>
                           {imageEntries.length > 0 && (
-                            <div className="part-summary-images">
+                            <div className="part-summary-images" aria-label={`${part.display_name || part.serial_number} view toggles`}>
                               {imageEntries.map(([viewName, imageRef]) => {
-                                const isHidden = hiddenViewNames.includes(String(viewName).toLowerCase());
+                                const normalizedViewName = String(viewName).toLowerCase();
+                                const isHidden = hiddenViewNames.includes(normalizedViewName);
                                 return (
-                                <button
-                                  type="button"
-                                  key={`${part.id}-${viewName}`}
-                                  className={`btn btn-secondary btn-sm ${isSelected && activeViewName === viewName ? 'active' : ''} ${isHidden ? 'muted-toggle' : ''}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setSelectedPartId(part.id);
-                                    toggleViewVisibility(viewName);
-                                    setSelectedViewName(viewName);
-                                    setSelectedImageRef(String(imageRef || ''));
-                                  }}
-                                >
-                                  {viewName.toUpperCase()}
-                                </button>
+                                  <button
+                                    type="button"
+                                    key={`${part.id}-${viewName}`}
+                                    className={`btn btn-secondary btn-sm ${isSelected && activeViewName === normalizedViewName ? 'active' : ''} ${isHidden ? 'muted-toggle' : ''}`}
+                                    aria-pressed={!isHidden}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelectedPartId(part.id);
+                                      toggleViewVisibility(viewName);
+                                      setSelectedViewName(normalizedViewName);
+                                      setSelectedImageRef(String(imageRef || ''));
+                                    }}
+                                  >
+                                    {viewName.toUpperCase()}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {partModalities.length > 0 && (
+                            <div className="part-summary-images part-summary-modalities" aria-label={`${part.display_name || part.serial_number} modality toggles`}>
+                              {partModalities.map((modality) => {
+                                const normalizedModality = String(modality).toLowerCase();
+                                const isEnabled = enabledModalities.map((entry) => String(entry).toLowerCase()).includes(normalizedModality);
+                                const matchingImage = partImageRefs.find((entry) => String(entry.modality || '').toLowerCase() === normalizedModality);
+                                return (
+                                  <button
+                                    type="button"
+                                    key={`${part.id}-modality-${normalizedModality}`}
+                                    className={`btn btn-secondary btn-sm ${isEnabled ? 'active' : 'muted-toggle'}`}
+                                    aria-pressed={isEnabled}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelectedPartId(part.id);
+                                      if (!(matchingImage?.overlay && (matchingImage.overlayBaseImageId || matchingImage.overlayBaseFilename))) {
+                                        toggleModalityVisibility(normalizedModality);
+                                      }
+                                      if (matchingImage) {
+                                        setSelectedViewName(String(matchingImage.viewName || '').toLowerCase());
+                                        setSelectedImageRef(String(matchingImage.imageRef || matchingImage.imageId || ''));
+                                      }
+                                    }}
+                                  >
+                                    {normalizedModality.toUpperCase()}
+                                  </button>
                                 );
                               })}
                             </div>
@@ -4198,6 +4808,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                       <MprSliceCanvas
                         axis={axis}
                         volumeCache={volumeCacheState.cache}
+                        overlayCaches={activeVolumeOverlayCaches}
                         volumeCacheStatus={volumeCacheState.status}
                         slicePosition={slicePosition}
                         dimensions={mprDimensions}
@@ -4318,9 +4929,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                   <span className="volume-box volume-face-right" />
                   <span className="volume-box volume-face-top" />
                   <span className="volume-box volume-face-bottom" />
-                  <span className={`volume-plane plane-axial ${activeMprPane === 'axial' ? 'active' : ''}`} />
-                  <span className={`volume-plane plane-coronal ${activeMprPane === 'coronal' ? 'active' : ''}`} />
-                  <span className={`volume-plane plane-sagittal ${activeMprPane === 'sagittal' ? 'active' : ''}`} />
+                  <span className={`volume-plane volume-keepout plane-axial ${activeMprPane === 'axial' ? 'active' : ''}`} />
+                  <span className={`volume-plane volume-keepout plane-coronal ${activeMprPane === 'coronal' ? 'active' : ''}`} />
+                  <span className={`volume-plane volume-keepout plane-sagittal ${activeMprPane === 'sagittal' ? 'active' : ''}`} />
                   <span className="volume-reticle reticle-x" />
                   <span className="volume-reticle reticle-y" />
                   <span className="volume-reticle reticle-z" />
@@ -4444,7 +5055,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	                const tilePreviewLines = tileAnnotationPreview?.mode === 'measure' && tileAnnotationPreview.imageId === tileAnnotationSourceImageId
 	                  ? [tileAnnotationPreview.line].filter(isFiniteMeasurementLine)
 	                  : [];
-	                const tilePreviewBoxes = tileAnnotationPreview?.mode === 'box' && tileAnnotationPreview.imageId === tileAnnotationSourceImageId
+	                const tilePreviewBoxes = ['box', 'crop'].includes(tileAnnotationPreview?.mode) && tileAnnotationPreview.imageId === tileAnnotationSourceImageId
 		                  ? [tileAnnotationPreview.box].filter(isFiniteAnnotationBox).map((box) => getBoxWithDerivedDimensions(box, tileAnnotationSourceImageId))
 		                  : [];
                 return (
@@ -4465,8 +5076,22 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                       }
                     }}
                   >
-                    <div className="view-cell-title">
-                      <span>{entry.label || viewName.toUpperCase()}</span>
+                    <div className={`view-cell-title ${entry.cropChild ? 'view-cell-title-crop-child' : ''}`}>
+                      <div className="view-cell-title-text">
+                        <span>{entry.label || viewName.toUpperCase()}</span>
+                        {entry.cropChild && (
+                          <input
+                            type="text"
+                            className="view-cell-subtitle-input"
+                            aria-label={`Subtitle for ${entry.label || 'crop child image'}`}
+                            placeholder="Add subtitle (e.g. Feature 1)"
+                            value={entry.cropSubtitle || ''}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onChange={(event) => updateCropChildSubtitle(entry, event.target.value)}
+                          />
+                        )}
+                      </div>
                       {entry.overlay && entry.imageId && (
                         <button
                           type="button"
@@ -4593,6 +5218,17 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          >
 	            Draw box
 	          </button>
+          {projectType !== 'PT3' && (
+            <button
+              type="button"
+              className={`btn btn-secondary ${annotationToolMode === 'crop' ? 'active' : ''}`}
+              aria-label="New Crop on tiles"
+              onClick={() => setTileAnnotationMode('crop')}
+              disabled={!selectedPart}
+            >
+              New Crop
+            </button>
+          )}
 	          {projectType === 'PT3' && (
 	            <button
 	              type="button"
@@ -4626,11 +5262,30 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	            Drag two corners {projectType === 'PT3' ? 'on the active MPR slice' : 'on a tile'} to draw a bounding box.
 	          </p>
         )}
+        {annotationToolMode === 'crop' && (
+          <p className="muted annotation-tool-hint">
+            Drag around part of a parent image to create a child crop tile.
+          </p>
+        )}
 	        {annotationToolMode === 'cube' && (
 	          <p className="muted annotation-tool-hint">
 	            Draw one box, move to another slice on the same axis, then draw the second box.
 	          </p>
 	        )}
+        {tileCalibrationPromptImageId && (
+          <div className="inspection-fullscreen-calibration-panel" role="dialog" aria-label="Measurement calibration required">
+            <div className="workbench-notice">
+              <strong>No Calibration Set</strong>
+              <p>Set calibration before placing measurement annotations.</p>
+            </div>
+            <CalibrationManager
+              projectId={projectId}
+              imageId={tileCalibrationPromptImageId}
+              image={projectImageLookup[tileCalibrationPromptImageId]}
+              onCalibrationChange={handleTileCalibrationChange}
+            />
+          </div>
+        )}
         <ul className="measurement-list" data-testid="annotation-list">
           {annotationsLoading ? (
             <li className="muted">Loading annotations…</li>
@@ -4662,6 +5317,21 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     <span className="annotation-entry-meta">{createdAt}</span>
                   </div>
                   <div className="annotation-entry-actions">
+                    {isBoundingBoxAnnotation(annotation) && (
+                      <button
+                        type="button"
+                        className="annotation-entry-crop"
+                        aria-label={`Crop annotation ${annotation.comment || annotation.defect_class || annotation.id}`}
+                        disabled={croppingAnnotationId === annotation.id}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          cropBoxAnnotation(annotation);
+                        }}
+                      >
+                        {croppingAnnotationId === annotation.id ? 'Cropping…' : 'Crop'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="annotation-entry-edit"
@@ -5256,6 +5926,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                   <MprSliceCanvas
                     axis={axis}
                     volumeCache={volumeCacheState.cache}
+                    overlayCaches={activeVolumeOverlayCaches}
                     volumeCacheStatus={volumeCacheState.status}
                     slicePosition={slicePosition}
                     dimensions={mprDimensions}
@@ -5326,9 +5997,84 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     );
   };
 
+  const renderMetadataTable = (rows, emptyMessage) => {
+    if (!rows.length) return <p className="metadata-modal-empty">{emptyMessage}</p>;
+    return (
+      <table className="metadata-modal-table">
+        <thead>
+          <tr>
+            <th scope="col">Metadata path</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.path}>
+              <td className="metadata-modal-path"><code>{row.path}</code></td>
+              <td><pre>{formatMetadataValue(row.value)}</pre></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
+  const renderMetadataModalBody = () => {
+    if (!selectedPart) return <p className="metadata-modal-empty">Select a part to view metadata.</p>;
+    const { nsiproEntries, otherMetadata } = getPartMetadataBreakout(selectedPart);
+    const otherRows = collectMetadataLeafEntries(otherMetadata);
+    return (
+      <div className="part-metadata-modal-body">
+        <div className="metadata-modal-part-summary">
+          <strong>{selectedPart.display_name || selectedPart.serial_number || selectedPart.id}</strong>
+          <span>{selectedPart.serial_number || selectedPart.id}</span>
+        </div>
+        <div className="project-tabs metadata-modal-tabs" role="tablist" aria-label="Part metadata categories">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeMetadataTab === 'nsipro'}
+            className={`project-tab ${activeMetadataTab === 'nsipro' ? 'active' : ''}`}
+            onClick={() => setActiveMetadataTab('nsipro')}
+          >
+            .nsipro
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeMetadataTab === 'other'}
+            className={`project-tab ${activeMetadataTab === 'other' ? 'active' : ''}`}
+            onClick={() => setActiveMetadataTab('other')}
+          >
+            Other
+          </button>
+        </div>
+        <section
+          className="metadata-modal-tab-panel"
+          role="tabpanel"
+          aria-label={activeMetadataTab === 'nsipro' ? '.nsipro metadata' : 'Other metadata'}
+        >
+          {activeMetadataTab === 'nsipro'
+            ? renderMetadataTable(nsiproEntries, 'No .nsipro metadata was found for the current part.')
+            : renderMetadataTable(otherRows, 'No other metadata was found for the current part.')}
+        </section>
+      </div>
+    );
+  };
+
   const renderWorkbenchModal = () => {
     if (!activeWorkbenchModal) return null;
-    const modalTitle = activeWorkbenchModal === 'parts' ? 'Part Selection' : 'Annotations';
+    const modalTitleByType = {
+      parts: 'Part Selection',
+      annotations: 'Annotations',
+      metadata: 'Part Metadata',
+    };
+    const modalTitle = modalTitleByType[activeWorkbenchModal] || 'Workbench';
+    const renderBody = () => {
+      if (activeWorkbenchModal === 'parts') return renderPartSummaryPane();
+      if (activeWorkbenchModal === 'metadata') return renderMetadataModalBody();
+      return renderAnnotationsPane();
+    };
     return (
       <div className="modal" style={{ display: 'flex' }} onClick={() => setActiveWorkbenchModal(null)}>
         <div className="modal-content workbench-utility-modal" onClick={(event) => event.stopPropagation()}>
@@ -5344,7 +6090,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
             </button>
           </div>
           <div className="modal-body">
-            {activeWorkbenchModal === 'parts' ? renderPartSummaryPane() : renderAnnotationsPane()}
+            {renderBody()}
           </div>
         </div>
       </div>
@@ -5369,6 +6115,17 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
         <div className="workbench-detail-actions">
           <button type="button" className="btn btn-secondary" onClick={() => setActiveWorkbenchModal('parts')}>
             Part Selection
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!selectedPart}
+            onClick={() => {
+              setActiveMetadataTab('nsipro');
+              setActiveWorkbenchModal('metadata');
+            }}
+          >
+            Metadata
           </button>
           {selectedPart && (
             <>
@@ -5484,6 +6241,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     const position = getAnnotationSurfacePointerPosition(event);
     if (!position) return true;
     const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
+    if (!requireCalibrationForAnnotation(annotationImageId, { surface: 'tile', toolMode: annotationToolMode })) return true;
     if (annotationToolMode === 'measure') {
       const firstPoint = tileAnnotationDraft?.mode === 'measure' ? tileAnnotationDraft : null;
       if (!firstPoint) {
@@ -5505,18 +6263,19 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      setAnnotationToolMode('');
 	      return true;
 	    }
-	    if (annotationToolMode === 'box') return true;
+	    if (annotationToolMode === 'box' || annotationToolMode === 'crop') return true;
 	    return true;
 	  };
 
 	  const handleTileBoxPointerDown = (event, imageId) => {
-	    if (annotationToolMode !== 'box') return false;
+	    if (!['box', 'crop'].includes(annotationToolMode)) return false;
 	    if (event.button !== undefined && event.button !== 0) return false;
 	    event.preventDefault();
 	    event.stopPropagation();
 	    const position = getAnnotationSurfacePointerPosition(event);
 	    if (!position) return true;
 	    const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
+	    if (!requireCalibrationForAnnotation(annotationImageId, { surface: 'tile', toolMode: annotationToolMode })) return true;
 	    const nextPoint = { ...position, mode: 'box', imageId: annotationImageId };
 	    tileAnnotationDraftRef.current = nextPoint;
 	    setTileAnnotationDraft(nextPoint);
@@ -5527,7 +6286,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const handleTileBoxPointerUp = (event, imageId) => {
-	    if (annotationToolMode !== 'box') return false;
+	    if (!['box', 'crop'].includes(annotationToolMode)) return false;
 	    event.preventDefault();
 	    event.stopPropagation();
 	    suppressNextTileClickRef.current = true;
@@ -5537,6 +6296,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
 	      const box = makeBoxFromPoints(firstPoint, position);
 	      if (isFiniteAnnotationBox(box)) {
+        if (annotationToolMode === 'crop') {
+          createCropChildImage({ parentImageId: annotationImageId, cropBox: box });
+        } else {
 	        const existingBoxCount = (boxAnnotationsByImageId[String(annotationImageId || '')] || []).length;
 	        createBoxAnnotation({
 	          imageId: annotationImageId,
@@ -5544,6 +6306,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          name: 'Drawn bounding box',
 	          color: MEASUREMENT_COLORS[existingBoxCount % MEASUREMENT_COLORS.length],
 	        });
+        }
 	      }
 	    }
 	    tileAnnotationDraftRef.current = null;
@@ -5563,7 +6326,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    setTileAnnotationPreview(null);
 	    setAnnotationToolMode('');
 	    suppressNextTileClickRef.current = true;
-	    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
+	    setFullscreenBoxActive(false);
+    setFullscreenCropActive(false);
+    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
 	  };
 
 	  const handleTileAnnotationPointerMove = (event, imageId) => {
@@ -5591,14 +6356,14 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	      return;
 	    }
 	    const firstPoint = tileAnnotationDraftRef.current || (tileAnnotationDraft?.mode === 'box' ? tileAnnotationDraft : null);
-	    if (annotationToolMode === 'box' && firstPoint && String(firstPoint.imageId || '') === String(annotationImageId || '')) {
+	    if (['box', 'crop'].includes(annotationToolMode) && firstPoint && String(firstPoint.imageId || '') === String(annotationImageId || '')) {
 	      const box = {
 	        ...makeBoxFromPoints(firstPoint, position),
 	        id: 'tile-box-preview',
 	        imageId: String(annotationImageId || ''),
 	        color: '#f97316',
 	      };
-	      setTileAnnotationPreview({ mode: 'box', imageId: String(annotationImageId || ''), box });
+	      setTileAnnotationPreview({ mode: annotationToolMode, imageId: String(annotationImageId || ''), box });
 	    }
 	  };
 
@@ -5767,52 +6532,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     return { x, y, displayX, displayY, rawDisplayX, rawDisplayY, rect, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight };
   };
 
-  const findHoveredMeasurementEndpoint = (position, lines) => {
-    if (!position || !Array.isArray(lines) || lines.length === 0) return null;
-    let closest = null;
-    lines.forEach((line) => {
-      if (!isFiniteMeasurementLine(line)) return;
-      const threshold = Math.max(6, Number(line.imageWidth) * MEASUREMENT_ENDPOINT_HOVER_RATIO);
-      [
-        { endpoint: 'start', x: Number(line.x1), y: Number(line.y1) },
-        { endpoint: 'end', x: Number(line.x2), y: Number(line.y2) },
-      ].forEach((candidate) => {
-        const distance = Math.hypot(position.x - candidate.x, position.y - candidate.y);
-        if (distance <= threshold && (!closest || distance < closest.distance)) {
-          closest = { lineId: String(line.id), endpoint: candidate.endpoint, distance };
-        }
-      });
-    });
-    return closest;
-  };
-
-  const findHoveredBoxCorner = (position, boxes) => {
-    if (!position || !Array.isArray(boxes) || boxes.length === 0) return null;
-    let closest = null;
-    boxes.forEach((box) => {
-      if (!isFiniteAnnotationBox(box)) return;
-      const threshold = Math.max(6, Number(box.imageWidth) * MEASUREMENT_ENDPOINT_HOVER_RATIO);
-      Object.entries(getAnnotationBoxCornerPoints(box)).forEach(([corner, point]) => {
-        const distance = Math.hypot(position.x - point.x, position.y - point.y);
-        if (distance <= threshold && (!closest || distance < closest.distance)) {
-          closest = { boxId: String(box.id), corner, distance };
-        }
-      });
-    });
-    return closest;
-  };
-
-  const getReducedSensitivityPosition = (position, anchor) => {
-    if (!position || !anchor) return position;
-    const x = Number(anchor.x) + ((Number(position.x) - Number(anchor.x)) * MEASUREMENT_LOCAL_ZOOM_POINTER_SENSITIVITY);
-    const y = Number(anchor.y) + ((Number(position.y) - Number(anchor.y)) * MEASUREMENT_LOCAL_ZOOM_POINTER_SENSITIVITY);
-    return {
-      ...position,
-      x: Math.min(position.naturalWidth, Math.max(0, x)),
-      y: Math.min(position.naturalHeight, Math.max(0, y)),
-    };
-  };
-
   const makeBoxFromMovedCorner = (box, corner, point, naturalWidth, naturalHeight) => {
     if (!isFiniteAnnotationBox(box) || !corner || !point) return null;
     const oppositeCorner = getAnnotationBoxOppositeCornerName(corner);
@@ -5824,30 +6543,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     );
   };
 
-  const updateFullscreenZoomLens = (position, nextScale = fullscreenZoomScale) => {
-    if (!position) {
-      setFullscreenZoomLens(null);
-      return;
-    }
-    const diameter = Math.max(1, position.rect.width * MEASUREMENT_LOCAL_ZOOM_DIAMETER_RATIO);
-    setFullscreenZoomLens({
-      displayX: position.displayX,
-      displayY: position.displayY,
-      naturalX: position.x,
-      naturalY: position.y,
-      naturalWidth: position.naturalWidth,
-      naturalHeight: position.naturalHeight,
-      imageDisplayWidth: position.rect.width,
-      imageDisplayHeight: position.rect.height,
-      diameter,
-      scale: nextScale,
-      backgroundSize: `${position.rect.width * nextScale}px ${position.rect.height * nextScale}px`,
-      backgroundPosition: `${(diameter / 2) - (position.displayX * nextScale)}px ${(diameter / 2) - (position.displayY * nextScale)}px`,
-    });
-  };
 
 	  const updateFullscreenImageZoomFromWheel = (event) => {
-	    if (fullscreenMeasureActive || fullscreenBoxActive || fullscreenEditingEndpoint) return;
+	    if (fullscreenMeasureActive || fullscreenBoxActive || fullscreenCropActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner) return;
 	    const position = getFullscreenImagePointerPosition(event);
 	    if (!position) return;
     event.preventDefault();
@@ -5870,55 +6568,76 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       setFullscreenMeasureActive(false);
       setPendingMeasurePoint(null);
       pendingMeasurePointRef.current = null;
-	      setFullscreenHoveredEndpoint(null);
 	      setFullscreenEditingEndpoint(null);
-      setFullscreenHoveredBoxCorner(null);
       setFullscreenEditingBoxCorner(null);
-	      setFullscreenZoomLens(null);
-	      setFullscreenAnnotationPreview(null);
+		      setFullscreenAnnotationPreview(null);
 	      return;
 	    }
     if (!getCalibrationForImage(getAnnotationSourceImageIdForImage(fullscreenImageModal?.imageId))) {
       setFullscreenCalibrationPromptVisible(true);
       return;
     }
-	    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
 	    setFullscreenCalibrationPromptVisible(false);
 	    setFullscreenBoxActive(false);
+    setFullscreenCropActive(false);
 	    setPendingBoxPoint(null);
 	    pendingBoxPointRef.current = null;
-    setFullscreenHoveredBoxCorner(null);
     setFullscreenEditingBoxCorner(null);
 	    setFullscreenAnnotationPreview(null);
 	    setFullscreenMeasureActive(true);
 	  };
 
 	  const toggleFullscreenBox = () => {
-	    if (fullscreenBoxActive) {
+	    if (fullscreenBoxActive || fullscreenCropActive) {
 	      setFullscreenBoxActive(false);
 	      setPendingBoxPoint(null);
 	      pendingBoxPointRef.current = null;
-      setFullscreenHoveredBoxCorner(null);
       setFullscreenEditingBoxCorner(null);
 	      setFullscreenAnnotationPreview(null);
 	      return;
 	    }
-	    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
 	    setFullscreenMeasureActive(false);
+    setFullscreenCropActive(false);
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
+	    if (!requireCalibrationForAnnotation(fullscreenImageModal?.imageId, { surface: 'fullscreen', toolMode: 'box' })) return;
 	    setFullscreenCalibrationPromptVisible(false);
 	    setFullscreenEditingEndpoint(null);
-	    setFullscreenHoveredEndpoint(null);
-    setFullscreenHoveredBoxCorner(null);
     setFullscreenEditingBoxCorner(null);
-	    setFullscreenZoomLens(null);
 	    setFullscreenAnnotationPreview(null);
 	    setFullscreenBoxActive(true);
 	  };
 
+  const toggleFullscreenCrop = () => {
+    if (fullscreenCropActive) {
+      setFullscreenCropActive(false);
+      setPendingBoxPoint(null);
+      pendingBoxPointRef.current = null;
+      setFullscreenEditingBoxCorner(null);
+      setFullscreenAnnotationPreview(null);
+      return;
+    }
+    setFullscreenMeasureActive(false);
+    setFullscreenBoxActive(false);
+    setPendingMeasurePoint(null);
+    pendingMeasurePointRef.current = null;
+    setPendingBoxPoint(null);
+    pendingBoxPointRef.current = null;
+    setFullscreenCalibrationPromptVisible(false);
+    setFullscreenEditingEndpoint(null);
+    setFullscreenEditingBoxCorner(null);
+    setFullscreenAnnotationPreview(null);
+    setFullscreenCropActive(true);
+  };
+
 	  const commitFullscreenBox = async (box) => {
 	    if (isFiniteAnnotationBox(box)) {
+	      if (!requireCalibrationForAnnotation(fullscreenImageModal?.imageId, { surface: 'fullscreen', toolMode: 'box' })) {
+	        setPendingBoxPoint(null);
+	        pendingBoxPointRef.current = null;
+	        setFullscreenAnnotationPreview(null);
+	        return;
+	      }
 	      const annotationSourceImageId = getAnnotationSourceImageIdForImage(fullscreenImageModal?.imageId);
 	      const existingBoxCount = (boxAnnotationsByImageId[String(annotationSourceImageId || '')] || []).length;
 	      await createBoxAnnotation({
@@ -5931,7 +6650,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    setPendingBoxPoint(null);
 	    pendingBoxPointRef.current = null;
 	    setFullscreenAnnotationPreview(null);
-	    setFullscreenBoxActive(false);
 	  };
 
   const commitFullscreenMeasureLine = async (line) => {
@@ -5966,16 +6684,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
     if (!position) return;
     if (fullscreenEditingEndpoint?.lineId) {
       const sourceLine = fullscreenEditingEndpoint.line;
-      const lensAnchoredPosition = fullscreenZoomLens && Number.isFinite(fullscreenZoomLens.naturalX) && Number.isFinite(fullscreenZoomLens.naturalY)
-        ? {
-            ...position,
-            x: fullscreenZoomLens.naturalX,
-            y: fullscreenZoomLens.naturalY,
-            naturalWidth: fullscreenZoomLens.naturalWidth || position.naturalWidth,
-            naturalHeight: fullscreenZoomLens.naturalHeight || position.naturalHeight,
-          }
-        : position;
-      const adjustedPosition = getReducedSensitivityPosition(lensAnchoredPosition, fullscreenEditingEndpoint.anchor);
+      const adjustedPosition = position;
       const coordinatePatch = fullscreenEditingEndpoint.endpoint === 'start'
         ? { x1: adjustedPosition.x, y1: adjustedPosition.y }
         : { x2: adjustedPosition.x, y2: adjustedPosition.y };
@@ -5987,12 +6696,10 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
       };
       await updateMeasurementAnnotationLine(fullscreenEditingEndpoint.lineId, nextLine);
       setFullscreenEditingEndpoint(null);
-      setFullscreenHoveredEndpoint(null);
-      setFullscreenZoomLens(null);
       return;
     }
     if (fullscreenEditingBoxCorner?.boxId) {
-      const adjustedPosition = getReducedSensitivityPosition(position, fullscreenEditingBoxCorner.anchor);
+      const adjustedPosition = position;
       const nextBox = makeBoxFromMovedCorner(
         fullscreenEditingBoxCorner.box,
         fullscreenEditingBoxCorner.corner,
@@ -6008,11 +6715,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
         });
       }
       setFullscreenEditingBoxCorner(null);
-      setFullscreenHoveredBoxCorner(null);
-      setFullscreenZoomLens(null);
       return;
     }
-	    if (fullscreenBoxActive) return;
+	    if (fullscreenBoxActive || fullscreenCropActive) return;
 	    if (!fullscreenMeasureActive) return;
     if (!getCalibrationForImage(getAnnotationSourceImageIdForImage(fullscreenImageModal?.imageId))) {
       setFullscreenMeasureActive(false);
@@ -6037,7 +6742,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const handleFullscreenBoxPointerDown = (event) => {
-	    if (!fullscreenBoxActive) return;
+	    if (!fullscreenBoxActive && !fullscreenCropActive) return;
 	    if (event.button !== undefined && event.button !== 0) return;
 	    const position = getFullscreenImagePointerPosition(event);
 	    if (!position) return;
@@ -6056,7 +6761,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const handleFullscreenBoxPointerUp = async (event) => {
-	    if (!fullscreenBoxActive) return;
+	    if (!fullscreenBoxActive && !fullscreenCropActive) return;
 	    const position = getFullscreenImagePointerPosition(event);
 	    event.preventDefault();
 	    event.stopPropagation();
@@ -6068,18 +6773,24 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	        imageWidth: position.naturalWidth,
 	        imageHeight: position.naturalHeight,
 	      });
-	      await commitFullscreenBox(box);
+	      if (fullscreenCropActive) {
+	        await createCropChildImage({ parentImageId: getAnnotationSourceImageIdForImage(fullscreenImageModal?.imageId), cropBox: box });
+	      } else {
+	        await commitFullscreenBox(box);
+	      }
 	    } else {
 	      setPendingBoxPoint(null);
 	      pendingBoxPointRef.current = null;
 	      setFullscreenAnnotationPreview(null);
 	      setFullscreenBoxActive(false);
 	    }
+        setFullscreenBoxActive(false);
+        setFullscreenCropActive(false);
 	    if (event.pointerId !== undefined) event.currentTarget.releasePointerCapture?.(event.pointerId);
 	  };
 
 	  const handleFullscreenBoxPointerCancel = (event) => {
-	    if (!fullscreenBoxActive && !pendingBoxPointRef.current) return;
+	    if (!fullscreenBoxActive && !fullscreenCropActive && !pendingBoxPointRef.current) return;
 	    event.preventDefault();
 	    event.stopPropagation();
 	    setPendingBoxPoint(null);
@@ -6090,17 +6801,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  };
 
 	  const handleFullscreenImageWheel = (event) => {
-	    if (fullscreenEditingEndpoint?.lineId || fullscreenEditingBoxCorner?.boxId) {
-      event.preventDefault();
-      const direction = event.deltaY < 0 ? 1 : -1;
-      const nextScale = Math.min(
-        MEASUREMENT_LOCAL_ZOOM_MAX_SCALE,
-        Math.max(MEASUREMENT_LOCAL_ZOOM_MIN_SCALE, fullscreenZoomScale + (direction * 1)),
-      );
-      setFullscreenZoomScale(nextScale);
-      updateFullscreenZoomLens(getFullscreenImagePointerPosition(event), nextScale);
-      return;
-    }
 	    updateFullscreenImageZoomFromWheel(event);
 	  };
 
@@ -6147,10 +6847,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    }
 	    const position = getFullscreenImagePointerPosition(event);
 	    if (fullscreenEditingEndpoint?.lineId || fullscreenEditingBoxCorner?.boxId) {
-	      updateFullscreenZoomLens(position);
 	      return;
 	    }
-	    if (fullscreenBoxActive) {
+	    if (fullscreenBoxActive || fullscreenCropActive) {
 	      const firstPoint = pendingBoxPointRef.current || pendingBoxPoint;
 	      if (firstPoint && position) {
 	        const box = {
@@ -6163,11 +6862,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          id: 'fullscreen-box-preview',
 	          color: '#f97316',
 	        };
-	        setFullscreenAnnotationPreview({ mode: 'box', box });
+	        setFullscreenAnnotationPreview({ mode: fullscreenCropActive ? 'crop' : 'box', box });
 	      }
-	      setFullscreenHoveredEndpoint(null);
-	      setFullscreenHoveredBoxCorner(null);
-	      return;
+		      return;
 	    }
 	    const firstMeasurePoint = pendingMeasurePointRef.current || pendingMeasurePoint;
 	    if (fullscreenMeasureActive && firstMeasurePoint && position) {
@@ -6187,38 +6884,25 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	        ),
 	      };
 	      setFullscreenAnnotationPreview({ mode: 'measure', line });
-	      setFullscreenHoveredEndpoint(null);
-	      setFullscreenHoveredBoxCorner(null);
-	      return;
+		      return;
 	    }
-	    const hovered = findHoveredMeasurementEndpoint(position, lines);
-    setFullscreenHoveredEndpoint((prev) => (
-      prev?.lineId === hovered?.lineId && prev?.endpoint === hovered?.endpoint ? prev : hovered
-    ));
-    const hoveredBoxCorner = hovered ? null : findHoveredBoxCorner(position, boxes);
-    setFullscreenHoveredBoxCorner((prev) => (
-      prev?.boxId === hoveredBoxCorner?.boxId && prev?.corner === hoveredBoxCorner?.corner ? prev : hoveredBoxCorner
-    ));
   };
 
 	  const startFullscreenEndpointEdit = (event, line, endpoint) => {
 	    event.preventDefault();
 	    event.stopPropagation();
+    if (String(fullscreenBoundsEditAnnotationId || '') !== String(line?.id || '')) return;
     const anchor = endpoint === 'start'
       ? { x: Number(line.x1), y: Number(line.y1) }
       : { x: Number(line.x2), y: Number(line.y2) };
 	    setFullscreenMeasureActive(false);
 	    setFullscreenBoxActive(false);
-	    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
 	    setPendingBoxPoint(null);
 	    pendingBoxPointRef.current = null;
     setFullscreenEditingBoxCorner(null);
-    setFullscreenHoveredBoxCorner(null);
     setFullscreenEditingEndpoint({ lineId: String(line.id), endpoint, line, anchor });
-    setFullscreenHoveredEndpoint({ lineId: String(line.id), endpoint });
-    updateFullscreenZoomLens(getFullscreenImagePointerPosition(event));
   };
 
   const handleFullscreenEndpointDotClick = (event, line, endpoint) => {
@@ -6234,19 +6918,16 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
   const startFullscreenBoxCornerEdit = (event, box, corner) => {
     event.preventDefault();
     event.stopPropagation();
+    if (String(fullscreenBoundsEditAnnotationId || '') !== String(box?.id || '')) return;
     const anchor = getAnnotationBoxCornerPoints(box)[corner];
     setFullscreenMeasureActive(false);
     setFullscreenBoxActive(false);
-    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
     setPendingMeasurePoint(null);
     pendingMeasurePointRef.current = null;
     setPendingBoxPoint(null);
     pendingBoxPointRef.current = null;
     setFullscreenEditingEndpoint(null);
-    setFullscreenHoveredEndpoint(null);
     setFullscreenEditingBoxCorner({ boxId: String(box.id), corner, box, anchor });
-    setFullscreenHoveredBoxCorner({ boxId: String(box.id), corner });
-    updateFullscreenZoomLens(getFullscreenImagePointerPosition(event));
   };
 
   const handleFullscreenBoxCornerDotClick = (event, box, corner) => {
@@ -6261,21 +6942,19 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 
   const closeFullscreenImageModal = () => {
 	    setFullscreenImageModal(null);
+      setFullscreenBoundsEditAnnotationId(null);
 	    fullscreenPanDragRef.current = null;
 	    setFullscreenImagePanning(false);
 	    setFullscreenMeasureActive(false);
 	    setFullscreenBoxActive(false);
+        setFullscreenCropActive(false);
 	    setPendingMeasurePoint(null);
 	    pendingMeasurePointRef.current = null;
 	    setPendingBoxPoint(null);
 	    pendingBoxPointRef.current = null;
     setFullscreenCalibrationPromptVisible(false);
-    setFullscreenHoveredEndpoint(null);
 	    setFullscreenEditingEndpoint(null);
-    setFullscreenHoveredBoxCorner(null);
     setFullscreenEditingBoxCorner(null);
-	    setFullscreenZoomLens(null);
-	    setFullscreenZoomScale(MEASUREMENT_LOCAL_ZOOM_SCALE);
 	    setFullscreenImageZoom({ scale: 1, originX: 50, originY: 50, panX: 0, panY: 0 });
 	    setFullscreenAnnotationPreview(null);
 	  };
@@ -6300,7 +6979,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	    const fullscreenPreviewLines = fullscreenAnnotationPreview?.mode === 'measure'
 	      ? [fullscreenAnnotationPreview.line].filter(isFiniteMeasurementLine)
 	      : [];
-	    const fullscreenPreviewBoxes = fullscreenAnnotationPreview?.mode === 'box'
+	    const fullscreenPreviewBoxes = ['box', 'crop'].includes(fullscreenAnnotationPreview?.mode)
 	      ? [fullscreenAnnotationPreview.box].filter(isFiniteAnnotationBox).map((box) => getBoxWithDerivedDimensions(box, fullscreenAnnotationSourceImageId))
 	      : [];
 	    const fullscreenAnnotationItems = [
@@ -6329,6 +7008,9 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	              <button type="button" className={`btn btn-secondary ${fullscreenBoxActive ? 'active' : ''}`} onClick={toggleFullscreenBox}>
 	                Draw box
 	              </button>
+                  <button type="button" className={`btn btn-secondary ${fullscreenCropActive ? 'active' : ''}`} onClick={toggleFullscreenCrop}>
+                    New Crop
+                  </button>
 	              <button type="button" className="modal-close-btn" aria-label="Close fullscreen image" onClick={closeFullscreenImageModal}>&times;</button>
 	            </div>
           </div>
@@ -6349,7 +7031,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	          <div className="inspection-fullscreen-stage">
 	            {fullscreenMeasureActive && <div className="workbench-notice">Click to set first point, click again to set second point.</div>}
 	            {fullscreenBoxActive && <div className="workbench-notice">Press and drag to draw a bounding box.</div>}
-	            {(fullscreenEditingEndpoint || fullscreenEditingBoxCorner) && <div className="workbench-notice">Move the zoom lens to the precise point and click to place it.</div>}
+            {fullscreenCropActive && <div className="workbench-notice">Press and drag around the parent image feature to create a child crop.</div>}
+	            {(fullscreenEditingEndpoint || fullscreenEditingBoxCorner) && <div className="workbench-notice">Click the new endpoint or corner position to update the selected annotation.</div>}
             <div className="inspection-fullscreen-workspace">
               <div
 	                className={`inspection-fullscreen-image-frame ${fullscreenImageZoom.scale > 1 ? 'zoomed' : ''} ${fullscreenImagePanning ? 'panning' : ''}`}
@@ -6358,8 +7041,6 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	                onMouseUp={handleFullscreenPanMouseUp}
 	                onMouseLeave={() => {
 	                  handleFullscreenPanMouseUp();
-	                  if (!fullscreenEditingEndpoint) setFullscreenHoveredEndpoint(null);
-                    if (!fullscreenEditingBoxCorner) setFullscreenHoveredBoxCorner(null);
 	                }}
                 onWheel={handleFullscreenImageWheel}
               >
@@ -6381,7 +7062,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     ref={fullscreenImageRef}
                     src={`/api/images/${encodeURIComponent(fullscreenImageModal.imageId)}/content`}
 	                    alt={`${fullscreenImageModal.label} fullscreen`}
-		                    className={`inspection-fullscreen-image ${fullscreenBaseImageId ? 'analysis-overlay-image' : ''} ${fullscreenMeasureActive || fullscreenBoxActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner ? 'measurement-active' : ''}`}
+		                    className={`inspection-fullscreen-image ${fullscreenBaseImageId ? 'analysis-overlay-image' : ''} ${fullscreenMeasureActive || fullscreenBoxActive || fullscreenCropActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner ? 'measurement-active' : ''}`}
 		                    onMouseDown={handleFullscreenBoxPointerDown}
 		                    onMouseUp={handleFullscreenBoxPointerUp}
 		                    onMouseLeave={handleFullscreenBoxPointerCancel}
@@ -6391,9 +7072,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	                    {[...fullscreenMeasurementLines, ...fullscreenPreviewLines].map((line) => {
                       const labelPosition = getMeasurementLabelViewBoxPosition(line, 20);
                       const endpointPositions = getMeasurementEndpointViewBoxPosition(line);
-                      const endpointActive = fullscreenHoveredEndpoint?.lineId === String(line.id)
-                        || fullscreenEditingEndpoint?.lineId === String(line.id)
-                        || String(selectedAnnotationId || '') === String(line.id);
+                      const endpointActive = fullscreenEditingEndpoint?.lineId === String(line.id)
+                        || String(fullscreenBoundsEditAnnotationId || '') === String(line.id);
                       return (
                         <g key={line.id}>
                           <line x1={(line.x1 / line.imageWidth) * 1000} y1={(line.y1 / line.imageHeight) * 1000} x2={(line.x2 / line.imageWidth) * 1000} y2={(line.y2 / line.imageHeight) * 1000} stroke={line.color} strokeWidth="3" />
@@ -6425,9 +7105,8 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	                    {renderAnnotationOverlay({ measurementLines: [], boxes: [...fullscreenBoxAnnotations, ...fullscreenPreviewBoxes], fontSize: 20, selectedAnnotationId })}
                     {fullscreenBoxAnnotations.map((box) => {
                       const cornerPositions = getAnnotationBoxCornerViewBoxPosition(box);
-                      const cornerActive = fullscreenHoveredBoxCorner?.boxId === String(box.id)
-                        || fullscreenEditingBoxCorner?.boxId === String(box.id)
-                        || String(selectedAnnotationId || '') === String(box.id);
+                      const cornerActive = fullscreenEditingBoxCorner?.boxId === String(box.id)
+                        || String(fullscreenBoundsEditAnnotationId || '') === String(box.id);
                       if (!cornerActive) return null;
                       return (
                         <g key={`box-corners-${box.id}`}>
@@ -6457,53 +7136,7 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
                     })}
 	                  </svg>
 	                </div>
-                {fullscreenZoomLens && (
-                  <div
-                    className="inspection-fullscreen-zoom-lens"
-                    data-testid="fullscreen-measurement-zoom-lens"
-                    style={{
-                      width: fullscreenZoomLens.diameter,
-                      height: fullscreenZoomLens.diameter,
-                      left: fullscreenZoomLens.displayX - (fullscreenZoomLens.diameter / 2),
-                      top: fullscreenZoomLens.displayY - (fullscreenZoomLens.diameter / 2),
-                      backgroundImage: fullscreenBaseImageId
-                        ? `url(/api/images/${encodeURIComponent(fullscreenImageModal.imageId)}/content), url(/api/images/${encodeURIComponent(fullscreenBaseImageId)}/content)`
-                        : `url(/api/images/${encodeURIComponent(fullscreenImageModal.imageId)}/content)`,
-                      backgroundSize: fullscreenZoomLens.backgroundSize,
-                      backgroundPosition: fullscreenZoomLens.backgroundPosition,
-                    }}
-                  >
-                    {fullscreenEditingEndpoint?.line && (
-                      <svg className="inspection-fullscreen-zoom-lens-overlay" width={fullscreenZoomLens.diameter} height={fullscreenZoomLens.diameter} aria-label="Measurement fine-tune overlay">
-                        {(() => {
-                          const line = fullscreenEditingEndpoint.line;
-                          const toLensX = (x) => {
-                            const displayX = (Number(x) / Number(line.imageWidth || fullscreenZoomLens.naturalWidth || 1)) * Number(fullscreenZoomLens.imageDisplayWidth || 1);
-                            return (fullscreenZoomLens.diameter / 2) + ((displayX - fullscreenZoomLens.displayX) * fullscreenZoomLens.scale);
-                          };
-                          const toLensY = (y) => {
-                            const displayY = (Number(y) / Number(line.imageHeight || fullscreenZoomLens.naturalHeight || 1)) * Number(fullscreenZoomLens.imageDisplayHeight || 1);
-                            return (fullscreenZoomLens.diameter / 2) + ((displayY - fullscreenZoomLens.displayY) * fullscreenZoomLens.scale);
-                          };
-                          return (
-                            <g opacity="0.45">
-                              <line
-                                x1={toLensX(line.x1)}
-                                y1={toLensY(line.y1)}
-                                x2={toLensX(line.x2)}
-                                y2={toLensY(line.y2)}
-                                stroke={line.color || '#f97316'}
-                                strokeWidth="2"
-                              />
-                              <circle cx={toLensX(line.x1)} cy={toLensY(line.y1)} r="4" fill="#ffffff" stroke={line.color || '#f97316'} strokeWidth="2" />
-                              <circle cx={toLensX(line.x2)} cy={toLensY(line.y2)} r="4" fill="#ffffff" stroke={line.color || '#f97316'} strokeWidth="2" />
-                            </g>
-                          );
-                        })()}
-                      </svg>
-                    )}
-                  </div>
-                )}
+
               </div>
 	              <aside className="inspection-fullscreen-annotations" aria-label="Measurement annotations" data-testid="fullscreen-annotation-list">
 	                <h4>Annotations</h4>
@@ -6520,12 +7153,29 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	                        <button
 	                          type="button"
 	                          className="inspection-fullscreen-annotation-body"
-	                          onClick={() => { setSelectedAnnotationId(annotation.id);
-                    setAnnotationEditModalVisible(true); setAnnotationEditModalVisible(true); }}
+	                          onClick={() => {
+                                setSelectedAnnotationId(annotation.id);
+                                setFullscreenBoundsEditAnnotationId(annotation.id);
+                                setAnnotationEditModalVisible(true);
+                              }}
 	                        >
 	                          <span className="inspection-fullscreen-annotation-title">{annotation.title || `Annotation ${index + 1}`}</span>
 	                          <span className="inspection-fullscreen-annotation-length">{annotation.summary}</span>
 	                        </button>
+	                        {annotation.annotationType === 'box' && (
+	                          <button
+	                            type="button"
+	                            className="inspection-fullscreen-annotation-crop"
+	                            aria-label={`Crop ${annotation.title || `annotation ${index + 1}`}`}
+	                            disabled={croppingAnnotationId === annotation.id}
+	                            onClick={(event) => {
+	                              event.stopPropagation();
+	                              cropBoxAnnotation(annotation);
+	                            }}
+	                          >
+	                            {croppingAnnotationId === annotation.id ? '…' : 'Crop'}
+	                          </button>
+	                        )}
 	                        <button
 	                          type="button"
 	                          className="inspection-fullscreen-annotation-delete"
@@ -6647,4 +7297,5 @@ function InspectionWorkbenchPanel({ projectId, projectType, hierarchy, launchFil
 	  );
 }
 
+export { getVolumeSourceImages, getVolumeOverlayStacks };
 export default InspectionWorkbenchPanel;

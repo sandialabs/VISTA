@@ -570,10 +570,14 @@ def test_project_json_report_supports_three_progressive_users(client, project_ty
         assert payload["summary"]["total_images"] == scenario["part_count"]
         assert payload["summary"]["reviewed_parts"] >= 0
         assert payload["summary"]["unreviewed_parts"] >= 0
+        assert payload["summary"]["part_status_counts"]["unreviewed"] >= 0
         assert "part_assignments" in payload
+        assert "part_review_summary" in payload
         assert "image_part_mappings" in payload
         assert isinstance(payload["part_assignments"], list)
+        assert isinstance(payload["part_review_summary"], list)
         assert isinstance(payload["image_part_mappings"], list)
+        assert {entry["review_status"] for entry in payload["part_review_summary"]}.issubset({"pass", "reject", "unreviewed"})
         if payload["part_assignments"]:
             assignment = payload["part_assignments"][0]
             assert "part_identifier" in assignment
@@ -1307,3 +1311,181 @@ class TestBuildWorkbook:
         assert ws.cell(row=1, column=5).quotePrefix is False
         # Fixed headers (Filename, etc.) should not have quotePrefix
         assert ws.cell(row=1, column=1).quotePrefix is False
+
+
+def test_project_backup_import_preview_and_restore_as_new(client):
+    project_resp = client.post("/api/projects/", json={
+        "name": "Restorable Project",
+        "description": "round trip backup",
+        "meta_group_id": "test-group",
+        "project_type": "PT2",
+    })
+    assert project_resp.status_code == 201, project_resp.text
+    project = project_resp.json()
+    image_resp = client.post(
+        f"/api/projects/{project['id']}/images",
+        files={"file": ("restore.png", b"restore-bytes", "image/png")},
+        data={"metadata": _json.dumps({"serial": "RESTORE-001"})},
+    )
+    assert image_resp.status_code == 201, image_resp.text
+
+    export_resp = client.get(f"/api/projects/{project['id']}/export-bundle?include_images=false")
+    assert export_resp.status_code == 200, export_resp.text
+    assert int(export_resp.headers["x-vista-backup-estimated-bytes"]) > 0
+    with zipfile.ZipFile(io.BytesIO(export_resp.content)) as archive:
+        names = archive.namelist()
+        assert "manifest.json" in names
+        assert f"projects/{project['id']}/project-backup.json" in names
+
+    preview_resp = client.post(
+        "/api/projects/import/preview",
+        files={"file": ("project.vistabundle", export_resp.content, "application/zip")},
+    )
+    assert preview_resp.status_code == 200, preview_resp.text
+    preview = preview_resp.json()
+    assert preview["valid"] is True
+    assert preview["project_count"] == 1
+    assert preview["projects"][0]["images"] == 1
+
+    import_resp = client.post(
+        "/api/projects/import",
+        files={"file": ("project.vistabundle", export_resp.content, "application/zip")},
+        data={"mode": "restore_as_new", "confirmation": "IMPORT"},
+    )
+    assert import_resp.status_code == 200, import_resp.text
+    payload = import_resp.json()
+    assert payload["ok"] is True
+    new_project_id = payload["projects_created"][0]["new_project_id"]
+
+    restored_project_resp = client.get(f"/api/projects/{new_project_id}")
+    assert restored_project_resp.status_code == 200, restored_project_resp.text
+    restored_project = restored_project_resp.json()
+    assert restored_project["name"].startswith("Restorable Project (Imported)")
+    assert restored_project["project_type"] == "PT2"
+
+    restored_images_resp = client.get(f"/api/projects/{new_project_id}/images")
+    assert restored_images_resp.status_code == 200, restored_images_resp.text
+    restored_images = restored_images_resp.json()
+    assert len(restored_images) == 1
+    assert restored_images[0]["filename"] == "restore.png"
+    assert restored_images[0]["metadata"]["serial"] == "RESTORE-001"
+    assert restored_images[0]["metadata"]["source_backup"]["image_id"] == image_resp.json()["id"]
+
+
+def test_dashboard_backup_export_and_import_preview(client):
+    project_resp = client.post("/api/projects/", json={
+        "name": "Dashboard Backup Project",
+        "description": "dashboard backup",
+        "meta_group_id": "test-group",
+        "project_type": "PT1",
+    })
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    export_resp = client.post(
+        "/api/dashboard/export",
+        json={
+            "include_images": False,
+            "include_overlays": False,
+            "include_ui_state": True,
+            "dashboard_state": {"gallery_state": {"gallery_state_demo": {"sortBy": "name"}}},
+        },
+    )
+    assert export_resp.status_code == 200, export_resp.text
+    assert export_resp.headers["content-type"].startswith("application/vnd.vista.dashboard-backup+zip")
+    assert int(export_resp.headers["x-vista-backup-estimated-bytes"]) > 0
+    with zipfile.ZipFile(io.BytesIO(export_resp.content)) as archive:
+        manifest = _json.loads(archive.read("manifest.json").decode("utf-8"))
+        dashboard_state = _json.loads(archive.read("dashboard-state.json").decode("utf-8"))
+        names = archive.namelist()
+    assert manifest["format"] == "vista-dashboard-backup"
+    assert manifest["project_count"] == 1
+    assert dashboard_state["gallery_state"]["gallery_state_demo"]["sortBy"] == "name"
+    assert f"projects/{project_id}/project-backup.json" in names
+
+    preview_resp = client.post(
+        "/api/dashboard/import/preview",
+        files={"file": ("dashboard.vistabundle", export_resp.content, "application/zip")},
+    )
+    assert preview_resp.status_code == 200, preview_resp.text
+    assert preview_resp.json()["format"] == "vista-dashboard-backup"
+    assert preview_resp.json()["project_count"] == 1
+
+
+def test_project_import_into_active_project_append_tags_duplicate_part_serials(client):
+    group = "active-import-append"
+    headers = {"X-Forwarded-Email": f"user@{group}.test"}
+
+    source_resp = client.post("/api/projects/", json={"name": "Source", "meta_group_id": group}, headers=headers)
+    target_resp = client.post("/api/projects/", json={"name": "Target", "meta_group_id": group}, headers=headers)
+    assert source_resp.status_code == 201, source_resp.text
+    assert target_resp.status_code == 201, target_resp.text
+    source_id = source_resp.json()["id"]
+    target_id = target_resp.json()["id"]
+
+    for project_id in (source_id, target_id):
+        part_resp = client.post(
+            f"/api/projects/{project_id}/parts",
+            json={"serial_number": "PART-001", "display_name": "Part 001"},
+            headers=headers,
+        )
+        assert part_resp.status_code == 201, part_resp.text
+
+    bundle_resp = client.get(f"/api/projects/{source_id}/export-bundle", headers=headers)
+    assert bundle_resp.status_code == 200, bundle_resp.text
+
+    import_resp = client.post(
+        f"/api/projects/{target_id}/import",
+        files={"file": ("source.zip", bundle_resp.content, "application/zip")},
+        data={"mode": "append_active", "confirmation": "IMPORT"},
+        headers=headers,
+    )
+    assert import_resp.status_code == 200, import_resp.text
+    assert import_resp.json()["mode"] == "append_active"
+
+    parts_resp = client.get(f"/api/projects/{target_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    serials = sorted(part["serial_number"] for part in parts_resp.json())
+    assert serials == ["PART-001", "PART-001 (duplicate)"]
+
+
+def test_project_import_into_active_project_overwrite_replaces_current_parts(client):
+    group = "active-import-overwrite"
+    headers = {"X-Forwarded-Email": f"user@{group}.test"}
+
+    source_resp = client.post("/api/projects/", json={"name": "Source", "meta_group_id": group}, headers=headers)
+    target_resp = client.post("/api/projects/", json={"name": "Target", "meta_group_id": group}, headers=headers)
+    assert source_resp.status_code == 201, source_resp.text
+    assert target_resp.status_code == 201, target_resp.text
+    source_id = source_resp.json()["id"]
+    target_id = target_resp.json()["id"]
+
+    source_part_resp = client.post(
+        f"/api/projects/{source_id}/parts",
+        json={"serial_number": "SOURCE-001", "display_name": "Source Part"},
+        headers=headers,
+    )
+    target_part_resp = client.post(
+        f"/api/projects/{target_id}/parts",
+        json={"serial_number": "TARGET-001", "display_name": "Target Part"},
+        headers=headers,
+    )
+    assert source_part_resp.status_code == 201, source_part_resp.text
+    assert target_part_resp.status_code == 201, target_part_resp.text
+
+    bundle_resp = client.get(f"/api/projects/{source_id}/export-bundle", headers=headers)
+    assert bundle_resp.status_code == 200, bundle_resp.text
+
+    import_resp = client.post(
+        f"/api/projects/{target_id}/import",
+        files={"file": ("source.zip", bundle_resp.content, "application/zip")},
+        data={"mode": "overwrite_active", "confirmation": "IMPORT"},
+        headers=headers,
+    )
+    assert import_resp.status_code == 200, import_resp.text
+    assert import_resp.json()["mode"] == "overwrite_active"
+
+    parts_resp = client.get(f"/api/projects/{target_id}/parts", headers=headers)
+    assert parts_resp.status_code == 200, parts_resp.text
+    serials = sorted(part["serial_number"] for part in parts_resp.json())
+    assert serials == ["SOURCE-001"]

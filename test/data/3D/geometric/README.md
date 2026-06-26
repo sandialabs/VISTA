@@ -8,3 +8,10 @@ This directory contains a synthetic geometric 3D stack designed to verify MPR or
 - `YZ` is embedded on sagittal plane `X=64`
 
 When slicing through the matching plane in each orthographic view, the corresponding two-letter block should become visible.
+
+
+The `overlays/` directory contains matching `*_overlay.png` segmentation overlay
+slices for every axial source slice. `PT3_GEOMETRIC_DUAL_LABEL.nsipro` is a
+synthetic NIS-Elements-style metadata sidecar with acquisition, microscope,
+camera, calibration, volume, stage, and channel fields for PT3 metadata-modal
+coverage.

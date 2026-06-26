@@ -74,6 +74,8 @@ class Project(ProjectBase):
     created_by: Optional[str] = None
     is_archived: bool = False
     archived_at: Optional[datetime] = None
+    image_count: int = 0
+    part_count: int = 0
 
     model_config = {
         "from_attributes": True,
@@ -148,6 +150,29 @@ class InspectionPartBatchAssignmentResponse(BaseModel):
 
 class InspectionPartManualFlagUpdateRequest(BaseModel):
     manual_flagged: bool = False
+
+
+class InspectionPartMetadataSourcesUpdateRequest(BaseModel):
+    metadata_source_keys: List[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("metadata_source_keys")
+    @classmethod
+    def normalize_metadata_source_keys(cls, v: List[str]) -> List[str]:
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for key in v or []:
+            safe_key = str(key or "").strip()
+            if not safe_key or safe_key in seen:
+                continue
+            if len(safe_key) > 255:
+                raise ValueError("metadata source keys must be 255 characters or fewer")
+            seen.add(safe_key)
+            normalized.append(safe_key)
+        return normalized
+
+
+class InspectionPartSourceImageUpdateRequest(BaseModel):
+    crop_subtitle: Optional[str] = Field(default=None, max_length=255)
 
 
 class InspectionPart(InspectionPartBase):
@@ -348,6 +373,16 @@ class InspectionProjectInterfaceLayoutConfig(BaseModel):
     default_model: Optional[Dict[str, Any]] = None
 
 
+class InspectionProjectFileNamingEntryConfig(BaseModel):
+    id: str = Field(default="other", max_length=128)
+    label: str = Field(default="", max_length=255)
+    abbreviation: str = Field(default="", max_length=64)
+
+
+class InspectionProjectFileNamingSchemeConfig(BaseModel):
+    hierarchy_levels: List[InspectionProjectFileNamingEntryConfig] = Field(default_factory=list)
+    image_descriptors: List[InspectionProjectFileNamingEntryConfig] = Field(default_factory=list)
+
 
 class InspectionProjectOwnerConfig(BaseModel):
     name: str = Field(default="", max_length=255)
@@ -358,6 +393,18 @@ class InspectionProjectCurrentUserConfig(BaseModel):
     username: str = Field(default="", max_length=255)
     sso_authenticated: bool = False
 
+
+class InspectionProjectNsiproParserConfig(BaseModel):
+    parser_id: str = Field(default="default", max_length=128)
+    parser_version: Optional[str] = Field(default=None, max_length=128)
+    parser_hash: Optional[str] = Field(default=None, max_length=255)
+    strict_version_match: bool = False
+
+
+class InspectionProjectMetadataParsersConfig(BaseModel):
+    nsipro: InspectionProjectNsiproParserConfig = Field(default_factory=InspectionProjectNsiproParserConfig)
+
+
 class InspectionProjectConfiguration(BaseModel):
     image_modalities: List[InspectionProjectModalityConfig] = Field(default_factory=list)
     part_views: List[InspectionProjectPartViewConfig] = Field(default_factory=list)
@@ -366,6 +413,8 @@ class InspectionProjectConfiguration(BaseModel):
     display_settings: InspectionProjectDisplaySettingsConfig = Field(default_factory=InspectionProjectDisplaySettingsConfig)
     phase_settings: InspectionProjectPhaseSettingsConfig = Field(default_factory=InspectionProjectPhaseSettingsConfig)
     interface_layout: InspectionProjectInterfaceLayoutConfig = Field(default_factory=InspectionProjectInterfaceLayoutConfig)
+    metadata_parsers: InspectionProjectMetadataParsersConfig = Field(default_factory=InspectionProjectMetadataParsersConfig)
+    file_naming_scheme: InspectionProjectFileNamingSchemeConfig = Field(default_factory=InspectionProjectFileNamingSchemeConfig)
     project_owner: InspectionProjectOwnerConfig = Field(default_factory=InspectionProjectOwnerConfig)
     current_user: InspectionProjectCurrentUserConfig = Field(default_factory=InspectionProjectCurrentUserConfig)
 
@@ -437,14 +486,30 @@ class InspectionBulkIngestResponse(BaseModel):
 
 class InspectionPartImageAssignmentRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=1024)
-    to_part_id: uuid.UUID
+    image_id: Optional[uuid.UUID] = None
+    to_part_id: Optional[uuid.UUID] = None
 
 
 class InspectionPartImageAssignmentResponse(BaseModel):
     project_id: uuid.UUID
     filename: str
     from_part_id: Optional[uuid.UUID] = None
-    to_part_id: uuid.UUID
+    to_part_id: Optional[uuid.UUID] = None
+
+
+class InspectionOverlayAssignmentRequest(BaseModel):
+    overlay_filename: str = Field(..., min_length=1, max_length=1024)
+    overlay_image_id: Optional[uuid.UUID] = None
+    base_filename: Optional[str] = Field(default=None, max_length=1024)
+    base_image_id: Optional[uuid.UUID] = None
+
+
+class InspectionOverlayAssignmentResponse(BaseModel):
+    project_id: uuid.UUID
+    overlay_filename: str
+    base_filename: Optional[str] = None
+    from_part_id: Optional[uuid.UUID] = None
+    to_part_id: Optional[uuid.UUID] = None
 
 
 # ImageGroup schemas

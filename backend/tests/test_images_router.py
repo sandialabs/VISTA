@@ -14,10 +14,42 @@ def _make_png_bytes(size=(10, 10), color=(255, 0, 0)):
     return buf
 
 
+def _make_encoded_index_png_bytes(index: int) -> io.BytesIO:
+    """Create a tiny RGB PNG whose only pixel encodes ``index``."""
+    img = Image.new(
+        "RGB",
+        (1, 1),
+        ((index >> 16) & 0xFF, (index >> 8) & 0xFF, index & 0xFF),
+    )
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
+def _decode_encoded_index_png_bytes(payload: bytes) -> int:
+    with Image.open(io.BytesIO(payload)) as img:
+        red, green, blue = img.convert("RGB").getpixel((0, 0))
+    return (red << 16) | (green << 8) | blue
+
+
 def _make_tiff_bytes(frame_count=1, size=(10, 10)):
     frames = [Image.new("L", size, color=i * 20) for i in range(frame_count)]
     buf = io.BytesIO()
     frames[0].save(buf, format="TIFF", save_all=frame_count > 1, append_images=frames[1:])
+    buf.seek(0)
+    return buf
+
+
+def _make_uint16_tiff_bytes(values):
+    return _make_scalar_image_bytes("TIFF", np.uint16, values)
+
+
+def _make_scalar_image_bytes(fmt, dtype, values):
+    array = np.array(values, dtype=dtype)
+    img = Image.fromarray(array)
+    buf = io.BytesIO()
+    img.save(buf, format=fmt)
     buf.seek(0)
     return buf
 
@@ -188,6 +220,94 @@ def test_upload_tiff_marks_3d_load_mode(client):
     assert metadata.get("load_mode") == "volume"
 
 
+def test_convert_uint16_tiff_to_web_format_preserves_relative_contrast():
+    from routers.images import convert_to_web_format
+
+    payload = _make_uint16_tiff_bytes([[1024, 2048], [4096, 12000]])
+    converted, content_type = convert_to_web_format(payload.getvalue(), "image/tiff")
+
+    assert content_type == "image/png"
+    with Image.open(io.BytesIO(converted)) as image:
+        assert image.mode == "L"
+        pixels = list(image.getdata())
+
+    assert min(pixels) == 0
+    assert max(pixels) == 255
+    assert len(set(pixels)) > 2
+
+
+def test_upload_uint16_tiff_records_actual_intensity_range_for_pt3_window(client):
+    pr = client.post("/api/projects/", json={"name": "Tiff16PT3", "description": None, "meta_group_id": "g", "project_type": "PT3"})
+    pid = pr.json()["id"]
+
+    payload = _make_uint16_tiff_bytes([[1024, 2048], [4096, 12000]])
+    r = client.post(
+        f"/api/projects/{pid}/images",
+        files={"file": ("slice16.tif", payload, "image/tiff")},
+    )
+    assert r.status_code == 201
+    metadata = r.json().get("metadata") or {}
+    assert metadata.get("tiff_dimensionality") == "2d"
+    assert metadata.get("load_mode") == "single_image"
+    assert metadata.get("pixel_dtype") == "uint16"
+    assert metadata.get("voxel_dtype") == "uint16"
+    assert metadata.get("bit_depth") == 16
+    assert metadata.get("bits_per_sample") == 16
+    assert metadata.get("pixel_value_range") == {"min": 1024, "max": 12000}
+    assert metadata.get("value_range") == {"min": 1024, "max": 12000}
+    assert metadata.get("intensity_range") == {"min": 1024, "max": 12000}
+
+
+@pytest.mark.parametrize(
+    "filename,content_type,pil_format,dtype,values,expected_dtype,expected_bit_depth,expected_range",
+    [
+        (
+            "scalar8.png", "image/png", "PNG", np.uint8,
+            [[0, 64], [128, 255]], "uint8", 8, {"min": 0, "max": 255},
+        ),
+        (
+            "scalar16.png", "image/png", "PNG", np.uint16,
+            [[1024, 2048], [4096, 12000]], "uint16", 16, {"min": 1024, "max": 12000},
+        ),
+        (
+            "scalar8.tif", "image/tiff", "TIFF", np.uint8,
+            [[0, 64], [128, 255]], "uint8", 8, {"min": 0, "max": 255},
+        ),
+        (
+            "scalar16.tif", "image/tiff", "TIFF", np.uint16,
+            [[1024, 2048], [4096, 12000]], "uint16", 16, {"min": 1024, "max": 12000},
+        ),
+    ],
+)
+def test_upload_variable_bit_depth_scalar_images_records_actual_display_window_metadata(
+    client,
+    filename,
+    content_type,
+    pil_format,
+    dtype,
+    values,
+    expected_dtype,
+    expected_bit_depth,
+    expected_range,
+):
+    pid = _create_project(client, name=f"scalar-{pil_format}-{expected_bit_depth}")
+
+    payload = _make_scalar_image_bytes(pil_format, dtype, values)
+    r = client.post(
+        f"/api/projects/{pid}/images",
+        files={"file": (filename, payload, content_type)},
+    )
+
+    assert r.status_code == 201
+    metadata = r.json().get("metadata") or {}
+    assert metadata.get("pixel_dtype") == expected_dtype
+    assert metadata.get("voxel_dtype") == expected_dtype
+    assert metadata.get("bit_depth") == expected_bit_depth
+    assert metadata.get("bits_per_sample") == expected_bit_depth
+    assert metadata.get("pixel_value_range") == expected_range
+    assert metadata.get("value_range") == expected_range
+    assert metadata.get("intensity_range") == expected_range
+
 def test_upload_inspiro_voxel_data_accepts_3d_arrays(client):
     pr = client.post("/api/projects/", json={"name": "P7", "description": None, "meta_group_id": "g"})
     pid = pr.json()["id"]
@@ -315,3 +435,127 @@ def test_thumbnail_bad_dimensions(client):
     image_id = ur.json()["id"]
     r = client.get(f"/api/images/{image_id}/thumbnail?width=0&height=10")
     assert r.status_code == 400
+
+
+def test_upload_and_list_1000_tiny_encoded_images(client, monkeypatch):
+    """Vista can ingest and list 1,000 tiny images without losing any files."""
+    image_count = 1000
+    pid = _create_project(client, name="1000-image-load")
+    uploaded_indices = set()
+
+    async def validate_and_capture_upload(
+        *, bucket_name, object_name, file_data, length, content_type
+    ):
+        del bucket_name, length
+        payload = file_data.read()
+        file_data.seek(0)
+        decoded_index = _decode_encoded_index_png_bytes(payload)
+        assert object_name.endswith(f"encoded-{decoded_index:04d}.png")
+        assert content_type == "image/png"
+        uploaded_indices.add(decoded_index)
+        return True
+
+    monkeypatch.setattr("routers.images.upload_file_to_s3", validate_and_capture_upload)
+
+    for index in range(1, image_count + 1):
+        response = client.post(
+            f"/api/projects/{pid}/images",
+            files={
+                "file": (
+                    f"encoded-{index:04d}.png",
+                    _make_encoded_index_png_bytes(index),
+                    "image/png",
+                )
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["filename"] == f"encoded-{index:04d}.png"
+
+    assert uploaded_indices == set(range(1, image_count + 1))
+
+    listed = client.get(f"/api/projects/{pid}/images?limit={image_count}")
+    assert listed.status_code == 200
+    items = listed.json()
+    assert len(items) == image_count
+    assert {item["filename"] for item in items} == {
+        f"encoded-{index:04d}.png" for index in range(1, image_count + 1)
+    }
+
+
+def test_list_project_s3_files_filters_supported_objects(client, monkeypatch):
+    pid = _create_project(client, name="S3 List")
+
+    async def fake_list_s3_objects(bucket, prefix, max_keys=1000):
+        assert bucket == "source-bucket"
+        assert prefix == "incoming"
+        return [
+            {"key": "incoming/a.png", "size": 12},
+            {"key": "incoming/readme.txt", "size": 4},
+            {"key": "incoming/folder/", "size": 0},
+            {"key": "incoming/volume.npy", "size": 20},
+        ]
+
+    monkeypatch.setattr("routers.images.list_s3_objects", fake_list_s3_objects)
+    response = client.post(f"/api/projects/{pid}/s3/list", json={"s3_url": "s3://source-bucket/incoming"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["bucket"] == "source-bucket"
+    assert body["prefix"] == "incoming"
+    assert [obj["key"] for obj in body["objects"]] == ["incoming/a.png", "incoming/volume.npy"]
+
+
+def test_import_project_s3_files_creates_image_records(client, monkeypatch):
+    pid = _create_project(client, name="S3 Import")
+    copied = []
+
+    async def fake_get_s3_object_info(bucket, key):
+        assert bucket == "source-bucket"
+        return {"size": 12, "content_type": "image/png", "metadata": {}}
+
+    async def fake_copy_s3_object_to_s3(source_bucket, source_key, destination_bucket, destination_key):
+        copied.append((source_bucket, source_key, destination_bucket, destination_key))
+        return True
+
+    monkeypatch.setattr("routers.images.get_s3_object_info", fake_get_s3_object_info)
+    monkeypatch.setattr("routers.images.copy_s3_object_to_s3", fake_copy_s3_object_to_s3)
+
+    response = client.post(
+        f"/api/projects/{pid}/s3/import",
+        json={
+            "s3_url": "s3://source-bucket/incoming",
+            "keys": ["incoming/a.png"],
+            "per_file_metadata": {"incoming/a.png": {"lot": "LOT1"}},
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["failed"] == []
+    assert len(body["imported"]) == 1
+    imported = body["imported"][0]
+    assert imported["filename"] == "a.png"
+    assert imported["project_id"] == pid
+    assert imported["content_type"] == "image/png"
+    assert imported["metadata"]["source"] == "s3_import"
+    assert imported["metadata"]["source_s3_bucket"] == "source-bucket"
+    assert imported["metadata"]["source_s3_key"] == "incoming/a.png"
+    assert imported["metadata"]["lot"] == "LOT1"
+    assert copied[0][0] == "source-bucket"
+    assert copied[0][1] == "incoming/a.png"
+
+    listed = client.get(f"/api/projects/{pid}/images")
+    assert listed.status_code == 200
+    assert [item["filename"] for item in listed.json()] == ["a.png"]
+
+
+def test_import_project_s3_files_rejects_key_outside_prefix(client):
+    pid = _create_project(client, name="S3 Import Guard")
+    response = client.post(
+        f"/api/projects/{pid}/s3/import",
+        json={"s3_url": "s3://source-bucket/incoming", "keys": ["other/a.png"]},
+    )
+
+    assert response.status_code == 400
+    assert "outside the requested S3 URL prefix" in response.json()["detail"]

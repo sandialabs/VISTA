@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { PROJECT_PHASE_LABELS, PROJECT_PHASE_SEQUENCE } from '../utils/projectPhases';
 import { buildErrorWithServiceDiagnostics } from '../utils/serviceDiagnostics';
+import { metadataKeyFromFilenameEntry } from './FilenameMetadataExtractor';
 
 
 function isSingleAlphanumeric(value) {
@@ -261,6 +262,11 @@ const EMPTY_CONFIG = {
     manual_phase_selection_enabled: false,
     manual_phase: 'data_ingestion',
   },
+  metadata_parsers: {
+    nsipro: {
+      parser_id: 'default',
+    },
+  },
   project_owner: {
     name: '',
     email: '',
@@ -281,6 +287,12 @@ const EMPTY_CONFIG = {
       { id: 'view', label: 'View', abbreviation: 'V' },
       { id: 'modality', label: 'Modality', abbreviation: 'M' },
     ],
+    overlay_indicator: {
+      enabled: true,
+      field_key: 'overlay',
+      values: ['true', 'overlay', 'ov', 'mask', 'heatmap'],
+      remove_from_base_filename: true,
+    },
   },
 };
 const FILE_NAME_ELEMENT_OPTIONS = [
@@ -293,9 +305,116 @@ const FILE_NAME_ELEMENT_OPTIONS = [
   { id: 'sub_batch', label: 'Sub Batch', abbreviation: 'SB' },
   { id: 'timestamp', label: 'Timestamp', abbreviation: 'T' },
   { id: 'operator', label: 'Operator', abbreviation: 'O' },
+  { id: 'version', label: 'Image Version', abbreviation: 'v' },
+  { id: 'image_identifier', label: 'Image Identifier', abbreviation: 'IMG' },
+  { id: 'image_sequence', label: 'Image Sequence', abbreviation: 'I' },
+  { id: 'channel', label: 'Channel', abbreviation: 'C' },
+  { id: 'wavelength', label: 'Wavelength', abbreviation: 'WL' },
+  { id: 'exposure', label: 'Exposure', abbreviation: 'EXP' },
+  { id: 'lighting', label: 'Lighting', abbreviation: 'LGT' },
+  { id: 'view', label: 'View', abbreviation: 'V' },
+  { id: 'side', label: 'Side', abbreviation: 'SIDE' },
+  { id: 'modality', label: 'Modality', abbreviation: 'M' },
+  { id: 'overlay', label: 'Overlay', abbreviation: 'OV' },
 ];
 
 const DEFAULT_DEFECT_TYPE_COLORS = ['#ef4444', '#f59e0b', '#3b82f6'];
+
+
+function getFilenameEntryName(entry, fallback) {
+  const candidate = (entry?.label || entry?.id || fallback || '').trim();
+  return candidate || fallback;
+}
+
+function normalizeFilenameToken(value, fallback) {
+  const token = String(value || fallback || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return token || fallback;
+}
+
+
+function getFilenameEntryMetadataKey(entry, fallback) {
+  return metadataKeyFromFilenameEntry(entry, fallback) || fallback;
+}
+
+function normalizeOverlayIndicator(source = {}) {
+  const values = Array.isArray(source.values) ? source.values : String(source.values || '').split(',');
+  const normalizedValues = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return {
+    enabled: source.enabled !== false,
+    field_key: String(source.field_key || 'overlay').trim() || 'overlay',
+    values: normalizedValues.length > 0 ? normalizedValues : ['true', 'overlay', 'ov', 'mask', 'heatmap'],
+    remove_from_base_filename: source.remove_from_base_filename !== false,
+  };
+}
+
+function getDisplayTokenForFilenameEntry(entry, fallback, { hierarchy = false } = {}) {
+  const prefix = String(entry?.abbreviation || '').trim();
+  if (hierarchy) return `${prefix || getFilenameEntryName(entry, fallback)}001`;
+  const key = getFilenameEntryMetadataKey(entry, fallback);
+  if (key === 'overlay') return prefix ? `${prefix}overlay` : 'overlay';
+  if (key === 'version') return `${prefix || 'v'}1`;
+  if (!hierarchy && (key === 'view' || key === 'side')) return 'side';
+  return normalizeFilenameToken(getFilenameEntryName(entry, fallback), fallback);
+}
+
+function buildExpectedFilenameExample(fileNamingScheme) {
+  const normalizedScheme = normalizeFileNamingScheme({ file_naming_scheme: fileNamingScheme });
+  const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) =>
+    getDisplayTokenForFilenameEntry(level, `level${index + 1}`, { hierarchy: true })
+  );
+  const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) =>
+    getDisplayTokenForFilenameEntry(descriptor, `descriptor${index + 1}`)
+  );
+  const delimiter = normalizedScheme.delimiter || '_';
+  return [...hierarchySegments, ...descriptorSegments].filter(Boolean).join(delimiter) + '.type';
+}
+
+
+const FILENAME_CONVENTION_COLORS = [
+  '#2563eb',
+  '#7c3aed',
+  '#0891b2',
+  '#16a34a',
+  '#f97316',
+  '#dc2626',
+  '#4f46e5',
+  '#0f766e',
+];
+
+function getFilenameConventionSegments(fileNamingScheme) {
+  const normalizedScheme = normalizeFileNamingScheme({ file_naming_scheme: fileNamingScheme });
+  const delimiter = normalizedScheme.delimiter || '_';
+  const hierarchySegments = normalizedScheme.hierarchy_levels.map((level, index) => {
+    return {
+      type: 'hierarchy',
+      index,
+      key: `hierarchy-${index}`,
+      label: getFilenameEntryName(level, `Level ${index + 1}`),
+      token: getDisplayTokenForFilenameEntry(level, `level${index + 1}`, { hierarchy: true }),
+      color: FILENAME_CONVENTION_COLORS[index % FILENAME_CONVENTION_COLORS.length],
+    };
+  });
+  const descriptorSegments = normalizedScheme.image_descriptors.map((descriptor, index) => {
+    return {
+      type: 'descriptor',
+      index,
+      key: `descriptor-${index}`,
+      label: getFilenameEntryName(descriptor, `Descriptor ${index + 1}`),
+      token: getDisplayTokenForFilenameEntry(descriptor, `descriptor${index + 1}`),
+      color: FILENAME_CONVENTION_COLORS[(hierarchySegments.length + index) % FILENAME_CONVENTION_COLORS.length],
+    };
+  });
+  return {
+    delimiter,
+    segments: [...hierarchySegments, ...descriptorSegments],
+  };
+}
 
 function normalizeProjectTypeSuffix(projectType) {
   const suffix = String(projectType || 'PT1').trim().toUpperCase();
@@ -343,7 +462,22 @@ function normalizeProjectConfiguration(config, projectType) {
     defect_types: defectTypes,
     serial_number_scheme: normalizeSerialNumberScheme(incomingConfig),
     phase_settings: normalizePhaseSettings(incomingConfig),
+    metadata_parsers: normalizeMetadataParsers(incomingConfig),
     file_naming_scheme: normalizeFileNamingScheme(incomingConfig),
+  };
+}
+
+
+function normalizeMetadataParsers(config) {
+  const nsipro = config?.metadata_parsers?.nsipro || {};
+  const parserId = typeof nsipro.parser_id === 'string' && nsipro.parser_id.trim()
+    ? nsipro.parser_id.trim()
+    : EMPTY_CONFIG.metadata_parsers.nsipro.parser_id;
+  return {
+    nsipro: {
+      ...nsipro,
+      parser_id: parserId,
+    },
   };
 }
 
@@ -361,16 +495,28 @@ function normalizeFileNamingScheme(config) {
   const imageDescriptors = Array.isArray(source.image_descriptors) && source.image_descriptors.length > 0
     ? source.image_descriptors.map(normalizeEntry)
     : defaultScheme.image_descriptors;
-  return { hierarchy_levels: hierarchyLevels, image_descriptors: imageDescriptors };
+  return {
+    hierarchy_levels: hierarchyLevels,
+    image_descriptors: imageDescriptors,
+    delimiter: String(source.delimiter || '_'),
+    metadata_extractor: source.metadata_extractor && typeof source.metadata_extractor === 'object'
+      ? source.metadata_extractor
+      : null,
+    overlay_indicator: normalizeOverlayIndicator(source.overlay_indicator || defaultScheme.overlay_indicator),
+  };
 }
 
-function ProjectConfigurationPanel({
+const AUTOSAVE_DELAY_MS = 500;
+
+const getConfigurationSignature = (configuration) => JSON.stringify(configuration || {});
+
+const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel({
   projectId,
   projectType,
   currentInterfaceLayout = null,
   isAdminUser = false,
   onConfigurationSaved = null,
-}) {
+}, ref) {
   const [config, setConfig] = useState(EMPTY_CONFIG);
   const [availableProjects, setAvailableProjects] = useState([]);
   const [currentProjectType, setCurrentProjectType] = useState('');
@@ -380,6 +526,22 @@ function ProjectConfigurationPanel({
   const [error, setError] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [copyingConfiguration, setCopyingConfiguration] = useState(false);
+  const configRef = useRef(config);
+  const autosaveTimerRef = useRef(null);
+  const loadCompleteRef = useRef(false);
+  const lastSavedSignatureRef = useRef(getConfigurationSignature(EMPTY_CONFIG));
+  const saveLoopPromiseRef = useRef(null);
+  const autosaveRequestedDuringSaveRef = useRef(false);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  useEffect(() => () => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const loadCurrentUser = async () => {
@@ -407,11 +569,21 @@ function ProjectConfigurationPanel({
   const [primaryError, diagnosticError] = typeof error === 'string'
     ? error.split('\n\n', 2)
     : ['', ''];
+  const normalizedFileNamingScheme = normalizeFileNamingScheme(config);
+  const filenameConvention = useMemo(
+    () => getFilenameConventionSegments(normalizedFileNamingScheme),
+    [normalizedFileNamingScheme],
+  );
+  const expectedFilenameExample = useMemo(
+    () => buildExpectedFilenameExample(normalizedFileNamingScheme),
+    [normalizedFileNamingScheme],
+  );
 
   useEffect(() => {
     const loadConfiguration = async () => {
       try {
         setLoading(true);
+        loadCompleteRef.current = false;
         setError(null);
         setStatusMessage('');
 
@@ -446,7 +618,10 @@ function ProjectConfigurationPanel({
           setAvailableProjects(filtered);
         }
 
-        setConfig(normalizeProjectConfiguration(incomingConfig, targetProjectType));
+        const normalizedConfig = normalizeProjectConfiguration(incomingConfig, targetProjectType);
+        lastSavedSignatureRef.current = getConfigurationSignature(normalizedConfig);
+        loadCompleteRef.current = true;
+        setConfig(normalizedConfig);
       } catch (err) {
         const message = err.message || 'Failed to load project configuration';
         setError(await buildErrorWithServiceDiagnostics(message, projectId));
@@ -476,12 +651,12 @@ function ProjectConfigurationPanel({
     [config.defect_types.length, config.image_modalities.length, config.part_views.length],
   );
 
-  const saveConfiguration = async () => {
-    const validationErrors = validateConfiguration(config);
+  const persistConfiguration = useCallback(async (configurationToSave, statusLabel = 'Configuration saved.') => {
+    const validationErrors = validateConfiguration(configurationToSave);
     if (validationErrors.length > 0) {
       setError(validationErrors.join(' '));
       setStatusMessage('');
-      return;
+      return false;
     }
 
     try {
@@ -490,22 +665,107 @@ function ProjectConfigurationPanel({
       const response = await fetch(`/api/projects/${projectId}/configuration`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({ config: configurationToSave }),
       });
       if (!response.ok) {
         throw new Error(`Failed to save project configuration (${response.status})`);
       }
       const payload = await response.json();
-      setStatusMessage('Configuration saved.');
+      lastSavedSignatureRef.current = getConfigurationSignature(configurationToSave);
+      setStatusMessage(statusLabel);
       if (payload?.config && typeof onConfigurationSaved === 'function') {
         onConfigurationSaved(payload.config);
       }
+      return true;
     } catch (err) {
       const message = err.message || 'Failed to save project configuration';
       setError(await buildErrorWithServiceDiagnostics(message, projectId));
+      return false;
     } finally {
       setSaving(false);
     }
+  }, [onConfigurationSaved, projectId]);
+
+  const runAutosave = useCallback((statusLabel = 'Configuration autosaved.') => {
+    if (saveLoopPromiseRef.current) {
+      autosaveRequestedDuringSaveRef.current = true;
+      return saveLoopPromiseRef.current;
+    }
+
+    saveLoopPromiseRef.current = (async () => {
+      let shouldContinue = true;
+      while (shouldContinue) {
+        autosaveRequestedDuringSaveRef.current = false;
+        const latestConfig = configRef.current;
+        const latestSignature = getConfigurationSignature(latestConfig);
+        if (latestSignature === lastSavedSignatureRef.current) {
+          return true;
+        }
+        const saved = await persistConfiguration(latestConfig, statusLabel);
+        if (!saved) {
+          return false;
+        }
+        shouldContinue =
+          autosaveRequestedDuringSaveRef.current ||
+          getConfigurationSignature(configRef.current) !== lastSavedSignatureRef.current;
+      }
+      return true;
+    })().finally(() => {
+      saveLoopPromiseRef.current = null;
+    });
+
+    return saveLoopPromiseRef.current;
+  }, [persistConfiguration]);
+
+  const hasPendingAutosave = useCallback(() => {
+    if (!loadCompleteRef.current) return false;
+    return Boolean(
+      autosaveTimerRef.current ||
+      saveLoopPromiseRef.current ||
+      getConfigurationSignature(configRef.current) !== lastSavedSignatureRef.current,
+    );
+  }, []);
+
+  const flushPendingAutosave = useCallback(async (statusLabel = 'Configuration autosaved.') => {
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (!hasPendingAutosave()) {
+      return true;
+    }
+    return runAutosave(statusLabel);
+  }, [hasPendingAutosave, runAutosave]);
+
+  useImperativeHandle(ref, () => ({
+    hasPendingAutosave,
+    flushPendingAutosave,
+  }), [flushPendingAutosave, hasPendingAutosave]);
+
+  useEffect(() => {
+    if (!loadCompleteRef.current || loading) {
+      return;
+    }
+    const latestSignature = getConfigurationSignature(config);
+    if (latestSignature === lastSavedSignatureRef.current) {
+      return;
+    }
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+    setStatusMessage('Unsaved changes will autosave shortly.');
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      runAutosave();
+    }, AUTOSAVE_DELAY_MS);
+  }, [config, loading, runAutosave]);
+
+  const saveConfiguration = async () => {
+    if (hasPendingAutosave()) {
+      await flushPendingAutosave('Configuration saved.');
+      return;
+    }
+    await persistConfiguration(configRef.current, 'Configuration saved.');
   };
 
   const saveInterfaceLayoutAsProjectDefault = async () => {
@@ -695,6 +955,25 @@ function ProjectConfigurationPanel({
     }));
   };
 
+
+  const updateOverlayIndicator = (patch) => {
+    setConfig((previous) => {
+      const currentScheme = normalizeFileNamingScheme(previous);
+      return {
+        ...previous,
+        file_naming_scheme: {
+          ...currentScheme,
+          overlay_indicator: normalizeOverlayIndicator({
+            ...currentScheme.overlay_indicator,
+            ...patch,
+          }),
+        },
+      };
+    });
+  };
+
+
+
   const copyConfiguration = async () => {
     if (!copySourceProjectId || copyingConfiguration) return;
 
@@ -714,13 +993,15 @@ function ProjectConfigurationPanel({
       }
 
       const clonedConfig = getCloneConfigOrThrow(cloneData);
-      setConfig({
+      const nextClonedConfig = {
         ...EMPTY_CONFIG,
         ...clonedConfig,
         serial_number_scheme: normalizeSerialNumberScheme(clonedConfig),
         phase_settings: normalizePhaseSettings(clonedConfig),
         file_naming_scheme: normalizeFileNamingScheme(clonedConfig),
-      });
+      };
+      lastSavedSignatureRef.current = getConfigurationSignature(nextClonedConfig);
+      setConfig(nextClonedConfig);
       const copiedFromProject = selectedCopySourceProject?.name || 'existing project';
       setCopySourceProjectId('');
       setStatusMessage(`Configuration copied from ${copiedFromProject}.`);
@@ -770,8 +1051,8 @@ function ProjectConfigurationPanel({
             </article>
           </div>
 
-
-          <section className="part-detail-panel" aria-label="Project owner">
+          <div className="configuration-sections-grid" data-testid="configuration-sections-grid">
+            <section className="part-detail-panel" aria-label="Project owner">
             <h3>Project Owner</h3>
             <div className="workbench-controls-row">
               <label htmlFor="project-owner-name">Owner Name</label>
@@ -792,75 +1073,243 @@ function ProjectConfigurationPanel({
             </div>
           </section>
 
-          <section className="part-detail-panel" aria-label="File naming configuration">
-            <h3>Project Configuration: File Name Convention</h3>
-            <p>Customize hierarchy and image descriptor elements used to build file names.</p>
+          <section className="part-detail-panel filename-convention-panel" aria-label="Filename convention">
+            <div className="filename-convention-heading">
+              <div>
+                <h3>Filename Convention</h3>
+              </div>
+              <code data-testid="expected-filename-preview">{expectedFilenameExample}</code>
+            </div>
+
+            <div className="filename-breakdown" aria-label="Expected filename preview">
+              {filenameConvention.segments.map((segment, index) => (
+                <React.Fragment key={segment.key}>
+                  <div className="filename-breakdown-segment" style={{ '--segment-color': segment.color }}>
+                    <span className="filename-breakdown-label">{segment.label}</span>
+                    <strong>{segment.token}</strong>
+                    <span className="filename-breakdown-decodes">
+                      {segment.type === 'hierarchy' ? 'ID value: 001' : 'Filename descriptor'}
+                    </span>
+                  </div>
+                  {index < filenameConvention.segments.length - 1 && (
+                    <span className="filename-breakdown-delimiter">{filenameConvention.delimiter}</span>
+                  )}
+                </React.Fragment>
+              ))}
+              <span className="filename-breakdown-extension">.type</span>
+            </div>
+
+            <p>
+              Configure each option directly under the filename part it controls. Numeric placeholders use
+              <strong> 001 </strong> because these fields normally decode image or part identifiers from the filename.
+            </p>
+
             <h4>Hierarchy Levels</h4>
+            <div className="filename-option-grid">
+              {normalizedFileNamingScheme.hierarchy_levels.map((level, index) => {
+                const segment = filenameConvention.segments.find((item) => item.type === 'hierarchy' && item.index === index);
+                return (
+                  <div className="filename-option-card" style={{ '--segment-color': segment?.color }} key={`hierarchy-level-${index}`}>
+                    <div className="filename-option-card-header">
+                      <span>{segment?.token}</span>
+                      <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('hierarchy_levels', index)}>Remove</button>
+                    </div>
+                    <label htmlFor={`hierarchy-level-select-${index}`}>Level {index + 1}</label>
+                    <select
+                      id={`hierarchy-level-select-${index}`}
+                      value={level.id}
+                      onChange={(event) => {
+                        const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
+                        updateFileNameEntry('hierarchy_levels', index, selected
+                          ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
+                          : { id: 'other', label: '', abbreviation: '' });
+                      }}
+                    >
+                      {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      <option value="other">Other</option>
+                    </select>
+                    {level.id === 'other' && (
+                      <>
+                        <label htmlFor={`hierarchy-level-custom-label-${index}`}>Custom Label</label>
+                        <input id={`hierarchy-level-custom-label-${index}`} value={level.label} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { label: event.target.value })} />
+                      </>
+                    )}
+                    <small className="filename-metadata-key">Metadata key: {getFilenameEntryMetadataKey(level, `hierarchy_${index + 1}`)}</small>
+                    <label htmlFor={`hierarchy-level-abbreviation-${index}`}>Abbreviation</label>
+                    <input id={`hierarchy-level-abbreviation-${index}`} value={level.abbreviation} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { abbreviation: event.target.value })} />
+                  </div>
+                );
+              })}
+            </div>
             <div className="workbench-controls-row">
               <button className="btn btn-secondary" type="button" onClick={() => addFileNameEntry('hierarchy_levels')}>
                 Add Hierarchy Level
               </button>
             </div>
-            {normalizeFileNamingScheme(config).hierarchy_levels.map((level, index) => (
-              <div className="workbench-controls-row config-entry-grid" key={`hierarchy-level-${index}`}>
-                <label htmlFor={`hierarchy-level-select-${index}`}>Level {index + 1}</label>
-                <select
-                  id={`hierarchy-level-select-${index}`}
-                  value={level.id}
-                  onChange={(event) => {
-                    const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
-                    updateFileNameEntry('hierarchy_levels', index, selected
-                      ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
-                      : { id: 'other', label: '', abbreviation: '' });
-                  }}
-                >
-                  {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                  <option value="other">Other</option>
-                </select>
-                {level.id === 'other' && (
-                  <>
-                    <label htmlFor={`hierarchy-level-custom-label-${index}`}>Custom Label</label>
-                    <input id={`hierarchy-level-custom-label-${index}`} value={level.label} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { label: event.target.value })} />
-                  </>
-                )}
-                <label htmlFor={`hierarchy-level-abbreviation-${index}`}>Abbreviation</label>
-                <input id={`hierarchy-level-abbreviation-${index}`} value={level.abbreviation} onChange={(event) => updateFileNameEntry('hierarchy_levels', index, { abbreviation: event.target.value })} />
-                <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('hierarchy_levels', index)}>Remove</button>
-              </div>
-            ))}
+
             <h4>Image Descriptors</h4>
+            <div className="filename-option-grid">
+              {normalizedFileNamingScheme.image_descriptors.map((descriptor, index) => {
+                const segment = filenameConvention.segments.find((item) => item.type === 'descriptor' && item.index === index);
+                return (
+                  <div className="filename-option-card" style={{ '--segment-color': segment?.color }} key={`image-descriptor-${index}`}>
+                    <div className="filename-option-card-header">
+                      <span>{segment?.token}</span>
+                      <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('image_descriptors', index)}>Remove</button>
+                    </div>
+                    <label htmlFor={`image-descriptor-select-${index}`}>Descriptor {index + 1}</label>
+                    <select
+                      id={`image-descriptor-select-${index}`}
+                      value={descriptor.id}
+                      onChange={(event) => {
+                        const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
+                        updateFileNameEntry('image_descriptors', index, selected
+                          ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
+                          : { id: 'other', label: '', abbreviation: '' });
+                      }}
+                    >
+                      {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      <option value="other">Other</option>
+                    </select>
+                    {descriptor.id === 'other' && (
+                      <>
+                        <label htmlFor={`image-descriptor-custom-label-${index}`}>Custom Label</label>
+                        <input id={`image-descriptor-custom-label-${index}`} value={descriptor.label} onChange={(event) => updateFileNameEntry('image_descriptors', index, { label: event.target.value })} />
+                      </>
+                    )}
+                    <small className="filename-metadata-key">Metadata key: {getFilenameEntryMetadataKey(descriptor, `descriptor_${index + 1}`)}</small>
+                    <label htmlFor={`image-descriptor-abbreviation-${index}`}>Abbreviation</label>
+                    <input id={`image-descriptor-abbreviation-${index}`} value={descriptor.abbreviation} onChange={(event) => updateFileNameEntry('image_descriptors', index, { abbreviation: event.target.value })} />
+                  </div>
+                );
+              })}
+            </div>
             <div className="workbench-controls-row">
               <button className="btn btn-secondary" type="button" onClick={() => addFileNameEntry('image_descriptors')}>
                 Add Image Descriptor
               </button>
             </div>
-            {normalizeFileNamingScheme(config).image_descriptors.map((descriptor, index) => (
-              <div className="workbench-controls-row config-entry-grid" key={`image-descriptor-${index}`}>
-                <label htmlFor={`image-descriptor-select-${index}`}>Descriptor {index + 1}</label>
-                <select
-                  id={`image-descriptor-select-${index}`}
-                  value={descriptor.id}
-                  onChange={(event) => {
-                    const selected = FILE_NAME_ELEMENT_OPTIONS.find((option) => option.id === event.target.value);
-                    updateFileNameEntry('image_descriptors', index, selected
-                      ? { id: selected.id, label: selected.label, abbreviation: selected.abbreviation }
-                      : { id: 'other', label: '', abbreviation: '' });
-                  }}
-                >
-                  {FILE_NAME_ELEMENT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                  <option value="other">Other</option>
-                </select>
-                {descriptor.id === 'other' && (
-                  <>
-                    <label htmlFor={`image-descriptor-custom-label-${index}`}>Custom Label</label>
-                    <input id={`image-descriptor-custom-label-${index}`} value={descriptor.label} onChange={(event) => updateFileNameEntry('image_descriptors', index, { label: event.target.value })} />
-                  </>
+
+            <h4>Overlay Matching</h4>
+            <p>
+              Use this when a filename segment marks an image as an overlay. Overlay images are rendered
+              on top of the non-overlay image with the same configured hierarchy/identifier values after
+              the overlay specifier is removed.
+            </p>
+            <div className="filename-option-card filename-overlay-card">
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Enable overlay filename matching"
+                  checked={normalizedFileNamingScheme.overlay_indicator.enabled}
+                  onChange={(event) => updateOverlayIndicator({ enabled: event.target.checked })}
+                />
+                Enable overlay filename matching
+              </label>
+              <label htmlFor="overlay-field-key">Overlay metadata key</label>
+              <select
+                id="overlay-field-key"
+                value={normalizedFileNamingScheme.overlay_indicator.field_key}
+                onChange={(event) => updateOverlayIndicator({ field_key: event.target.value })}
+              >
+                {[...normalizedFileNamingScheme.hierarchy_levels, ...normalizedFileNamingScheme.image_descriptors]
+                  .map((entry, index) => getFilenameEntryMetadataKey(entry, `filename_field_${index + 1}`))
+                  .filter(Boolean)
+                  .filter((key, index, keys) => keys.indexOf(key) === index)
+                  .map((key) => <option key={key} value={key}>{key}</option>)}
+                {!([...normalizedFileNamingScheme.hierarchy_levels, ...normalizedFileNamingScheme.image_descriptors]
+                  .map((entry, index) => getFilenameEntryMetadataKey(entry, `filename_field_${index + 1}`))
+                  .includes(normalizedFileNamingScheme.overlay_indicator.field_key)) && (
+                  <option value={normalizedFileNamingScheme.overlay_indicator.field_key}>{normalizedFileNamingScheme.overlay_indicator.field_key}</option>
                 )}
-                <label htmlFor={`image-descriptor-abbreviation-${index}`}>Abbreviation</label>
-                <input id={`image-descriptor-abbreviation-${index}`} value={descriptor.abbreviation} onChange={(event) => updateFileNameEntry('image_descriptors', index, { abbreviation: event.target.value })} />
-                <button className="btn btn-secondary" type="button" onClick={() => removeFileNameEntry('image_descriptors', index)}>Remove</button>
+              </select>
+              <label htmlFor="overlay-values">Overlay values</label>
+              <input
+                id="overlay-values"
+                aria-label="Overlay values"
+                type="text"
+                value={normalizedFileNamingScheme.overlay_indicator.values.join(', ')}
+                onChange={(event) => updateOverlayIndicator({ values: event.target.value.split(',') })}
+              />
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Remove overlay specifier when matching base image"
+                  checked={normalizedFileNamingScheme.overlay_indicator.remove_from_base_filename}
+                  onChange={(event) => updateOverlayIndicator({ remove_from_base_filename: event.target.checked })}
+                />
+                Match the base image by removing the overlay specifier from the filename
+              </label>
+            </div>
+
+
+            <h4>Image Modalities</h4>
+            <p>Modalities are also filename values, so define their labels and identifiers alongside the filename descriptor they populate.</p>
+            <div className="workbench-controls-row">
+              <button className="btn btn-secondary" type="button" onClick={addImageModality} disabled={saving}>
+                Add Modality
+              </button>
+            </div>
+            {(config.image_modalities || []).length === 0 ? (
+              <p>No image modalities configured yet.</p>
+            ) : (
+              <div className="filename-option-grid modality-option-grid">
+                {(config.image_modalities || []).map((modality, index) => (
+                  <div className="filename-option-card" style={{ '--segment-color': '#f97316' }} key={`image-modality-${index}`}>
+                    <div className="filename-option-card-header">
+                      <span>{modality.id || `modality-${index + 1}`}</span>
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        aria-label={`Remove image modality ${index + 1}`}
+                        onClick={() => removeImageModality(index)}
+                        disabled={saving}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <label htmlFor={`image-modality-label-${index}`}>Label</label>
+                    <input
+                      id={`image-modality-label-${index}`}
+                      aria-label={`Image modality label ${index + 1}`}
+                      type="text"
+                      value={modality.label || ''}
+                      onChange={(event) => updateImageModality(index, { label: event.target.value })}
+                    />
+                    <label htmlFor={`image-modality-id-${index}`}>Identifier</label>
+                    <input
+                      id={`image-modality-id-${index}`}
+                      aria-label={`Image modality id ${index + 1}`}
+                      type="text"
+                      value={modality.id || ''}
+                      onChange={(event) => updateImageModality(index, { id: event.target.value })}
+                    />
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label={`Image modality calibration required ${index + 1}`}
+                        checked={Boolean(modality.calibration_required)}
+                        onChange={(event) =>
+                          updateImageModality(index, { calibration_required: event.target.checked })
+                        }
+                      />
+                      Calibration required
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label={`Image modality example uploaded ${index + 1}`}
+                        checked={Boolean(modality.example_image_uploaded)}
+                        onChange={(event) =>
+                          updateImageModality(index, { example_image_uploaded: event.target.checked })
+                        }
+                      />
+                      Example uploaded
+                    </label>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </section>
           <section className="part-detail-panel" aria-label="Process settings">
             <h3>Process Settings</h3>
@@ -879,6 +1328,40 @@ function ProjectConfigurationPanel({
                 }}
               />
               Require disposition on submit
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                aria-label="Require measurement for critical defects"
+                checked={Boolean(config.process_settings?.require_measurement_for_critical)}
+                onChange={(event) => {
+                  setConfig((previous) => ({
+                    ...previous,
+                    process_settings: {
+                      ...previous.process_settings,
+                      require_measurement_for_critical: event.target.checked,
+                    },
+                  }));
+                }}
+              />
+              Require measurement for critical defects
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                aria-label="Require second reviewer for rejects"
+                checked={Boolean(config.process_settings?.require_second_reviewer_for_reject)}
+                onChange={(event) => {
+                  setConfig((previous) => ({
+                    ...previous,
+                    process_settings: {
+                      ...previous.process_settings,
+                      require_second_reviewer_for_reject: event.target.checked,
+                    },
+                  }));
+                }}
+              />
+              Require second reviewer for rejects
             </label>
             <div className="workbench-controls-row">
               <label htmlFor="hotkey-accept">Accept hotkey</label>
@@ -1069,71 +1552,6 @@ function ProjectConfigurationPanel({
             </div>
           </section>
 
-          <section className="part-detail-panel" aria-label="Image modalities">
-            <h3>Image Modalities</h3>
-            <p>Manage modality definitions and calibration requirements for this project.</p>
-            <div className="workbench-controls-row">
-              <button className="btn btn-secondary" type="button" onClick={addImageModality} disabled={saving}>
-                Add Modality
-              </button>
-            </div>
-            {(config.image_modalities || []).length === 0 ? (
-              <p>No image modalities configured yet.</p>
-            ) : (
-              (config.image_modalities || []).map((modality, index) => (
-                <div className="workbench-controls-row config-entry-grid" key={`image-modality-${index}`}>
-                  <label htmlFor={`image-modality-label-${index}`}>Label</label>
-                  <input
-                    id={`image-modality-label-${index}`}
-                    aria-label={`Image modality label ${index + 1}`}
-                    type="text"
-                    value={modality.label || ''}
-                    onChange={(event) => updateImageModality(index, { label: event.target.value })}
-                  />
-                  <label htmlFor={`image-modality-id-${index}`}>Identifier</label>
-                  <input
-                    id={`image-modality-id-${index}`}
-                    aria-label={`Image modality id ${index + 1}`}
-                    type="text"
-                    value={modality.id || ''}
-                    onChange={(event) => updateImageModality(index, { id: event.target.value })}
-                  />
-                  <label>
-                    <input
-                      type="checkbox"
-                      aria-label={`Image modality calibration required ${index + 1}`}
-                      checked={Boolean(modality.calibration_required)}
-                      onChange={(event) =>
-                        updateImageModality(index, { calibration_required: event.target.checked })
-                      }
-                    />
-                    Calibration required
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      aria-label={`Image modality example uploaded ${index + 1}`}
-                      checked={Boolean(modality.example_image_uploaded)}
-                      onChange={(event) =>
-                        updateImageModality(index, { example_image_uploaded: event.target.checked })
-                      }
-                    />
-                    Example uploaded
-                  </label>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    aria-label={`Remove image modality ${index + 1}`}
-                    onClick={() => removeImageModality(index)}
-                    disabled={saving}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))
-            )}
-          </section>
-
           <section className="part-detail-panel" aria-label="Defect types">
             <h3>Defect Types</h3>
             <p>Define the defect taxonomy used in annotations and review workflows.</p>
@@ -1274,6 +1692,43 @@ function ProjectConfigurationPanel({
               <option value="magma">magma</option>
               <option value="viridis">viridis</option>
             </select>
+            <label htmlFor="anomaly-colormap">Anomaly colormap</label>
+            <select
+              id="anomaly-colormap"
+              aria-label="Anomaly colormap"
+              value={config.display_settings?.anomaly_colormap || 'viridis'}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setConfig((previous) => ({
+                  ...previous,
+                  display_settings: {
+                    ...previous.display_settings,
+                    anomaly_colormap: nextValue,
+                  },
+                }));
+              }}
+            >
+              <option value="grayscale">grayscale</option>
+              <option value="magma">magma</option>
+              <option value="viridis">viridis</option>
+            </select>
+            <label>
+              <input
+                type="checkbox"
+                aria-label="Use grayscale base image"
+                checked={Boolean(config.display_settings?.grayscale_base_image)}
+                onChange={(event) => {
+                  setConfig((previous) => ({
+                    ...previous,
+                    display_settings: {
+                      ...previous.display_settings,
+                      grayscale_base_image: event.target.checked,
+                    },
+                  }));
+                }}
+              />
+              Use grayscale base image
+            </label>
           </section>
 
           <section className="part-detail-panel" aria-label="Copy configuration">
@@ -1317,8 +1772,9 @@ function ProjectConfigurationPanel({
               </button>
             </div>
           </section>
+          </div>
 
-          <div className="workbench-controls-row">
+          <div className="workbench-controls-row configuration-action-bar">
             <button className="btn btn-primary" type="button" disabled={saving} onClick={saveConfiguration}>
               {saving ? 'Saving...' : 'Save Configuration'}
             </button>
@@ -1348,6 +1804,6 @@ function ProjectConfigurationPanel({
       )}
     </section>
   );
-}
+});
 
 export default ProjectConfigurationPanel;

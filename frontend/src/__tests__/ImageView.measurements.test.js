@@ -121,6 +121,64 @@ describe('ImageView - Measurement Handlers', () => {
     jest.restoreAllMocks();
   });
 
+  const setupFetchMock = (image, options = {}) => {
+    const {
+      metadataResponse,
+      metadataOk = true,
+      metadataStatus = metadataOk ? 200 : 422,
+      metadataText = 'Validation error'
+    } = options;
+
+    fetchMock.mockImplementation(async (url, requestOptions = {}) => {
+      const urlString = String(url);
+      const method = requestOptions.method || 'GET';
+
+      if (urlString === '/api/users/me') {
+        return { ok: true, json: async () => ({ email: 'test@example.com' }) };
+      }
+
+      if (urlString === '/api/images/test-image-id' && method === 'GET') {
+        return { ok: true, json: async () => image };
+      }
+
+      if (urlString === '/api/projects/test-project-id/classes') {
+        return { ok: true, json: async () => [] };
+      }
+
+      if (urlString === '/api/projects/test-project-id') {
+        return { ok: true, json: async () => ({ is_archived: false }) };
+      }
+
+      if (urlString.startsWith('/api/projects/test-project-id/images')) {
+        return { ok: true, json: async () => [image] };
+      }
+
+      if (urlString === '/api/images/test-image-id/reviews') {
+        return { ok: true, json: async () => [] };
+      }
+
+      if (urlString === '/api/images/test-image-id/metadata' && method === 'PUT') {
+        if (!metadataOk) {
+          return { ok: false, status: metadataStatus, text: async () => metadataText };
+        }
+
+        const body = JSON.parse(requestOptions.body);
+        return {
+          ok: true,
+          json: async () => metadataResponse || {
+            ...image,
+            metadata: {
+              ...(image.metadata || image.metadata_ || {}),
+              [body.key]: body.value
+            }
+          }
+        };
+      }
+
+      throw new Error(`Unhandled fetch in ImageView.measurements.test.js: ${method} ${urlString}`);
+    });
+  };
+
   describe('Bug Fix: Metadata field compatibility', () => {
     test('loads measurements from metadata field (not metadata_)', async () => {
       const mockImage = {
@@ -133,23 +191,7 @@ describe('ImageView - Measurement Handlers', () => {
         }
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        });
+      setupFetchMock(mockImage);
 
       render(
         <BrowserRouter>
@@ -173,23 +215,7 @@ describe('ImageView - Measurement Handlers', () => {
         }
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        });
+      setupFetchMock(mockImage);
 
       render(
         <BrowserRouter>
@@ -216,32 +242,7 @@ describe('ImageView - Measurement Handlers', () => {
         }
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({
-            ...mockImage,
-            metadata: {
-              measurements: [{ id: 'measurement-2', name: 'Measurement 2' }]
-            }
-          })
-        });
+      setupFetchMock(mockImage);
 
       const { getByText } = render(
         <BrowserRouter>
@@ -260,8 +261,8 @@ describe('ImageView - Measurement Handlers', () => {
       });
 
       await waitFor(() => {
-        const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-        const [url, options] = lastCall;
+        const metadataCalls = fetchMock.mock.calls.filter(call => call[0].includes('/metadata'));
+        const [url, options] = metadataCalls[metadataCalls.length - 1];
 
         expect(url).toContain('/metadata');
         expect(options.method).toBe('PUT');
@@ -288,32 +289,7 @@ describe('ImageView - Measurement Handlers', () => {
         }
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({
-            ...mockImage,
-            metadata: {
-              measurements: [{ id: 'test-measurement-id', name: 'New Name' }]
-            }
-          })
-        });
+      setupFetchMock(mockImage);
 
       const { getByText } = render(
         <BrowserRouter>
@@ -332,8 +308,8 @@ describe('ImageView - Measurement Handlers', () => {
       });
 
       await waitFor(() => {
-        const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-        const [url, options] = lastCall;
+        const metadataCalls = fetchMock.mock.calls.filter(call => call[0].includes('/metadata'));
+        const [url, options] = metadataCalls[metadataCalls.length - 1];
 
         expect(url).toContain('/metadata');
         expect(options.method).toBe('PUT');
@@ -362,28 +338,11 @@ describe('ImageView - Measurement Handlers', () => {
       // Suppress console.error for this test
       const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 422,
-          text: async () => 'Validation error'
-        });
+      setupFetchMock(mockImage, {
+        metadataOk: false,
+        metadataStatus: 422,
+        metadataText: 'Validation error'
+      });
 
       const { getByText } = render(
         <BrowserRouter>
@@ -423,28 +382,11 @@ describe('ImageView - Measurement Handlers', () => {
       // Suppress console.error for this test
       const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 500,
-          text: async () => 'Server error'
-        });
+      setupFetchMock(mockImage, {
+        metadataOk: false,
+        metadataStatus: 500,
+        metadataText: 'Server error'
+      });
 
       const { getByText } = render(
         <BrowserRouter>
@@ -485,23 +427,7 @@ describe('ImageView - Measurement Handlers', () => {
         }
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        });
+      setupFetchMock(mockImage);
 
       const { getByText, getByTestId } = render(
         <BrowserRouter>
@@ -546,23 +472,7 @@ describe('ImageView - Measurement Handlers', () => {
         metadata: {}
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        });
+      setupFetchMock(mockImage);
 
       render(
         <BrowserRouter>
@@ -585,23 +495,7 @@ describe('ImageView - Measurement Handlers', () => {
         metadata: null
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ email: 'test@example.com' })
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockImage
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => []
-        });
+      setupFetchMock(mockImage);
 
       render(
         <BrowserRouter>
