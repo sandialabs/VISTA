@@ -7,7 +7,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.16.0",
-    "react-scripts": "^5.0.1"
+    "react-scripts": "^5.0.1",
+    "three": "^0.185.1"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -16,11 +17,16 @@
     "build": "react-scripts build",
     "build:analyze": "npm run build && npx webpack-bundle-analyzer build/static/js/*.js",
     "build:profile": "react-scripts --profile build",
-    "test": "react-scripts test",
-    "test:e2e": "playwright test",
+    "test": "react-scripts test --runInBand --watchAll=false --all",
+    "test:e2e": "playwright test --project=chromium-local",
+    "test:e2e:browsers": "playwright test --config=playwright.cross-browser.config.js",
+    "test:e2e:install-browsers": "node scripts/install-cross-browser-browsers.js",
     "test:e2e:pr03": "playwright test e2e/specs/inspection-workbench.spec.js",
     "test:e2e:headed": "playwright test --headed --project=chromium-local",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "lint": "eslint src --ext .js,.jsx --ignore-pattern '**/__tests__/**' --ignore-pattern '**/*.test.js' --ignore-pattern src/setupTests.js --max-warnings 0",
+    "test:unit:ci": "CI=true react-scripts test --runInBand --watchAll=false --silent --reporters=./scripts/compact-jest-reporter.js",
+    "test:ci": "npm run test:unit:ci && npm run test:e2e"
   },
   "eslintConfig": {
     "extends": [
