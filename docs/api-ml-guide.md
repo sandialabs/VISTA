@@ -99,25 +99,25 @@ import hashlib
 import time
 import json
 
+
 def create_hmac_headers(payload, secret):
     """Create HMAC authentication headers."""
     timestamp = str(int(time.time()))
-    
+
     # Create message to sign
-    message = json.dumps(payload, separators=(',', ':'), sort_keys=True)
-    
+    message = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
     # Generate HMAC signature
     signature = hmac.new(
-        secret.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
+        secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    
+
     return {
-        'Content-Type': 'application/json',
-        'X-ML-Signature': signature,
-        'X-ML-Timestamp': timestamp
+        "Content-Type": "application/json",
+        "X-ML-Signature": signature,
+        "X-ML-Timestamp": timestamp,
     }
+
 
 # Usage
 headers = create_hmac_headers(payload, ML_CALLBACK_HMAC_SECRET)
@@ -131,16 +131,16 @@ const crypto = require('crypto');
 
 function createHMACHeaders(payload, secret) {
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    
+
     // Create message to sign
     const message = JSON.stringify(payload);
-    
+
     // Generate HMAC signature
     const signature = crypto
         .createHmac('sha256', secret)
         .update(message)
         .digest('hex');
-    
+
     return {
         'Content-Type': 'application/json',
         'X-ML-Signature': signature,
@@ -353,11 +353,9 @@ POST /api/analyses/{analysis_id}/finalize
 import requests
 
 # Upload file
-with open('bounding_boxes.png', 'rb') as f:
+with open("bounding_boxes.png", "rb") as f:
     response = requests.put(
-        presigned_url,
-        data=f,
-        headers={'Content-Type': 'image/png'}
+        presigned_url, data=f, headers={"Content-Type": "image/png"}
     )
 
 print(f"Upload status: {response.status_code}")
@@ -574,187 +572,160 @@ import time
 import json
 from pathlib import Path
 
+
 class MLPipelineClient:
     def __init__(self, api_url, hmac_secret, api_key=None):
-        self.api_url = api_url.rstrip('/')
+        self.api_url = api_url.rstrip("/")
         self.hmac_secret = hmac_secret
         self.api_key = api_key
-        
+
     def _create_hmac_headers(self, payload):
         """Create HMAC authentication headers."""
         timestamp = str(int(time.time()))
-        message = json.dumps(payload, separators=(',', ':'), sort_keys=True)
-        
+        message = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
         signature = hmac.new(
-            self.hmac_secret.encode('utf-8'),
-            message.encode('utf-8'),
-            hashlib.sha256
+            self.hmac_secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
         ).hexdigest()
-        
+
         return {
-            'Content-Type': 'application/json',
-            'X-ML-Signature': signature,
-            'X-ML-Timestamp': timestamp
+            "Content-Type": "application/json",
+            "X-ML-Signature": signature,
+            "X-ML-Timestamp": timestamp,
         }
-    
+
     def _get_user_headers(self):
         """Get user authentication headers."""
         if self.api_key:
-            return {'X-API-Key': self.api_key}
+            return {"X-API-Key": self.api_key}
         return {}
-    
+
     def create_analysis(self, image_id, model_name, model_version, parameters=None):
         """Step 1: Create a new ML analysis."""
         url = f"{self.api_url}/api/images/{image_id}/analyses"
         payload = {
-            'model_name': model_name,
-            'model_version': model_version,
-            'parameters': parameters or {}
+            "model_name": model_name,
+            "model_version": model_version,
+            "parameters": parameters or {},
         }
-        
-        response = requests.post(
-            url,
-            json=payload,
-            headers=self._get_user_headers()
-        )
+
+        response = requests.post(url, json=payload, headers=self._get_user_headers())
         response.raise_for_status()
         return response.json()
-    
+
     def update_status(self, analysis_id, status):
         """Step 2: Update analysis status."""
         url = f"{self.api_url}/api/analyses/{analysis_id}/status"
-        payload = {'status': status}
-        
+        payload = {"status": status}
+
         response = requests.patch(
-            url,
-            json=payload,
-            headers=self._create_hmac_headers(payload)
+            url, json=payload, headers=self._create_hmac_headers(payload)
         )
         response.raise_for_status()
         return response.json()
-    
+
     def request_presigned_urls(self, analysis_id, artifacts):
         """Step 3: Request presigned URLs for artifact uploads."""
         url = f"{self.api_url}/api/analyses/{analysis_id}/artifacts/presign"
-        payload = {'artifacts': artifacts}
-        
+        payload = {"artifacts": artifacts}
+
         response = requests.post(
-            url,
-            json=payload,
-            headers=self._create_hmac_headers(payload)
+            url, json=payload, headers=self._create_hmac_headers(payload)
         )
         response.raise_for_status()
         return response.json()
-    
+
     def upload_artifact(self, presigned_url, file_path, content_type):
         """Step 4: Upload artifact to S3 using presigned URL."""
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             response = requests.put(
-                presigned_url,
-                data=f,
-                headers={'Content-Type': content_type}
+                presigned_url, data=f, headers={"Content-Type": content_type}
             )
         response.raise_for_status()
-    
+
     def submit_annotations(self, analysis_id, annotations):
         """Step 5: Submit annotations in bulk."""
         url = f"{self.api_url}/api/analyses/{analysis_id}/annotations:bulk"
-        payload = {'annotations': annotations}
-        
+        payload = {"annotations": annotations}
+
         response = requests.post(
-            url,
-            json=payload,
-            headers=self._create_hmac_headers(payload)
+            url, json=payload, headers=self._create_hmac_headers(payload)
         )
         response.raise_for_status()
         return response.json()
-    
-    def finalize_analysis(self, analysis_id, status='completed', summary=None):
+
+    def finalize_analysis(self, analysis_id, status="completed", summary=None):
         """Step 6: Finalize the analysis."""
         url = f"{self.api_url}/api/analyses/{analysis_id}/finalize"
-        payload = {
-            'status': status,
-            'summary': summary or {}
-        }
-        
+        payload = {"status": status, "summary": summary or {}}
+
         response = requests.post(
-            url,
-            json=payload,
-            headers=self._create_hmac_headers(payload)
+            url, json=payload, headers=self._create_hmac_headers(payload)
         )
         response.raise_for_status()
         return response.json()
+
 
 def run_ml_analysis(image_id, image_path):
     """Complete ML analysis workflow example."""
     client = MLPipelineClient(
-        api_url='http://localhost:8000',
-        hmac_secret='your-hmac-secret',
-        api_key='your-api-key'
+        api_url="http://localhost:8000",
+        hmac_secret="your-hmac-secret",
+        api_key="your-api-key",
     )
-    
+
     # Step 1: Create analysis
     print("Creating analysis...")
     analysis = client.create_analysis(
         image_id=image_id,
-        model_name='yolo_v8',
-        model_version='v8.0.0',
-        parameters={'confidence_threshold': 0.5}
+        model_name="yolo_v8",
+        model_version="v8.0.0",
+        parameters={"confidence_threshold": 0.5},
     )
-    analysis_id = analysis['id']
+    analysis_id = analysis["id"]
     print(f"Analysis created: {analysis_id}")
-    
+
     # Step 2: Update to processing
     print("Updating status to processing...")
-    client.update_status(analysis_id, 'processing')
-    
+    client.update_status(analysis_id, "processing")
+
     # Run your ML model here
     # results = run_yolo_model(image_path)
-    
+
     # Step 3 & 4: Upload artifacts
     print("Uploading artifacts...")
-    artifacts = [
-        {'artifact_name': 'detections.png', 'content_type': 'image/png'}
-    ]
+    artifacts = [{"artifact_name": "detections.png", "content_type": "image/png"}]
     presigned = client.request_presigned_urls(analysis_id, artifacts)
-    
-    for url_info in presigned['presigned_urls']:
+
+    for url_info in presigned["presigned_urls"]:
         # Generate visualization
         # create_detection_visualization(results, 'detections.png')
-        client.upload_artifact(
-            url_info['upload_url'],
-            'detections.png',
-            'image/png'
-        )
-    
+        client.upload_artifact(url_info["upload_url"], "detections.png", "image/png")
+
     # Step 5: Submit annotations
     print("Submitting annotations...")
     annotations = [
         {
-            'annotation_type': 'bounding_box',
-            'class_name': 'person',
-            'confidence': 0.95,
-            'data': {'bbox': [100, 150, 50, 100], 'format': 'xywh'}
+            "annotation_type": "bounding_box",
+            "class_name": "person",
+            "confidence": 0.95,
+            "data": {"bbox": [100, 150, 50, 100], "format": "xywh"},
         }
     ]
     client.submit_annotations(analysis_id, annotations)
-    
+
     # Step 6: Finalize
     print("Finalizing analysis...")
     client.finalize_analysis(
-        analysis_id,
-        status='completed',
-        summary={'total_detections': len(annotations)}
+        analysis_id, status="completed", summary={"total_detections": len(annotations)}
     )
-    
+
     print("Analysis complete!")
 
+
 # Run the pipeline
-if __name__ == '__main__':
-    run_ml_analysis(
-        image_id='your-image-id',
-        image_path='/path/to/image.jpg'
-    )
+if __name__ == "__main__":
+    run_ml_analysis(image_id="your-image-id", image_path="/path/to/image.jpg")
 ```
 
 ## Testing
@@ -828,7 +799,7 @@ def safe_api_call(func, *args, **kwargs):
     """Wrapper for safe API calls with retry logic."""
     max_retries = 3
     retry_delay = 5
-    
+
     for attempt in range(max_retries):
         try:
             return func(*args, **kwargs)
@@ -866,9 +837,11 @@ logger.error(f"Failed to upload artifact: {error}")
 # Process multiple images in parallel
 from concurrent.futures import ThreadPoolExecutor
 
+
 def process_image(image_id):
     # Run analysis pipeline
     pass
+
 
 with ThreadPoolExecutor(max_workers=4) as executor:
     executor.map(process_image, image_ids)
@@ -880,8 +853,8 @@ with ThreadPoolExecutor(max_workers=4) as executor:
 from PIL import Image
 
 # Compress images before upload
-img = Image.open('detection.png')
-img.save('detection_compressed.png', optimize=True, quality=85)
+img = Image.open("detection.png")
+img.save("detection_compressed.png", optimize=True, quality=85)
 ```
 
 ### Security
@@ -899,14 +872,14 @@ Track model versions for reproducibility:
 ```python
 analysis = client.create_analysis(
     image_id=image_id,
-    model_name='yolo_v8',
-    model_version='v8.0.0',
+    model_name="yolo_v8",
+    model_version="v8.0.0",
     parameters={
-        'confidence_threshold': 0.5,
-        'iou_threshold': 0.45,
-        'model_checkpoint': 'epoch_100',
-        'training_date': '2024-01-15'
-    }
+        "confidence_threshold": 0.5,
+        "iou_threshold": 0.45,
+        "model_checkpoint": "epoch_100",
+        "training_date": "2024-01-15",
+    },
 )
 ```
 
@@ -926,7 +899,7 @@ analysis = client.create_analysis(
 
 ```python
 # Print payload being signed
-print("Payload:", json.dumps(payload, separators=(',', ':'), sort_keys=True))
+print("Payload:", json.dumps(payload, separators=(",", ":"), sort_keys=True))
 
 # Print signature
 print("Signature:", signature)

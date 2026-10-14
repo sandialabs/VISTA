@@ -115,7 +115,9 @@ Use this section first. It assumes the deployed model function can be imported a
 
 
    def run(request):
-       payload = request.model_dump(mode="python") if hasattr(request, "model_dump") else request
+       payload = (
+           request.model_dump(mode="python") if hasattr(request, "model_dump") else request
+       )
        image_bytes = base64.b64decode(payload["image_data_base64"])
        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
@@ -258,9 +260,9 @@ Use these files as the authoritative references when changing or extending the i
 | Runtime dispatch for `placeholder`, `local_import`, and `fastapi` | `backend/analyze_toolbox/segmentation.py`, `SegmentationComponent.run`, `_run_local_import`, and `_run_fastapi` |
 | Mapping from placeholder method ID to backend name | `backend/analyze_toolbox/segmentation.py`, `SEGMENTATION_METHOD_BACKENDS` |
 | Graph node and edge shape used by Pipeline Studio workflows | `backend/analyze_toolbox/contracts.py`, `WorkflowNodeSpec`, `EdgeSpec`, and `WorkflowGraph` |
-| Executor handoff from workflow parameters to `SegmentationInput` | `backend/analyze_toolbox/executor.py`, `_apply_segmentation_component` |
-| Conversion of returned masks into labels, detections, measurements, and overlay metadata | `backend/analyze_toolbox/executor.py`, `_apply_segmentation_component` |
-| Output artifact behavior after segmentation | `backend/analyze_toolbox/executor.py`, `output.versioned_image_artifact` branch |
+| Executor handoff from workflow parameters to `SegmentationInput` | `backend/analyze_toolbox/segmentation_step.py`, `apply_segmentation_component` |
+| Conversion of returned masks into labels, detections, measurements, and overlay metadata | `backend/analyze_toolbox/segmentation_step.py`, `apply_segmentation_component` |
+| Output artifact behavior after segmentation | `backend/analyze_toolbox/method_handlers.py`, `output.versioned_image_artifact` handler |
 
 ## Done checklist
 

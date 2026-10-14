@@ -25,24 +25,24 @@ cd backend
 export VISTA_MCP_API_KEY="your-secure-api-key-here"
 
 # Optional: Configure host and port
-export MCP_HOST="0.0.0.0"  # Default: 0.0.0.0
+export MCP_HOST="localhost"  # Default: localhost
 export MCP_PORT="8001"     # Default: 8001
 
 # Start the server
 python mcp_server.py
 ```
 
-The server will start as an HTTP service on the configured host and port (default: http://0.0.0.0:8001).
+The server will start as an HTTP service on the configured host and port (default: http://localhost:8001).
 
 ## Configuration
 
 ### Environment Variables
 
 **Required:**
-- `VISTA_MCP_API_KEY` - API key for authentication (default: "vista-default-key-change-me")
+- `VISTA_MCP_API_KEY` - API key for authentication. The server refuses to start when this value is unset, empty, or the old example value `vista-default-key-change-me`.
 
 **Optional:**
-- `MCP_HOST` - Host to bind to (default: "0.0.0.0")
+- `MCP_HOST` - Host to bind to (default: "localhost")
 - `MCP_PORT` - Port to bind to (default: 8001)
 
 ### VISTA Configuration
@@ -109,24 +109,19 @@ from mcp.client.sse import sse_client
 # Connect to VISTA MCP server
 async with sse_client(
     url="http://localhost:8001/sse",
-    headers={
-        "Authorization": "Bearer your-api-key-here"
-    }
+    headers={"Authorization": "Bearer your-api-key-here"},
 ) as (read, write):
     from mcp import ClientSession
+
     async with ClientSession(read, write) as session:
         await session.initialize()
-        
+
         # Get projects for a user
         result = await session.call_tool(
             "get_projects",
-            arguments={
-                "username": "alice@example.com",
-                "skip": 0,
-                "limit": 10
-            }
+            arguments={"username": "alice@example.com", "skip": 0, "limit": 10},
         )
-        
+
         # Get images in a project
         result = await session.call_tool(
             "get_images",
@@ -134,10 +129,10 @@ async with sse_client(
                 "username": "alice@example.com",
                 "project_id": "123e4567-e89b-12d3-a456-426614174000",
                 "skip": 0,
-                "limit": 50
-            }
+                "limit": 50,
+            },
         )
-        
+
         # Add metadata to an image
         result = await session.call_tool(
             "add_image_metadata",
@@ -145,8 +140,8 @@ async with sse_client(
                 "username": "alice@example.com",
                 "image_id": "789e0123-e89b-12d3-a456-426614174000",
                 "key": "camera_model",
-                "value": "Canon EOS R5"
-            }
+                "value": "Canon EOS R5",
+            },
         )
 ```
 ```

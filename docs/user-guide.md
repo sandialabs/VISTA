@@ -697,10 +697,7 @@ curl -H "X-API-Key: your-api-key-here" \
 import requests
 
 headers = {"X-API-Key": "your-api-key-here"}
-response = requests.get(
-    "https://your-app.example.com/api/projects",
-    headers=headers
-)
+response = requests.get("https://your-app.example.com/api/projects", headers=headers)
 projects = response.json()
 ```
 

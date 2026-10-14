@@ -8,21 +8,12 @@ This guide covers monitoring, logging, health checks, and regular maintenance fo
 
 ```bash
 # Basic health check
-curl http://localhost:8000/health
+curl http://localhost:8000/api/health
 
 # Expected response:
 # {"status": "healthy"}
 
-# Detailed health check (includes database and S3)
-curl http://localhost:8000/health/detailed
-
-# Expected response:
-# {
-#   "status": "healthy",
-#   "database": "connected",
-#   "storage": "accessible",
-#   "timestamp": "2024-01-15T10:30:00Z"
-# }
+# The endpoint also includes a UTC timestamp.
 ```
 
 ### Container Health Checks
@@ -43,14 +34,14 @@ podman stats vista
 # In deployment.yaml
 livenessProbe:
   httpGet:
-    path: /health
+    path: /api/health
     port: 8000
   initialDelaySeconds: 30
   periodSeconds: 10
 
 readinessProbe:
   httpGet:
-    path: /health
+    path: /api/health
     port: 8000
   initialDelaySeconds: 5
   periodSeconds: 5
@@ -198,13 +189,13 @@ groups:
         for: 5m
         annotations:
           summary: "High error rate detected"
-          
+
       - alert: HighResponseTime
         expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
         for: 5m
         annotations:
           summary: "High response time (p95 > 5s)"
-          
+
       - alert: DatabaseConnectionPoolExhausted
         expr: database_connections{state="waiting"} > 10
         for: 2m
@@ -303,14 +294,14 @@ services:
       - discovery.type=single-node
     ports:
       - "9200:9200"
-      
+
   logstash:
     image: logstash:8.5.0
     volumes:
       - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf
     depends_on:
       - elasticsearch
-      
+
   kibana:
     image: kibana:8.5.0
     ports:
@@ -359,7 +350,7 @@ services:
       - "3100:3100"
     volumes:
       - loki-data:/loki
-      
+
   promtail:
     image: grafana/promtail:latest
     volumes:
@@ -367,7 +358,7 @@ services:
       - ./promtail-config.yml:/etc/promtail/config.yml
     depends_on:
       - loki
-      
+
   grafana:
     image: grafana/grafana:latest
     ports:
@@ -386,7 +377,7 @@ services:
    ```bash
    # Database backup
    pg_dump imagemanager > backup-$(date +%Y%m%d).sql
-   
+
    # Configuration backup
    cp .env .env.backup-$(date +%Y%m%d)
    ```
@@ -398,7 +389,7 @@ services:
 
 3. **Rebuild image:**
    ```bash
-   podman build -t vista:latest .
+   podman build --ignorefile Dockerfile.dockerignore -t vista:latest .
    ```
 
 4. **Run migrations:**
@@ -426,7 +417,7 @@ services:
 
 7. **Verify deployment:**
    ```bash
-   curl http://localhost:8000/health
+   curl http://localhost:8000/api/health
    podman logs -f vista
    ```
 
@@ -439,7 +430,7 @@ services:
 podman run -d --name app-green -p 8001:8000 vista:latest
 
 # Test new version
-curl http://localhost:8001/health
+curl http://localhost:8001/api/health
 
 # Update load balancer to point to new version
 # (nginx, haproxy, etc.)
@@ -481,7 +472,7 @@ kubectl rollout undo deployment/vista
 echo "=== Daily Health Check $(date) ===" >> /var/log/maintenance.log
 
 # Check application
-curl -s http://localhost:8000/health || echo "App health check FAILED"
+curl -s http://localhost:8000/api/health || echo "App health check FAILED"
 
 # Check disk space
 df -h / | grep -v Filesystem >> /var/log/maintenance.log
@@ -583,17 +574,14 @@ curl -X POST -H 'Content-type: application/json' \
 # alert.py
 import requests
 
-def send_pagerduty_alert(message, severity='error'):
-    url = 'https://events.pagerduty.com/v2/enqueue'
-    headers = {'Content-Type': 'application/json'}
+
+def send_pagerduty_alert(message, severity="error"):
+    url = "https://events.pagerduty.com/v2/enqueue"
+    headers = {"Content-Type": "application/json"}
     payload = {
-        'routing_key': 'YOUR_INTEGRATION_KEY',
-        'event_action': 'trigger',
-        'payload': {
-            'summary': message,
-            'severity': severity,
-            'source': 'vista'
-        }
+        "routing_key": "YOUR_INTEGRATION_KEY",
+        "event_action": "trigger",
+        "payload": {"summary": message, "severity": severity, "source": "vista"},
     }
     requests.post(url, json=payload, headers=headers)
 ```

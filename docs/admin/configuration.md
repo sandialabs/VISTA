@@ -296,7 +296,7 @@ DEBUG=true
 SKIP_HEADER_CHECK=true
 MOCK_USER_EMAIL=dev@example.com
 MOCK_USER_GROUPS_JSON='["admin-group"]'
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/postgres
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
 S3_ENDPOINT=localhost:9000
 S3_USE_SSL=false
 ALLOWED_ORIGINS=*
@@ -340,8 +340,8 @@ When running backend/database in Docker but accessing from host:
 
 ```bash
 # Host machine connects to Docker PostgreSQL
-HOST_DB_PORT=5433
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5433/postgres
+HOST_DB_PORT=5432
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/postgres
 
 # Docker-to-Docker communication uses service name
 DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/postgres

@@ -98,6 +98,52 @@ Relationships shown with arrows: --> (one-to-many), --< (many-to-one)
 +---------------------+
 
 
+INSPECTION METADATA QUERY INDEX
+================================================================================
+
++------------------------------------------+
+| inspection_part_metadata_fields          |
++------------------------------------------+
+| id [PK] UUID                             |
+| project_id [FK] --> projects.id          |
+| part_id [FK] --> inspection_parts.id     |
+| source_ref                               |
+| source_filename                          |
+| field_path (RFC 6901 JSON Pointer)        |
+| field_path_hash                          |
+| field_name                               |
+| ordinal                                  |
+| value_type                               |
+| value_json                               |
+| value_text / value_text_hash             |
+| value_number / value_boolean             |
+| created_at                               |
++------------------------------------------+
+
+Parsed .nsipro leaves are materialized here during inspection ingest and
+metadata-source reassignment. The existing inspection_parts.metadata JSON stays
+authoritative for API compatibility; this table is a derived, typed query
+index. Rows are replaced atomically per touched part and source. Hash columns
+bound equality indexes for long paths and strings; queries must also compare
+the readable field_path/value column after a hash match. Materialization is
+bounded per parsed source, per part, and per ingest transaction; over-limit
+metadata fails atomically with HTTP 422. Bulk ingest locks existing parts before
+replacement and indexes only refs resolved to project-owned .nsipro metadata;
+unverified legacy inline payloads remain available in JSON but are not indexed.
+
+Example exact-string predicates should use both the bounded hash indexes and
+the readable columns to retain collision-safe semantics:
+
+  WHERE project_id = :project_id
+    AND field_path_hash = :sha256_path
+    AND field_path = '/capture/operator'
+    AND value_text_hash = :sha256_value
+    AND value_text = 'alice'
+
+Numeric range filters use the same path hash plus field_path equality and then
+compare value_number.
+
+
 MACHINE LEARNING SUBSYSTEM
 ================================================================================
 

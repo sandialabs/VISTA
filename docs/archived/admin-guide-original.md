@@ -317,7 +317,7 @@ Edit `backend/core/group_auth.py` and implement `_check_group_membership`:
 def _check_group_membership(user_email: str, group_id: str) -> bool:
     """
     Integrate with your auth system to check group membership.
-    
+
     Examples:
     - Query LDAP/Active Directory
     - Call external auth API
@@ -326,7 +326,7 @@ def _check_group_membership(user_email: str, group_id: str) -> bool:
     # Example: Call auth service
     response = requests.get(
         f"{settings.AUTH_SERVER_URL}/api/users/{user_email}/groups",
-        headers={"Authorization": f"Bearer {settings.AUTH_API_TOKEN}"}
+        headers={"Authorization": f"Bearer {settings.AUTH_API_TOKEN}"},
     )
     return group_id in response.json().get("groups", [])
 ```

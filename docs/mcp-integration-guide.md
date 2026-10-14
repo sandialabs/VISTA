@@ -184,7 +184,7 @@ async with sse_client(
     url="http://localhost:8001/sse",  # VISTA MCP server URL
     headers={
         "Authorization": "Bearer your-api-key-here"  # API key authentication
-    }
+    },
 ) as (read, write):
     async with ClientSession(read, write) as session:
         await session.initialize()
@@ -196,12 +196,7 @@ async with sse_client(
 ```python
 # Get projects for a user
 result = await session.call_tool(
-    "get_projects",
-    arguments={
-        "username": "user@example.com",
-        "skip": 0,
-        "limit": 20
-    }
+    "get_projects", arguments={"username": "user@example.com", "skip": 0, "limit": 20}
 )
 projects = json.loads(result.content[0].text)
 
@@ -212,8 +207,8 @@ result = await session.call_tool(
         "username": "user@example.com",
         "project_id": projects[0]["id"],
         "skip": 0,
-        "limit": 50
-    }
+        "limit": 50,
+    },
 )
 images = json.loads(result.content[0].text)
 
@@ -224,8 +219,8 @@ result = await session.call_tool(
         "username": "user@example.com",
         "image_id": images[0]["id"],
         "key": "analysis_date",
-        "value": "2024-12-07"
-    }
+        "value": "2024-12-07",
+    },
 )
 ```
 
@@ -234,10 +229,10 @@ result = await session.call_tool(
 All tools return either successful results or error messages:
 
 ```python
-result = await session.call_tool("get_project", arguments={
-    "username": "user@example.com",
-    "project_id": "invalid-uuid"
-})
+result = await session.call_tool(
+    "get_project",
+    arguments={"username": "user@example.com", "project_id": "invalid-uuid"},
+)
 data = json.loads(result.content[0].text)
 
 if "error" in data:

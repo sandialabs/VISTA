@@ -29,7 +29,7 @@ VISTA is a full-stack application for managing, classifying, and collaborating o
 - Alembic - Database migrations
 - Pydantic - Data validation and serialization
 - boto3 - S3/MinIO integration
-- aiocache + diskcache - Caching layer
+- diskcache - Response caching layer
 
 **Frontend:**
 - React 18 - UI library with hooks
@@ -93,6 +93,14 @@ VISTA is a full-stack application for managing, classifying, and collaborating o
 ### Implementation Recipes
 
 - [Replace the default `.nsipro` parser](nsipro-default-parser-replacement-recipe.md) when a deployment uses one custom `.nsipro` data extraction function as the default parser.
+
+### Analyze Pipeline Studio
+
+Pipeline Studio is implemented by `backend/analyze_toolbox/` and the React `AnalyzeWorkbenchTab` component. The default OpenCV and SAM blocks call local adapters in `backend/utils/segmentation_integrations/`; keep their native toolkit imports behind lazy runtime loaders so test collection and xdist workers do not import OpenCV/SAM extensions until an operational run needs them. The backend test suite forces `VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME` on and fakes the OpenCV runtime unless `VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true`, so a bare `pytest` run inside the deployment image (which sets the flag to `false`) cannot load real checkpoints per worker. The executor decodes ordinary image files and representative center slices from `.npy`, `.npz`, `.inspiro`, and multi-frame TIFF inputs before applying workflow nodes. OpenCV defaults include `options.min_peak_distance_px = 1`; SAM can run without prompts or a checkpoint by using a foreground fallback mask.
+
+### Inspection Workbench All Part
+
+`InspectionWorkbenchPanel` adds a frontend-only `All` part row at the top of the inspection part summary. The reserved selection ID is `__all_parts__`; it is used only in client state and workspace state. The row aggregates mapped, loaded images from the currently visible/filtered parts, then reuses the normal view, modality, and layer filters so inspectors can compare the same view and modality across all matching parts. Keep backend mutations scoped to real parts only: review updates, annotation edits, image ordering, crop creation, and source-image visibility changes must not send the synthetic ID to part endpoints. The `All` row and each real part row can be collapsed, and collapsed rows should remain single-line summaries.
 
 ## Getting Started
 
@@ -172,7 +180,7 @@ VISTA is a full-stack application for managing, classifying, and collaborating o
 
 **Database Management:**
 - pgAdmin: http://localhost:8080 (user: admin@admin.com, pass: admin)
-- Or use: `psql -h localhost -p 5433 -U postgres`
+- Or use: `psql -h localhost -p 5432 -U postgres`
 
 **Storage Management:**
 - MinIO Console: http://localhost:9001 (user: minioadmin, pass: minioadminpassword)
@@ -184,6 +192,7 @@ Key development settings in `.env`:
 ```bash
 # Development mode
 DEBUG=true
+GITLAB_COMMIT_SHA=
 SKIP_HEADER_CHECK=true  # Disables auth header validation
 
 # Mock user (when SKIP_HEADER_CHECK=true)
@@ -191,7 +200,7 @@ MOCK_USER_EMAIL=dev@example.com
 MOCK_USER_GROUPS_JSON='["admin-group", "data-scientists"]'
 
 # Database (Docker)
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/postgres
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
 
 # Storage (Docker MinIO)
 S3_ENDPOINT=localhost:9000
@@ -200,6 +209,8 @@ S3_SECRET_KEY=minioadminpassword
 S3_BUCKET=data-storage
 S3_USE_SSL=false
 ```
+
+`GITLAB_COMMIT_SHA` appears in Dashboard Settings as read-only build metadata. GitLab CI supplies it for container images; local development can leave it blank.
 
 ### Hot Reloading
 
@@ -229,7 +240,7 @@ User Request → Frontend (React)
               ↓
          Business Logic
               ↓
-    Database (PostgreSQL) + Cache (aiocache)
+    Database (PostgreSQL) + Cache (diskcache)
               ↓
        Storage (S3/MinIO)
               ↓
@@ -239,7 +250,8 @@ User Request → Frontend (React)
 ### Key Design Patterns
 
 **Backend:**
-- Repository pattern (CRUD operations in `utils/crud.py`)
+- Repository pattern (database access in `repositories/`)
+- Service layer (`services/`) that never imports FastAPI or routers
 - Dependency injection (FastAPI dependencies)
 - Middleware pattern (auth, CORS, security headers)
 - Factory pattern (database session, S3 client)
@@ -261,16 +273,19 @@ User Request → Frontend (React)
 - Header-based authentication via reverse proxy
 - Validates `X-User-Email` and `X-Proxy-Secret` headers
 - Group-based access control for projects
+- Human-only endpoints use `require_authenticated_user`, which rejects `Authorization: Bearer` API keys; this covers API-key and user administration, destructive project operations, database settings, and `POST /api/projects/{project_id}/load-test-data` (fixture seeding)
 
 ### Caching Strategy
 
-Multi-layer caching for performance:
+One diskcache store (`utils.cache_manager.get_cache()`) holds three per-user
+response caches:
 
-1. **Application Cache:** aiocache with TTL for API responses
-2. **Thumbnail Cache:** diskcache for resized images
-3. **Metadata Cache:** Project and image metadata
+1. **Project image lists:** `GET /api/projects/{id}/images`, 30 minutes.
+2. **Image metadata:** `GET /api/images/{id}`, 1 hour.
+3. **Thumbnails:** `GET /api/images/{id}/thumbnail`, 24 hours.
 
-Cache invalidation on mutations (create/update/delete).
+Every mutation that changes cached image data invalidates through
+`cache_manager` after it commits (see [Caching](#caching)).
 
 ## Backend Development
 
@@ -283,10 +298,12 @@ backend/
 │   ├── config.py           # Settings (Pydantic BaseSettings)
 │   ├── database.py         # Async SQLAlchemy engine
 │   ├── models.py           # ORM models
-│   ├── schemas.py          # Pydantic schemas
 │   ├── security.py         # Password hashing, etc.
 │   └── group_auth.py       # Authorization helpers
-├── routers/                # API endpoints by resource
+├── routers/                # API endpoints by resource (HTTP only)
+├── services/               # Domain workflows; raise services.errors types
+├── repositories/           # Database access helpers
+├── schemas/                # Pydantic schemas by resource
 ├── middleware/             # Request/response middleware
 ├── utils/                  # Shared utilities
 └── tests/                  # pytest tests
@@ -294,22 +311,24 @@ backend/
 
 ### Adding a New API Endpoint
 
-1. **Define Pydantic schemas** in `core/schemas.py`:
+1. **Define Pydantic schemas** in `schemas/widgets.py`:
    ```python
    from pydantic import BaseModel
    from uuid import UUID
    from datetime import datetime
-   
+
+
    class WidgetCreate(BaseModel):
        name: str
        description: str | None = None
-   
+
+
    class WidgetResponse(BaseModel):
        id: UUID
        name: str
        description: str | None
        created_at: datetime
-       
+
        class Config:
            from_attributes = True
    ```
@@ -318,7 +337,7 @@ backend/
    ```python
    class Widget(Base):
        __tablename__ = "widgets"
-       
+
        id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
        name = Column(String(255), nullable=False)
        description = Column(Text)
@@ -333,7 +352,7 @@ backend/
    alembic upgrade head
    ```
 
-4. **Add CRUD operations** in `utils/crud.py` or router file:
+4. **Add database operations** in `repositories/widgets.py`:
    ```python
    async def create_widget(db: AsyncSession, widget: WidgetCreate) -> Widget:
        db_widget = Widget(**widget.model_dump())
@@ -348,26 +367,61 @@ backend/
    from fastapi import APIRouter, Depends, HTTPException
    from sqlalchemy.ext.asyncio import AsyncSession
    from core.database import get_db
-   from core.schemas import WidgetCreate, WidgetResponse
+   from repositories.widgets import create_widget
+   from schemas.widgets import WidgetCreate, WidgetResponse
    from utils.dependencies import get_current_user_email
-   
+
    router = APIRouter(prefix="/api/widgets", tags=["widgets"])
-   
+
+
    @router.post("/", response_model=WidgetResponse, status_code=201)
    async def create_widget_endpoint(
        widget: WidgetCreate,
        db: AsyncSession = Depends(get_db),
-       user_email: str = Depends(get_current_user_email)
+       user_email: str = Depends(get_current_user_email),
    ):
        """Create a new widget."""
        db_widget = await create_widget(db, widget)
        return db_widget
    ```
 
+   Project- or image-scoped routes take the resource from a shared access
+   dependency instead of checking group membership themselves:
+
+   ```python
+   from utils.dependencies import AccessibleImage, ReadableProject, WritableProject
+
+
+   @router.get("/projects/{project_id}/widgets")
+   async def list_project_widgets(project_id: uuid.UUID, project: ReadableProject):
+       ...
+   ```
+
+   `ReadableProject` returns 404 for a missing project and 403 when the caller is
+   not in its `meta_group_id`. `WritableProject` also rejects archived projects
+   with 403. `AccessibleImage` does the same for `{image_id}` and honors the
+   `include_deleted` query flag. When the project ID comes from a request body,
+   call `get_project_or_403` / `get_project_or_403_writable` directly. Tests
+   revoke access by patching `utils.dependencies.is_user_in_group`.
+
+   Service code under `backend/services/` never imports FastAPI. Raise a type
+   from `services/errors.py` (`ValidationFailedError`, `ForbiddenError`,
+   `NotFoundError`, `ConflictError`, `CapacityError`, and so on) or a domain
+   error built on one, and let the `ServiceError` handler in `main.py` produce
+   the HTTP response. Do not add router `try/except` blocks that only translate
+   a service error into an `HTTPException`. Keep `detail` client-safe; log
+   bucket names, paths, and raw exception text instead of returning them.
+
+   Imports point one way: routers may import services, repositories, and
+   utils, but nothing under `services/`, `repositories/`, or `utils/` imports
+   from `routers/` (`tests/test_import_direction.py` enforces this). Routers
+   call services directly; do not add private router functions that only
+   forward to a service, and patch the owning service module in tests.
+
 6. **Register router** in `main.py`:
    ```python
    from routers import widgets
-   
+
    api_router.include_router(widgets.router)
    ```
 
@@ -375,12 +429,12 @@ backend/
    ```python
    import pytest
    from httpx import AsyncClient
-   
+
+
    @pytest.mark.asyncio
    async def test_create_widget(client: AsyncClient):
        response = await client.post(
-           "/api/widgets/",
-           json={"name": "Test Widget", "description": "Test"}
+           "/api/widgets/", json={"name": "Test Widget", "description": "Test"}
        )
        assert response.status_code == 201
        data = response.json()
@@ -394,6 +448,7 @@ backend/
 from core.models import Project
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 async def create_project(db: AsyncSession, name: str, group_id: str):
     project = Project(name=name, meta_group_id=group_id)
     db.add(project)
@@ -406,10 +461,9 @@ async def create_project(db: AsyncSession, name: str, group_id: str):
 ```python
 from sqlalchemy import select
 
+
 async def get_project(db: AsyncSession, project_id: UUID):
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
+    result = await db.execute(select(Project).where(Project.id == project_id))
     return result.scalar_one_or_none()
 ```
 
@@ -441,12 +495,15 @@ async def delete_project(db: AsyncSession, project_id: UUID):
 import boto3
 from core.config import settings
 
+
 def get_s3_client():
     return boto3.client(
-        's3',
-        endpoint_url=f"http://{settings.S3_ENDPOINT}" if not settings.S3_USE_SSL else f"https://{settings.S3_ENDPOINT}",
+        "s3",
+        endpoint_url=f"http://{settings.S3_ENDPOINT}"
+        if not settings.S3_USE_SSL
+        else f"https://{settings.S3_ENDPOINT}",
         aws_access_key_id=settings.S3_ACCESS_KEY,
-        aws_secret_access_key=settings.S3_SECRET_KEY
+        aws_secret_access_key=settings.S3_SECRET_KEY,
     )
 ```
 
@@ -461,71 +518,51 @@ s3_client.put_object(
     Bucket=settings.S3_BUCKET,
     Key=f"projects/{project_id}/{filename}",
     Body=file_content,
-    ContentType=content_type
+    ContentType=content_type,
 )
 
 # Upload from file
 s3_client.upload_file(
-    "/path/to/file",
-    settings.S3_BUCKET,
-    f"projects/{project_id}/{filename}"
+    "/path/to/file", settings.S3_BUCKET, f"projects/{project_id}/{filename}"
 )
 ```
 
 **Generate presigned URL:**
 ```python
 url = s3_client.generate_presigned_url(
-    'get_object',
-    Params={
-        'Bucket': settings.S3_BUCKET,
-        'Key': object_key
-    },
-    ExpiresIn=3600  # 1 hour
+    "get_object",
+    Params={"Bucket": settings.S3_BUCKET, "Key": object_key},
+    ExpiresIn=3600,  # 1 hour
 )
 ```
 
 ### Caching
 
-**Using cache decorator:**
-```python
-from aiocache import cached
+Build cache keys and invalidate only through `backend/utils/cache_manager.py`
+so the read and invalidation patterns cannot drift apart:
 
-@cached(ttl=300, key="projects:list")
-async def get_all_projects(db: AsyncSession):
-    result = await db.execute(select(Project))
-    return result.scalars().all()
+```python
+from utils import cache_manager
+
+cache = cache_manager.get_cache()
+key = cache_manager.image_metadata_key(image_id, current_user.email)
+cached = cache.get(key)
+if cached is None:
+    cached = to_data_instance_schema(db_image)
+    cache.set(key, cached, expire=60 * 60)
 ```
 
-**Manual cache operations:**
-```python
-from aiocache import Cache
+After a mutation commits, call the helper that matches what changed:
 
-cache = Cache()
+- `cache_manager.invalidate_project_images(project_id)` when only the set of
+  images in a project changed (uploads, imports, project deletion).
+- `cache_manager.invalidate_images(project_id, image_ids)` when existing images
+  changed (metadata, group assignment, deletion, restore). It also drops those
+  images' cached metadata and thumbnails.
 
-# Set value
-await cache.set("key", value, ttl=300)
-
-# Get value
-value = await cache.get("key")
-
-# Delete value
-await cache.delete("key")
-
-# Clear all
-await cache.clear()
-```
-
-**Cache invalidation pattern:**
-```python
-@router.post("/")
-async def create_project(...):
-    project = await create_project_in_db(...)
-    
-    # Invalidate list cache
-    await cache.delete(f"projects:user:{user_email}:skip:0:limit:100")
-    
-    return project
-```
+Both helpers are best-effort: a cache failure is logged and never turns a
+committed mutation into an HTTP error. Tests that need a failing or recording
+cache patch `utils.cache_manager.get_cache`.
 
 ## Frontend Development
 
@@ -573,13 +610,13 @@ function MyComponent({ projectId }) {
         setLoading(false);
       }
     }
-    
+
     fetchData();
   }, [projectId]);
 
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error}</div>;
-  
+
   return (
     <div>
       <h2>{data.name}</h2>
@@ -602,14 +639,14 @@ function useFetch(url) {
 
   useEffect(() => {
     let cancelled = false;
-    
+
     async function fetchData() {
       try {
         setLoading(true);
         const response = await fetch(url);
         if (!response.ok) throw new Error('Request failed');
         const json = await response.json();
-        
+
         if (!cancelled) {
           setData(json);
           setError(null);
@@ -624,9 +661,9 @@ function useFetch(url) {
         }
       }
     }
-    
+
     fetchData();
-    
+
     return () => { cancelled = true; };
   }, [url]);
 
@@ -796,38 +833,35 @@ alembic current
 **Adding a column:**
 ```python
 def upgrade():
-    op.add_column('projects',
-        sa.Column('new_field', sa.String(255), nullable=True)
-    )
+    op.add_column("projects", sa.Column("new_field", sa.String(255), nullable=True))
+
 
 def downgrade():
-    op.drop_column('projects', 'new_field')
+    op.drop_column("projects", "new_field")
 ```
 
 **Adding an index:**
 ```python
 def upgrade():
-    op.create_index('ix_projects_name', 'projects', ['name'])
+    op.create_index("ix_projects_name", "projects", ["name"])
+
 
 def downgrade():
-    op.drop_index('ix_projects_name', table_name='projects')
+    op.drop_index("ix_projects_name", table_name="projects")
 ```
 
 **Adding a foreign key:**
 ```python
 def upgrade():
-    op.add_column('images',
-        sa.Column('category_id', sa.UUID(), nullable=True)
-    )
+    op.add_column("images", sa.Column("category_id", sa.UUID(), nullable=True))
     op.create_foreign_key(
-        'fk_images_category',
-        'images', 'categories',
-        ['category_id'], ['id']
+        "fk_images_category", "images", "categories", ["category_id"], ["id"]
     )
 
+
 def downgrade():
-    op.drop_constraint('fk_images_category', 'images')
-    op.drop_column('images', 'category_id')
+    op.drop_constraint("fk_images_category", "images")
+    op.drop_column("images", "category_id")
 ```
 
 ## API Development
@@ -862,9 +896,12 @@ The API is self-documenting via OpenAPI/Swagger:
 **Error (4xx/5xx):**
 ```json
 {
-  "detail": "Error message"
+  "detail": "Error message",
+  "error_context": {"status_code": 404, "path": "/api/...", "request_id": "..."}
 }
 ```
+
+`HTTPException` and service `ServiceError` responses share this shape.
 
 **List with pagination:**
 ```json
@@ -917,6 +954,7 @@ import pytest
 from httpx import AsyncClient
 from core.models import Project
 
+
 @pytest.mark.asyncio
 async def test_create_project(client: AsyncClient, db_session):
     """Test creating a new project."""
@@ -925,10 +963,10 @@ async def test_create_project(client: AsyncClient, db_session):
         json={
             "name": "Test Project",
             "description": "Test",
-            "meta_group_id": "test-group"
-        }
+            "meta_group_id": "test-group",
+        },
     )
-    
+
     assert response.status_code == 201
     data = response.json()
     assert data["name"] == "Test Project"
@@ -942,12 +980,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from httpx import AsyncClient
 from main import app
 
+
 @pytest.fixture
 async def db_session():
     """Provide a test database session."""
     engine = create_async_engine("sqlite+aiosqlite:///./test.db")
     # Create tables, yield session, cleanup
     # ...
+
 
 @pytest.fixture
 async def client(db_session):
@@ -1010,27 +1050,25 @@ Test full workflows combining frontend and backend:
 async def test_upload_and_classify_image(client, db_session):
     # Create project
     project = await create_test_project(db_session)
-    
+
     # Upload image
-    files = {'file': ('test.jpg', image_bytes, 'image/jpeg')}
+    files = {"file": ("test.jpg", image_bytes, "image/jpeg")}
     response = await client.post(
-        f"/api/images/upload?project_id={project.id}",
-        files=files
+        f"/api/images/upload?project_id={project.id}", files=files
     )
     assert response.status_code == 201
     image = response.json()
-    
+
     # Create class
     class_response = await client.post(
-        f"/api/projects/{project.id}/classes",
-        json={"name": "Test Class"}
+        f"/api/projects/{project.id}/classes", json={"name": "Test Class"}
     )
     image_class = class_response.json()
-    
+
     # Classify image
     classify_response = await client.post(
         f"/api/images/{image['id']}/classifications",
-        json={"class_id": image_class["id"]}
+        json={"class_id": image_class["id"]},
     )
     assert classify_response.status_code == 201
 ```
@@ -1067,26 +1105,23 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 
 from core.models import Project
-from core.schemas import ProjectCreate
+from schemas.projects import ProjectCreate
+
 
 # Type hints
-async def get_project(
-    db: AsyncSession,
-    project_id: UUID
-) -> Optional[Project]:
+async def get_project(db: AsyncSession, project_id: UUID) -> Optional[Project]:
     """Get a project by ID.
-    
+
     Args:
         db: Database session
         project_id: UUID of the project
-        
+
     Returns:
         Project if found, None otherwise
     """
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
+    result = await db.execute(select(Project).where(Project.id == project_id))
     return result.scalar_one_or_none()
+
 
 # Constants in CAPS
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -1124,16 +1159,11 @@ async function loadData() {
 
 ### Linting
 
-**Python:**
+**Python:** the project uses Ruff (lint and format) and mypy, not black/isort/flake8. CI enforces both on `backend/services`, `backend/repositories`, `backend/schemas`, `backend/utils/metadata_values.py`, and `backend/metadata`; expand mypy's scope in `pyproject.toml` as more modules stabilize.
 ```bash
-# Format with black
-black backend/
-
-# Sort imports
-isort backend/
-
-# Lint with flake8
-flake8 backend/
+ruff check <changed files>
+ruff format <changed files>
+mypy
 ```
 
 **JavaScript:**
@@ -1164,15 +1194,16 @@ npm run format
 ```python
 from pydantic import BaseModel, validator, Field
 
+
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
     meta_group_id: str = Field(..., min_length=1, max_length=255)
-    
-    @validator('name')
+
+    @validator("name")
     def name_must_not_be_empty(cls, v):
         if not v or not v.strip():
-            raise ValueError('Name cannot be empty')
+            raise ValueError("Name cannot be empty")
         return v.strip()
 ```
 
@@ -1182,9 +1213,7 @@ SQLAlchemy ORM protects against SQL injection. Always use:
 
 ```python
 # SAFE - parameterized
-result = await db.execute(
-    select(Project).where(Project.id == project_id)
-)
+result = await db.execute(select(Project).where(Project.id == project_id))
 
 # SAFE - ORM methods
 project = Project(name=name, description=description)
@@ -1201,24 +1230,25 @@ Validate uploaded files:
 ```python
 from utils.file_security import validate_file_type
 
-ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif'}
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
 
 async def upload_image(file: UploadFile):
     # Check file size
     contents = await file.read()
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(400, "File too large")
-    
+
     # Check file extension
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, "Invalid file type")
-    
+
     # Validate MIME type
-    if not file.content_type.startswith('image/'):
+    if not file.content_type.startswith("image/"):
         raise HTTPException(400, "Not an image file")
-    
+
     # Proceed with upload
     # ...
 ```

@@ -60,7 +60,7 @@ See [Configuration Guide](configuration.md) for detailed environment variable do
 ### Step 3: Build Docker Image
 
 ```bash
-podman build -t vista:latest .
+podman build --ignorefile Dockerfile.dockerignore -t vista:latest .
 ```
 
 ### Step 4: Start Infrastructure
@@ -103,7 +103,7 @@ podman ps
 podman logs vista
 
 # Test health endpoint
-curl http://localhost:8000/health
+curl http://localhost:8000/api/health
 ```
 
 ## Kubernetes Deployment
@@ -210,6 +210,14 @@ helm install vista ./vista \
   --set image.tag=latest \
   --set postgresql.enabled=true \
   --set minio.enabled=true
+
+# Or updated install
+helm install --namespace vista-tk-dev -f .\helm\dev-values.yaml vista-tk helm/  
+```
+
+## Update appplication using helm upgrade
+```bash
+helm upgrade --namespace vista-tk-prod -f helm/prod-values.yaml --install --force-conflicts --take-ownership vista-tk helm/
 ```
 
 ## Manual Installation
@@ -334,7 +342,7 @@ podman-compose -f podman-compose.production.yml up -d
 git pull origin main
 
 # Rebuild image
-podman build -t vista:latest .
+podman build --ignorefile Dockerfile.dockerignore -t vista:latest .
 
 # Run migrations
 podman run --rm \
@@ -359,7 +367,7 @@ podman run -d \
 
 ```bash
 # Update image
-podman build -t vista:v1.1.0 .
+podman build --ignorefile Dockerfile.dockerignore -t vista:v1.1.0 .
 podman push your-registry/vista:v1.1.0
 
 # Update deployment
