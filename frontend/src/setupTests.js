@@ -3,6 +3,18 @@
 // expect(element).toHaveTextContent(/react/i)
 // learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
+import { cleanup } from '@testing-library/react';
+
+// The real factory uses `new URL(..., import.meta.url)`, which Jest cannot parse.
+// jsdom has no Worker, so this throws and the viewer takes its unavailable path
+// unless a test installs a Worker stub on the global object.
+jest.mock('./components/pt3SplatAssetWorker', () => ({
+  createSplatWorker: () => {
+    const WorkerImpl = global.Worker;
+    if (typeof WorkerImpl !== 'function') throw new Error('Worker is not available');
+    return new WorkerImpl('pt3SplatAsset.worker.js');
+  },
+}));
 
 jest.mock('flexlayout-react', () => {
   const React = require('react');
@@ -22,13 +34,18 @@ jest.mock('flexlayout-react', () => {
   };
 
   const Actions = {
+    SELECT_TAB: 'FlexLayout_SelectTab',
     ADJUST_WEIGHTS: 'FlexLayout_AdjustWeights',
   };
 
-  function TestTabSet({ tabset, factory }) {
+  function TestTabSet({ tabset, factory, onAction, onModelChange, model }) {
     const initialSelected = Number.isFinite(tabset.selected) ? tabset.selected : 0;
     const [selected, setSelected] = React.useState(initialSelected);
     const tabs = Array.isArray(tabset.children) ? tabset.children : [];
+    React.useEffect(() => {
+      const nextSelected = Number.isFinite(tabset.selected) ? tabset.selected : 0;
+      setSelected((current) => (current === nextSelected ? current : nextSelected));
+    }, [tabset.selected]);
     const selectedTab = tabs[Math.min(selected, Math.max(0, tabs.length - 1))];
 
     return (
@@ -41,7 +58,12 @@ jest.mock('flexlayout-react', () => {
               className={`flexlayout__tab_button ${index === selected ? 'flexlayout__tab_button--selected' : ''}`}
               role="tab"
               aria-selected={index === selected}
-              onClick={() => setSelected(index)}
+              onClick={() => {
+                setSelected(index);
+                const action = { type: Actions.SELECT_TAB, data: { tabNode: tab.id } };
+                const nextAction = onAction ? onAction(action) : action;
+                if (nextAction) onModelChange?.(model, nextAction);
+              }}
             >
               {tab.name}
             </button>
@@ -59,7 +81,7 @@ jest.mock('flexlayout-react', () => {
     );
   }
 
-  function Layout({ model, factory, onModelChange }) {
+  function Layout({ model, factory, onAction, onModelChange }) {
     const json = model.toJson();
     const tabsets = Array.isArray(json?.layout?.children) ? json.layout.children : [];
 
@@ -92,7 +114,13 @@ jest.mock('flexlayout-react', () => {
                 splitter
               </button>
             )}
-            <TestTabSet tabset={tabset} factory={factory} />
+            <TestTabSet
+              tabset={tabset}
+              factory={factory}
+              onAction={onAction}
+              onModelChange={onModelChange}
+              model={model}
+            />
           </React.Fragment>
         ))}
       </div>
@@ -139,59 +167,202 @@ if (typeof HTMLCanvasElement !== 'undefined') {
   });
 }
 
-// Reduce noisy console output from React Router future-flag warnings
-// and expected app logs during tests, while preserving other warnings/errors.
+// Keep every test hermetic. Individual suites used to restore fetch, fake
+// timers, and viewport mutations inconsistently, so one early failure could
+// change the behavior of every test that followed it.
+const originalConsole = {
+  error: console.error,
+  log: console.log,
+  warn: console.warn,
+};
+const viewportProperties = ['innerWidth', 'innerHeight', 'devicePixelRatio'];
+let suiteEnvironment;
+let reactActWarnings = [];
+let unexpectedConsoleErrors = [];
+let unhandledRejections = [];
+let unhandledRejectionListener = null;
 
-const originalWarn = console.warn;
-const originalLog = console.log;
-const originalError = console.error;
+const propertyDescriptor = (target, property) => (
+  Object.getOwnPropertyDescriptor(target, property)
+);
 
-beforeAll(() => {
-	console.warn = (...args) => {
-		const first = args[0];
-		const message = typeof first === 'string' ? first : '';
+const restoreProperty = (target, property, descriptor) => {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else {
+    delete target[property];
+  }
+};
 
-		if (message.includes('React Router Future Flag Warning')) {
-			return;
-		}
+const messageFrom = (args) => (
+  typeof args[0] === 'string' ? args[0] : ''
+);
 
-		return originalWarn(...args);
-	};
+const isReactActWarning = (args) => (
+  messageFrom(args).includes('not wrapped in act')
+);
 
-	console.log = (...args) => {
-		const first = args[0];
-		const message = typeof first === 'string' ? first : '';
+const rememberReactActWarning = (args) => {
+  reactActWarnings.push(new Error(args.map((arg) => String(arg)).join(' ')));
+};
 
-		if (
-			message.startsWith('Fetching images for project:') ||
-			message.startsWith('Authentication is disabled or user is not logged in') ||
-			message.startsWith('Starting download for image') ||
-			message.startsWith('Trying endpoint:') ||
-			message.startsWith('Direct image fetch failed') ||
-			message.startsWith('Download completed successfully:') ||
-			message.startsWith('App render count:')
-		) {
-			return;
-		}
+const formatConsoleArgs = (args) => (
+  args.map((arg) => (
+    arg instanceof Error ? (arg.stack || arg.message) : String(arg)
+  )).join(' ')
+);
 
-		return originalLog(...args);
-	};
+const usingFakeTimers = () => {
+  const timer = global.setTimeout;
+  return Boolean(
+    jest.isMockFunction(timer)
+    || (timer && Object.prototype.hasOwnProperty.call(timer, 'clock')),
+  );
+};
 
-	console.error = (...args) => {
-		const first = args[0];
-		const message = typeof first === 'string' ? first : '';
+const installConsoleGuards = () => {
+  console.warn = (...args) => {
+    if (messageFrom(args).includes('React Router Future Flag Warning')) {
+      return;
+    }
+    return originalConsole.warn(...args);
+  };
 
-		if (message.startsWith('Failed to load image with ID:') ||
-			message.startsWith('Failed to load review statuses:')) {
-			return;
-		}
+  console.log = (...args) => {
+    const message = messageFrom(args);
+    if (
+      message.startsWith('Fetching images for project:') ||
+      message.startsWith('Authentication is disabled or user is not logged in') ||
+      message.startsWith('Starting download for image') ||
+      message.startsWith('Trying endpoint:') ||
+      message.startsWith('Direct image fetch failed') ||
+      message.startsWith('Download completed successfully:') ||
+      message.startsWith('App render count:')
+    ) {
+      return;
+    }
+    return originalConsole.log(...args);
+  };
 
-		return originalError(...args);
-	};
+  console.error = (...args) => {
+    if (isReactActWarning(args)) {
+      rememberReactActWarning(args);
+      return;
+    }
+    unexpectedConsoleErrors.push(new Error(formatConsoleArgs(args)));
+    return originalConsole.error(...args);
+  };
+};
+
+beforeEach(() => {
+  // This hook runs after suite-level beforeAll hooks and before file-level
+  // beforeEach hooks. Capture the suite baseline once so module-level mocks are
+  // preserved while per-test replacements are always discarded.
+  if (!suiteEnvironment) {
+    suiteEnvironment = {
+      fetch: propertyDescriptor(global, 'fetch'),
+      viewport: Object.fromEntries(
+        viewportProperties.map((property) => [
+          property,
+          propertyDescriptor(window, property),
+        ]),
+      ),
+    };
+  }
+  reactActWarnings = [];
+  unexpectedConsoleErrors = [];
+  unhandledRejections = [];
+  unhandledRejectionListener = (event) => {
+    const reason = event?.reason;
+    unhandledRejections.push(
+      reason instanceof Error
+        ? reason
+        : new Error(`Unhandled promise rejection: ${String(reason)}`),
+    );
+  };
+  window.addEventListener('unhandledrejection', unhandledRejectionListener);
+  installConsoleGuards();
+});
+
+afterEach(() => {
+  // Unmount first so lifecycle warnings raised during cleanup are attributed to
+  // the test that created the component.
+  cleanup();
+
+  // Tests that intentionally spy on console.error still cannot hide React's
+  // lifecycle warning from the harness.
+  if (jest.isMockFunction(console.error)) {
+    console.error.mock.calls
+      .filter(isReactActWarning)
+      .forEach(rememberReactActWarning);
+  }
+
+  const actWarnings = [...reactActWarnings];
+  const consoleErrors = [...unexpectedConsoleErrors];
+  const rejectionErrors = [...unhandledRejections];
+  let pendingTimerCount = 0;
+
+  if (unhandledRejectionListener) {
+    window.removeEventListener('unhandledrejection', unhandledRejectionListener);
+    unhandledRejectionListener = null;
+  }
+
+  // Count and clear queued fake timers without executing them. This keeps
+  // teardown bounded even when a leaked callback recursively schedules more.
+  if (usingFakeTimers()) {
+    pendingTimerCount = jest.getTimerCount();
+    if (pendingTimerCount > 0) {
+      jest.clearAllTimers();
+    }
+  }
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+  jest.clearAllMocks();
+
+  restoreProperty(global, 'fetch', suiteEnvironment.fetch);
+  viewportProperties.forEach((property) => {
+    restoreProperty(window, property, suiteEnvironment.viewport[property]);
+  });
+
+  console.warn = originalConsole.warn;
+  console.log = originalConsole.log;
+  console.error = originalConsole.error;
+
+  const testName = expect.getState().currentTestName || 'Unknown test';
+  const failures = [];
+  if (actWarnings.length > 0) {
+    failures.push(
+      `React act warning in "${testName}":\n${actWarnings
+        .map((warning) => warning.message)
+        .join('\n')}`,
+    );
+  }
+  if (consoleErrors.length > 0) {
+    failures.push(
+      `Unexpected console.error in "${testName}":\n${consoleErrors
+        .map((error) => error.message)
+        .join('\n')}`,
+    );
+  }
+  if (rejectionErrors.length > 0) {
+    failures.push(
+      `Unhandled promise rejection in "${testName}":\n${rejectionErrors
+        .map((error) => error.stack || error.message)
+        .join('\n')}`,
+    );
+  }
+  if (pendingTimerCount > 0) {
+    failures.push(
+      `Fake timer leak in "${testName}": ${pendingTimerCount} timer(s) remained queued after cleanup.`,
+    );
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.join('\n\n'));
+  }
 });
 
 afterAll(() => {
-	console.warn = originalWarn;
-	console.log = originalLog;
-	console.error = originalError;
+  console.warn = originalConsole.warn;
+  console.log = originalConsole.log;
+  console.error = originalConsole.error;
 });

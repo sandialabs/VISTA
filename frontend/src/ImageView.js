@@ -1,585 +1,190 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import './App.css';
 
-// Import components
 import ImageDisplay from './components/ImageDisplay';
-import ImageMetadata from './components/ImageMetadata';
-import CompactImageClassifications from './components/CompactImageClassifications';
-import ImageComments from './components/ImageComments';
 import ImageDeletionControls from './components/ImageDeletionControls';
-import MLAnalysisPanel from './components/MLAnalysisPanel';
-import OverlayControls from './components/OverlayControls';
-import MLDebugOutputs from './components/MLDebugOutputs';
-import CalibrationManager from './components/CalibrationManager';
-import MeasurementList from './components/MeasurementList';
-import ReviewPanel from './components/ReviewPanel';
-import ImageGroupPanel from './components/ImageGroupPanel';
-import { loadGalleryState, applyGalleryFilters, sortImages } from './utils/galleryState';
+import { copyCurrentShareUrl } from './utils/shareLink';
+import ImageNavigationSettings from './features/imageView/ImageNavigationSettings';
+import ImageViewHeader from './features/imageView/ImageViewHeader';
+import ImageViewSidebar from './features/imageView/ImageViewSidebar';
+import useImageAnalysisSelection from './features/imageView/useImageAnalysisSelection';
+import useImageMeasurements from './features/imageView/useImageMeasurements';
+import useImageNavigation from './features/imageView/useImageNavigation';
+import useImageProjectData from './features/imageView/useImageProjectData';
+import useImageRecordLoader from './features/imageView/useImageRecordLoader';
+import useImageViewPreferences from './features/imageView/useImageViewPreferences';
+import useOptionalCurrentUser from './features/imageView/useOptionalCurrentUser';
+import useResizableSidebar from './features/imageView/useResizableSidebar';
 
 function ImageView() {
   const { imageId } = useParams();
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('project');
   const navigate = useNavigate();
-
-  // State variables
-  const [image, setImage] = useState(null);
-  const [projectImages, setProjectImages] = useState([]);
-  const [currentImageIndex, setCurrentImageIndex] = useState(-1);
-  const [classes, setClasses] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isTransitioning, setIsTransitioning] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [sidebarWidth, setSidebarWidth] = useState(350);
-  const [isResizing, setIsResizing] = useState(false);
-  const [projectArchived, setProjectArchived] = useState(null);
-
-  // Navigation settings - restore from localStorage
-  const [skipDeletedImages, setSkipDeletedImages] = useState(() => {
-    const saved = localStorage.getItem('skipDeletedImages');
-    return saved !== null ? JSON.parse(saved) : true; // Default to true (skip deleted)
+  const routeKey = `${projectId || ''}:${imageId || ''}`;
+  const routeInstanceIdentityRef = useRef({
+    epoch: 0,
+    instanceKey: '',
+    routeKey: null,
   });
-
-  // ML Analysis state - restore from localStorage if available
-  const [selectedAnalysis, setSelectedAnalysis] = useState(null);
-  const [selectedAnnotations, setSelectedAnnotations] = useState([]);
-  const [overlayOptions, setOverlayOptions] = useState(() => {
-    const saved = localStorage.getItem('mlOverlayOptions');
-    if (saved) {
-      try {
-        return { ...JSON.parse(saved), bitmapAvailable: false };
-      } catch (e) {
-        console.error('Failed to parse saved overlay options:', e);
-      }
-    }
-    return {
-      showBoxes: true,
-      showHeatmap: false,
-      opacity: 0.7,
-      viewMode: 'overlay',
-      bitmapAvailable: false
+  if (routeInstanceIdentityRef.current.routeKey !== routeKey) {
+    const epoch = routeInstanceIdentityRef.current.epoch + 1;
+    routeInstanceIdentityRef.current = {
+      epoch,
+      instanceKey: `${routeKey}#${epoch}`,
+      routeKey,
     };
+  }
+  const routeInstanceKey = routeInstanceIdentityRef.current.instanceKey;
+  const activeRouteInstanceKeyRef = useRef(routeInstanceKey);
+  activeRouteInstanceKeyRef.current = routeInstanceKey;
+
+  // loaderActionsRef breaks the one remaining circular dependency:
+  // useImageProjectData and useImageMeasurements need the loader's setError
+  // and updateCurrentImage, but the loader is only callable after
+  // useImageMeasurements has produced the measurement glue it depends on.
+  // The stable callbacks below read the ref only inside callbacks that run
+  // after mount, by which point the assignment near the bottom of this
+  // component has already run, mirroring the existing
+  // activeRouteInstanceKeyRef.current assignment pattern used elsewhere.
+  const loaderActionsRef = useRef({
+    setError: () => {},
+    updateCurrentImage: () => {},
   });
-  const [autoSelectLatest, setAutoSelectLatest] = useState(() => {
-    const saved = localStorage.getItem('mlAutoSelectLatest');
-    return saved === 'true' || saved === null; // Default to true
+  const reportError = useCallback((message) => {
+    loaderActionsRef.current.setError(message);
+  }, []);
+  const applyImageUpdate = useCallback((nextImageOrUpdater) => {
+    loaderActionsRef.current.updateCurrentImage(nextImageOrUpdater);
+  }, []);
+
+  const {
+    classes,
+    projectArchived,
+  } = useImageProjectData({ projectId, setError: reportError });
+  const currentUser = useOptionalCurrentUser();
+  const {
+    handleMouseDown,
+    isResizing,
+    sidebarWidth,
+  } = useResizableSidebar();
+  const [shareLinkMessage, setShareLinkMessage] = React.useState(null);
+
+  const handleCopySessionLink = useCallback(async () => {
+    try {
+      await copyCurrentShareUrl();
+      setShareLinkMessage({ type: 'success', text: 'Link copied to clipboard.' });
+    } catch (err) {
+      setShareLinkMessage({
+        type: 'error',
+        text: err?.message || 'Unable to copy link. Please copy the browser URL manually.',
+      });
+    }
+  }, []);
+
+  const {
+    autoSelectLatest,
+    overlayOptions,
+    setAutoSelectLatest,
+    setOverlayOptions,
+    setSkipDeletedImages,
+    skipDeletedImages,
+  } = useImageViewPreferences();
+
+  const {
+    handleMLAnalysisSelect,
+    selectedAnalysis,
+    selectedAnnotations,
+  } = useImageAnalysisSelection({
+    routeInstanceKey,
+    setOverlayOptions,
   });
 
-  // Measurement state
-  const [calibration, setCalibration] = useState(null);
-  const [measurements, setMeasurements] = useState([]);
-  const [measurementActive, setMeasurementActive] = useState(false);
-  const [selectedMeasurementId, setSelectedMeasurementId] = useState(null);
-  const [visibleMeasurementIds, setVisibleMeasurementIds] = useState(null);
+  const {
+    glue: measurementsGlue,
+    handleDeleteMeasurement,
+    handleRenameMeasurement,
+    handleSaveMeasurement,
+    handleToggleVisibility,
+    measurementActive,
+    measurements,
+    selectedMeasurementId,
+    setRouteMeasurementActive,
+    setRouteSelectedMeasurementId,
+    visibleMeasurementIds,
+  } = useImageMeasurements({
+    activeRouteInstanceKeyRef,
+    imageId,
+    projectArchived,
+    projectId,
+    routeInstanceKey,
+    setError: reportError,
+    updateCurrentImage: applyImageUpdate,
+  });
 
-  // ML analysis selection handler
-  const handleMLAnalysisSelect = useCallback((data) => {
-    if (data && data.analysis) {
-      setSelectedAnalysis(data.analysis);
-      setSelectedAnnotations(data.annotations || []);
-      // Check if any bitmap artifacts are available (heatmap, segmentation, mask)
-      const hasBitmap = (data.annotations || []).some(a =>
-        a.storage_path && ['heatmap', 'segmentation', 'mask'].includes(a.annotation_type)
-      );
-      setOverlayOptions(prev => ({ ...prev, bitmapAvailable: hasBitmap }));
+  const {
+    calibration,
+    error,
+    image,
+    loading,
+    setError,
+    setRouteCalibration,
+    setRouteError,
+    setRouteLoading,
+    updateCurrentImage,
+  } = useImageRecordLoader({
+    activeRouteInstanceKeyRef,
+    imageId,
+    measurementsGlue,
+    projectId,
+    routeInstanceKey,
+  });
+  loaderActionsRef.current = { setError, updateCurrentImage };
+
+  const handleBack = useCallback(() => {
+    if (image && image.group_id) {
+      navigate(`/project/${projectId}/group/${image.group_id}`);
     } else {
-      setSelectedAnalysis(null);
-      setSelectedAnnotations([]);
-      setOverlayOptions(prev => ({ ...prev, bitmapAvailable: false }));
+      navigate(`/project/${projectId}`);
     }
-  }, []);
+  }, [image, navigate, projectId]);
 
-  // Load image data
-  const loadImageData = useCallback(async () => {
-    try {
-      setLoading(true);
-      
-      // Try to fetch image metadata directly first
-      let response = await fetch(`/api/images/${imageId}`);
-      
-      if (!response.ok) {
-        // If direct fetch fails (likely because image is deleted), 
-        // try to find it through the project endpoint with deleted images included
-        console.log('Direct image fetch failed, trying project endpoint with deleted images...');
-        const projectResponse = await fetch(`/api/projects/${projectId}/images?include_deleted=true`);
-        
-        if (!projectResponse.ok) {
-          throw new Error(`Failed to fetch project images: ${projectResponse.status}`);
-        }
-        
-        const projectImages = await projectResponse.json();
-        const imageData = projectImages.find(img => img.id === imageId);
-        
-        if (!imageData) {
-          throw new Error('Image not found in project');
-        }
-        
-        setImage(imageData);
-        // Update document title
-        document.title = `${imageData.filename || 'Image'} - Image Manager`;
-      } else {
-        const imageData = await response.json();
-        setImage(imageData);
-        // Update document title
-        document.title = `${imageData.filename || 'Image'} - Image Manager`;
-      }
-      
-    } catch (error) {
-      console.error('Error loading image data:', error);
-      setError('Failed to load image. Please try again later.');
-    } finally {
-      setLoading(false);
-    }
-  }, [imageId, projectId]);
-
-  // Load project images for navigation
-  const loadProjectImages = useCallback(async (groupId) => {
-    try {
-      const params = new URLSearchParams({ include_deleted: 'true' });
-      const urlGalleryKey = searchParams.get('galleryKey');
-      const isUngroupedGallery = urlGalleryKey && urlGalleryKey.endsWith('_ungrouped');
-
-      if (isUngroupedGallery) {
-        params.set('ungrouped', 'true');
-      } else if (groupId) {
-        params.set('group_id', groupId);
-      }
-      const response = await fetch(`/api/projects/${projectId}/images?${params}`);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-
-      const images = await response.json();
-
-      if (!Array.isArray(images)) {
-        console.error('Server response is not an array:', images);
-        throw new Error('Invalid server response: expected an array of images');
-      }
-
-      // Determine the gallery state key for this view.
-      // Prefer the explicit galleryKey from the URL (set by ImageGallery on click).
-      // Fall back to a group-derived key, then the project key.
-      let galleryStateKey;
-      if (urlGalleryKey) {
-        galleryStateKey = urlGalleryKey;
-      } else if (groupId) {
-        galleryStateKey = `${projectId}_group_${groupId}`;
-      } else {
-        galleryStateKey = projectId;
-      }
-
-      // Load saved gallery filter/sort state and apply it for consistent navigation
-      let navImages;
-      try {
-        const galleryState = loadGalleryState(galleryStateKey);
-
-        // Fetch review statuses if a non-default review filter is active
-        let reviewStatuses = null;
-        if (galleryState.reviewFilter && galleryState.reviewFilter !== 'all') {
-          try {
-            const reviewResp = await fetch(`/api/projects/${projectId}/image-review-statuses`);
-            if (reviewResp.ok) {
-              reviewStatuses = await reviewResp.json();
-            } else {
-              console.warn('Non-OK response when loading review statuses for navigation filter:', reviewResp.status);
-            }
-          } catch (e) {
-            console.warn('Failed to load review statuses for navigation filter:', e);
-          }
-        }
-
-        // If review statuses are unavailable, bypass the review filter to avoid empty navImages
-        const effectiveGalleryState =
-          reviewStatuses != null
-            ? { ...galleryState, reviewStatuses }
-            : { ...galleryState, reviewFilter: 'all', reviewStatuses: null };
-
-        navImages = applyGalleryFilters(images, effectiveGalleryState);
-      } catch (e) {
-        // If anything goes wrong reading saved state, fall back to default date sort
-        navImages = sortImages(images, 'date');
-      }
-
-      setProjectImages(navImages);
-
-      // Find the index of the current image in the filtered/sorted array
-      const index = navImages.findIndex(img => img.id === imageId);
-      setCurrentImageIndex(index);
-
-    } catch (error) {
-      console.error('Error loading project images:', error);
-      setError('Failed to load project images for navigation. Please try again later.');
-    }
-  }, [projectId, imageId, searchParams]);
-
-  // Save skip deleted preference to localStorage
-  useEffect(() => {
-    localStorage.setItem('skipDeletedImages', JSON.stringify(skipDeletedImages));
-  }, [skipDeletedImages]);
-
-  // Load classes for the project
-  const loadClasses = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/projects/${projectId}/classes`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      
-      const classesData = await response.json();
-      setClasses(classesData);
-      
-    } catch (error) {
-      console.error('Error loading classes:', error);
-      setError('Failed to load classes. Please try again later.');
-    }
-  }, [projectId]);
-
-  // Initialize data on component mount
-  useEffect(() => {
-    if (!imageId || !projectId) {
-      setError('Image ID or Project ID is missing.');
-      return;
-    }
-    
-    // Fetch the current user
-    fetch('/api/users/me')
-      .then(response => {
-        if (!response.ok) {
-          // If we get a 401, it's expected when authentication is disabled
-          if (response.status === 401) {
-            console.log("Authentication is disabled or user is not logged in");
-            return null;
-          }
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(userData => {
-        if (userData) {
-          setCurrentUser(userData);
-        }
-      })
-      .catch(err => {
-        console.error("Failed to fetch current user:", err);
-      });
-    
-    loadImageData();
-    loadClasses();
-  }, [imageId, projectId, loadImageData, loadClasses]);
-
-  // Fetch project archive status (only when projectId changes, not on every image navigation)
-  useEffect(() => {
-    if (projectId) {
-      fetch(`/api/projects/${projectId}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (data) setProjectArchived(!!data.is_archived);
-        })
-        .catch(() => {});
-    }
-  }, [projectId]);
-
-  // Load project images for navigation once we know the current image's group
-  useEffect(() => {
-    if (image && projectId) {
-      loadProjectImages(image.group_id || null);
-    }
-  }, [image?.id, image?.group_id, projectId, loadProjectImages]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Build query string for navigation, preserving galleryKey if present
-  const buildNavQuery = useCallback(() => {
-    const params = new URLSearchParams({ project: projectId });
-    const galleryKey = searchParams.get('galleryKey');
-    if (galleryKey) params.set('galleryKey', galleryKey);
-    return params.toString();
-  }, [projectId, searchParams]);
-
-  // Navigate to previous image with transition
-  const navigateToPreviousImage = useCallback(() => {
-    let targetIndex = currentImageIndex - 1;
-
-    // Skip deleted images if option is enabled
-    if (skipDeletedImages) {
-      while (targetIndex >= 0 && projectImages[targetIndex]?.deleted_at) {
-        targetIndex--;
-      }
-    }
-
-    if (targetIndex >= 0) {
-      setIsTransitioning(true);
-      setTimeout(() => {
-        const prevImage = projectImages[targetIndex];
-        navigate(`/view/${prevImage.id}?${buildNavQuery()}`);
-      }, 300);
-    }
-  }, [currentImageIndex, projectImages, navigate, buildNavQuery, skipDeletedImages]);
-
-  // Navigate to next image with transition
-  const navigateToNextImage = useCallback(() => {
-    let targetIndex = currentImageIndex + 1;
-
-    // Skip deleted images if option is enabled
-    if (skipDeletedImages) {
-      while (targetIndex < projectImages.length && projectImages[targetIndex]?.deleted_at) {
-        targetIndex++;
-      }
-    }
-
-    if (targetIndex < projectImages.length) {
-      setIsTransitioning(true);
-      setTimeout(() => {
-        const nextImage = projectImages[targetIndex];
-        navigate(`/view/${nextImage.id}?${buildNavQuery()}`);
-      }, 300);
-    }
-  }, [currentImageIndex, projectImages, navigate, buildNavQuery, skipDeletedImages]);
-
-  // Reset transition state when image changes (but keep ML settings)
-  useEffect(() => {
-    setIsTransitioning(false);
-    // Clear selected analysis so MLAnalysisPanel can auto-select latest if enabled
-    setSelectedAnalysis(null);
-    setSelectedAnnotations([]);
-    setOverlayOptions(prev => ({
-      ...prev,
-      bitmapAvailable: false
-    }));
-    // Clear measurement mode when image changes
-    setMeasurementActive(false);
-    setSelectedMeasurementId(null);
-  }, [imageId]);
-
-  // Load measurements when image changes (syncs state with image metadata)
-  useEffect(() => {
-    // Check both metadata and metadata_ for compatibility
-    const metadata = image?.metadata || image?.metadata_;
-
-    if (metadata?.measurements) {
-      setMeasurements(metadata.measurements);
-      const ids = metadata.measurements.map(m => m.id);
-      setVisibleMeasurementIds(ids);
-    } else {
-      setMeasurements([]);
-      setVisibleMeasurementIds(null);
-    }
-  }, [imageId, image]);
-
-  // Save overlay options to localStorage when they change
-  useEffect(() => {
-    const { bitmapAvailable, ...persistentOptions } = overlayOptions;
-    localStorage.setItem('mlOverlayOptions', JSON.stringify(persistentOptions));
-  }, [overlayOptions]);
-
-  // Save auto-select preference to localStorage
-  useEffect(() => {
-    localStorage.setItem('mlAutoSelectLatest', autoSelectLatest.toString());
-  }, [autoSelectLatest]);
-
-  // Handle resize functionality
-  const handleMouseDown = useCallback(() => {
-    setIsResizing(true);
-  }, []);
-
-  const handleMouseMove = useCallback((e) => {
-    if (!isResizing) return;
-
-    const newWidth = e.clientX;
-    const minWidth = 250;
-    const maxWidth = window.innerWidth * 0.6; // Max 60% of screen width
-
-    if (newWidth >= minWidth && newWidth <= maxWidth) {
-      setSidebarWidth(newWidth);
-    }
-  }, [isResizing]);
-
-  const handleMouseUp = useCallback(() => {
-    setIsResizing(false);
-  }, []);
-
-  // Add global mouse event listeners for resizing
-  useEffect(() => {
-    if (isResizing) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'ew-resize';
-      document.body.style.userSelect = 'none';
-
-      return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      };
-    }
-  }, [isResizing, handleMouseMove, handleMouseUp]);
-
-
-  // Keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'ArrowLeft') {
-        navigateToPreviousImage();
-      } else if (e.key === 'ArrowRight') {
-        navigateToNextImage();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [currentImageIndex, projectImages.length, navigateToNextImage, navigateToPreviousImage]);
-
-  // Measurement handlers
-  const handleSaveMeasurement = async (measurement) => {
-    // Save original state for potential rollback
-    const originalMeasurements = [...measurements];
-    const originalVisibleIds = visibleMeasurementIds ? [...visibleMeasurementIds] : null;
-
-    // Calculate updated measurements
-    const updatedMeasurements = [...measurements, measurement];
-
-    // Optimistic update
-    setMeasurements(updatedMeasurements);
-    setVisibleMeasurementIds(updatedMeasurements.map(m => m.id));
-
-    try {
-      const response = await fetch(`/api/images/${imageId}/metadata`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: 'measurements',
-          value: updatedMeasurements
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save measurement');
-      }
-
-      const updatedImage = await response.json();
-      setImage(updatedImage);
-    } catch (err) {
-      console.error('Error saving measurement:', err);
-      setError('Failed to save measurement. Please try again.');
-      // Revert to original state on error
-      setMeasurements(originalMeasurements);
-      setVisibleMeasurementIds(originalVisibleIds);
-    }
-  };
-
-  const handleDeleteMeasurement = async (measurementId) => {
-    // Save original state for potential rollback
-    const originalMeasurements = [...measurements];
-    const originalVisibleIds = visibleMeasurementIds ? [...visibleMeasurementIds] : null;
-
-    const updatedMeasurements = measurements.filter(m => m.id !== measurementId);
-
-    // Optimistic update
-    setMeasurements(updatedMeasurements);
-    setVisibleMeasurementIds(updatedMeasurements.map(m => m.id));
-
-    try {
-      const response = await fetch(`/api/images/${imageId}/metadata`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: 'measurements',
-          value: updatedMeasurements
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to delete measurement: ${response.status} - ${errorText}`);
-      }
-
-      const updatedImage = await response.json();
-      setImage(updatedImage);
-    } catch (err) {
-      console.error('Error deleting measurement:', err);
-      setError('Failed to delete measurement. Please try again.');
-      // Revert to original state
-      setMeasurements(originalMeasurements);
-      setVisibleMeasurementIds(originalVisibleIds);
-    }
-  };
-
-  const handleRenameMeasurement = async (measurementId, newName) => {
-    // Save original state for potential rollback
-    const originalMeasurements = [...measurements];
-
-    const updatedMeasurements = measurements.map(m =>
-      m.id === measurementId ? { ...m, name: newName } : m
-    );
-
-    // Optimistic update
-    setMeasurements(updatedMeasurements);
-
-    try {
-      const response = await fetch(`/api/images/${imageId}/metadata`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: 'measurements',
-          value: updatedMeasurements
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to rename measurement');
-      }
-
-      const updatedImage = await response.json();
-      setImage(updatedImage);
-    } catch (err) {
-      console.error('Error renaming measurement:', err);
-      setError('Failed to rename measurement. Please try again.');
-      // Revert to original state
-      setMeasurements(originalMeasurements);
-    }
-  };
-
-  const handleToggleVisibility = (measurementId) => {
-    setVisibleMeasurementIds(prev => {
-      if (!prev) return [measurementId];
-      if (prev.includes(measurementId)) {
-        return prev.filter(id => id !== measurementId);
-      } else {
-        return [...prev, measurementId];
-      }
-    });
-  };
+  const {
+    currentImageIndex,
+    isTransitioning,
+    loadProjectImages,
+    navigateToNextImage,
+    navigateToPreviousImage,
+    projectImages,
+  } = useImageNavigation({
+    activeRouteInstanceKeyRef,
+    image,
+    imageId,
+    navigate,
+    projectId,
+    routeInstanceKey,
+    searchParams,
+    setError,
+    skipDeletedImages,
+  });
 
   return (
     <div className="App" style={{ maxWidth: '100%', padding: '0' }}>
-      <header className="view-header-compact">
-        <div className="view-header-content">
-          <button
-            className="btn btn-secondary btn-small"
-            onClick={() => {
-              if (image && image.group_id) {
-                navigate(`/project/${projectId}/group/${image.group_id}`);
-              } else {
-                navigate(`/project/${projectId}`);
-              }
-            }}
-          >
-            ← Back
-          </button>
-          <span className="view-filename">{image ? image.filename : 'Loading...'}</span>
-          {currentUser && (
-            <span className="view-user-info">{currentUser.email}</span>
-          )}
-        </div>
-      </header>
+      <ImageViewHeader
+        currentUser={currentUser}
+        filename={image ? image.filename : 'Loading...'}
+        onBack={handleBack}
+        onCopySessionLink={handleCopySessionLink}
+      />
 
       <div className="container" style={{ maxWidth: '100%', padding: 'var(--space-4)' }}>
+        {shareLinkMessage && (
+          <div className={`alert alert-${shareLinkMessage.type}`} role="status">
+            {shareLinkMessage.text}
+          </div>
+        )}
+
         {projectArchived === true && (
           <div className="archived-project-notice">
             <strong>This project is archived.</strong> It is read-only. Classifications, comments, reviews, and other edits are disabled.
@@ -596,106 +201,37 @@ function ImageView() {
             </button>
           </div>
         )}
-        
+
         <div className="image-view-container">
           <div className="image-view-main">
-            {/* Left sidebar with classification controls, metadata, and comments */}
-            <div
-              className="image-view-sidebar"
-              style={{ width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` }}
-            >
-              {/* Review verification panel */}
-              {image && (
-                <ReviewPanel
-                  imageId={imageId}
-                  readOnly={projectArchived !== false}
-                />
-              )}
-
-              {/* Group assignment panel */}
-              {image && projectId && (
-                <ImageGroupPanel
-                  imageId={imageId}
-                  projectId={projectId}
-                  groupId={image.group_id || null}
-                  onGroupChanged={(newGroupId) => {
-                    setImage(prev => prev ? { ...prev, group_id: newGroupId } : prev);
-                  }}
-                  readOnly={projectArchived !== false}
-                />
-              )}
-
-              {/* Classification controls */}
-              <CompactImageClassifications
-                imageId={imageId}
-                classes={classes}
-                loading={loading}
-                setLoading={setLoading}
-                setError={setError}
-                readOnly={projectArchived !== false}
-              />
-
-
-              <ImageComments
-                imageId={imageId}
-                loading={loading}
-                setLoading={setLoading}
-                setError={setError}
-                readOnly={projectArchived !== false}
-              />
-
-              <ImageMetadata
-                imageId={imageId}
-                image={image}
-                setImage={setImage}
-                loading={loading}
-                setLoading={setLoading}
-                setError={setError}
-              />
-
-              {/* Calibration Manager */}
-              {image && (
-                <CalibrationManager
-                  projectId={projectId}
-                  imageId={imageId}
-                  image={image}
-                  onCalibrationChange={setCalibration}
-                />
-              )}
-
-              {/* Measurement List */}
-              {image && measurements.length > 0 && (
-                <MeasurementList
-                  measurements={measurements}
-                  calibration={calibration}
-                  onDeleteMeasurement={handleDeleteMeasurement}
-                  onRenameMeasurement={handleRenameMeasurement}
-                  onToggleVisibility={handleToggleVisibility}
-                  visibleMeasurementIds={visibleMeasurementIds}
-                  selectedMeasurementId={selectedMeasurementId}
-                  onSelectMeasurement={setSelectedMeasurementId}
-                />
-              )}
-
-              {/* ML Analysis Panel (read-only, only visible when analyses exist) */}
-              {image && (
-                <MLAnalysisPanel
-                  key={imageId}
-                  imageId={imageId}
-                  onSelect={handleMLAnalysisSelect}
-                  autoSelectLatest={autoSelectLatest}
-                  onAutoSelectChange={setAutoSelectLatest}
-                />
-              )}
-
-              {/* Overlay controls (only visible when an analysis is selected) */}
-              {selectedAnalysis && (
-                <OverlayControls
-                  options={overlayOptions}
-                  onChange={setOverlayOptions}
-                />
-              )}
-            </div>
+            <ImageViewSidebar
+              autoSelectLatest={autoSelectLatest}
+              calibration={calibration}
+              classes={classes}
+              handleDeleteMeasurement={handleDeleteMeasurement}
+              handleMLAnalysisSelect={handleMLAnalysisSelect}
+              handleRenameMeasurement={handleRenameMeasurement}
+              handleToggleVisibility={handleToggleVisibility}
+              image={image}
+              imageId={imageId}
+              loading={loading}
+              measurements={measurements}
+              overlayOptions={overlayOptions}
+              projectArchived={projectArchived}
+              projectId={projectId}
+              routeInstanceKey={routeInstanceKey}
+              selectedAnalysis={selectedAnalysis}
+              selectedMeasurementId={selectedMeasurementId}
+              setAutoSelectLatest={setAutoSelectLatest}
+              setOverlayOptions={setOverlayOptions}
+              setRouteCalibration={setRouteCalibration}
+              setRouteError={setRouteError}
+              setRouteLoading={setRouteLoading}
+              setRouteSelectedMeasurementId={setRouteSelectedMeasurementId}
+              sidebarWidth={sidebarWidth}
+              updateCurrentImage={updateCurrentImage}
+              visibleMeasurementIds={visibleMeasurementIds}
+            />
 
             {/* Resizable divider */}
             <div
@@ -709,11 +245,12 @@ function ImageView() {
             {/* Right side with image display */}
             <div className="image-view-content">
               <ImageDisplay
+                key={`display:${routeInstanceKey}`}
                 imageId={imageId}
                 image={image}
                 isTransitioning={isTransitioning}
                 projectId={projectId}
-                setImage={setImage}
+                setImage={updateCurrentImage}
                 refreshProjectImages={loadProjectImages}
                 navigateToPreviousImage={navigateToPreviousImage}
                 navigateToNextImage={navigateToNextImage}
@@ -725,8 +262,8 @@ function ImageView() {
                 calibration={calibration}
                 measurements={measurements}
                 measurementActive={measurementActive}
-                setMeasurementActive={setMeasurementActive}
-                onSaveMeasurement={handleSaveMeasurement}
+                setMeasurementActive={setRouteMeasurementActive}
+                onSaveMeasurement={projectArchived === false ? handleSaveMeasurement : undefined}
                 selectedMeasurementId={selectedMeasurementId}
                 visibleMeasurementIds={visibleMeasurementIds}
               />
@@ -736,53 +273,18 @@ function ImageView() {
           {/* Keep deletion controls at the bottom for all to see (hidden for archived projects) */}
           {projectArchived === false && (
             <ImageDeletionControls
+              key={`deletion:${routeInstanceKey}`}
               projectId={projectId}
               image={image}
-              setImage={setImage}
+              setImage={updateCurrentImage}
               refreshProjectImages={loadProjectImages}
             />
           )}
 
-          {/* Navigation settings */}
-          <div style={{
-            marginTop: '1rem',
-            padding: '0.75rem',
-            background: 'var(--bg-secondary, #f8f9fa)',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color, #dee2e6)'
-          }}>
-            <label style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              userSelect: 'none'
-            }}>
-              <input
-                type="checkbox"
-                checked={skipDeletedImages}
-                onChange={(e) => setSkipDeletedImages(e.target.checked)}
-                style={{ cursor: 'pointer' }}
-              />
-              <span>Skip deleted images when navigating (arrow keys)</span>
-            </label>
-            <div style={{
-              marginTop: '0.5rem',
-              fontSize: '0.85rem',
-              color: 'var(--text-muted, #6c757d)',
-              paddingLeft: '1.5rem'
-            }}>
-              When enabled, arrow key navigation will automatically skip over soft-deleted images.
-            </div>
-          </div>
-
-          {/* Debug ML outputs section */}
-          {imageId && (
-            <div style={{ marginTop: '1rem' }}>
-              <MLDebugOutputs imageId={imageId} />
-            </div>
-          )}
+          <ImageNavigationSettings
+            setSkipDeletedImages={setSkipDeletedImages}
+            skipDeletedImages={skipDeletedImages}
+          />
         </div>
       </div>
     </div>

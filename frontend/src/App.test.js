@@ -2,8 +2,31 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { getProjectTypeLabel } from './projectTypes';
 
-test('renders image management platform header', () => {
+jest.setTimeout(30000);
+
+beforeEach(() => {
+  window.localStorage.removeItem('vista.dashboard.debugMode');
+});
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function projectTypeCardMatcher(projectType) {
+  const expected = `Type: ${getProjectTypeLabel(projectType, { short: true })}`;
+  return (_content, element) => element?.classList?.contains('project-card-meta')
+    && element.textContent.includes(expected);
+}
+
+test('renders image management platform header', async () => {
   global.fetch = jest.fn((input) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url.endsWith('/api/users/me')) {
@@ -17,11 +40,14 @@ test('renders image management platform header', () => {
     }
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
   });
-  render(
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  );
+  await act(async () => {
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
+    await Promise.resolve();
+  });
   const headerElement = screen.getByText('VISTA an Image Management System');
   expect(headerElement).toBeInTheDocument();
 });
@@ -57,19 +83,20 @@ test('renders project dashboard cards with loaded image and part counts from the
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
   });
 
-  render(
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  );
+  await act(async () => {
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
+    await Promise.resolve();
+  });
 
   expect(await screen.findByText('Dashboard Counts Project')).toBeInTheDocument();
   expect(screen.getByText('Images: 7 • Parts: 3')).toBeInTheDocument();
 });
 
-test('stops loading and shows an error when projects request stalls', async () => {
-  jest.useFakeTimers();
-  window.__VISTA_DASHBOARD_FETCH_TIMEOUT_MS = 25;
+test('stops loading and shows an error when projects request fails', async () => {
   global.fetch = jest.fn((input) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url.endsWith('/api/users/me')) {
@@ -79,7 +106,44 @@ test('stops loading and shows an error when projects request stalls', async () =
       return Promise.resolve({ ok: true, status: 200, json: async () => [] });
     }
     if (url.endsWith('/api/projects/')) {
-      return new Promise(() => {});
+      return Promise.reject(new Error('Request timed out after 1ms'));
+    }
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+  });
+
+  await act(async () => {
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
+    await Promise.resolve();
+  });
+
+  expect(await screen.findByText(/Failed to fetch projects: Request timed out/i)).toBeInTheDocument();
+  expect(screen.queryByText('Loading your projects...')).not.toBeInTheDocument();
+});
+
+
+test('dashboard debug mode surfaces detailed persistent project load errors', async () => {
+  jest.useFakeTimers();
+  window.localStorage.setItem('vista.dashboard.debugMode', 'true');
+  global.fetch = jest.fn((input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.endsWith('/api/users/me')) {
+      return Promise.resolve({ ok: false, status: 401, json: async () => ({ detail: 'Unauthorized' }) });
+    }
+    if (url.endsWith('/api/users/me/groups')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+    }
+    if (url.endsWith('/api/projects/')) {
+      return Promise.resolve({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { get: () => 'application/json' },
+        json: async () => ({ detail: 'database relation "projects" does not exist', trace_id: 'trace-500' }),
+      });
     }
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
   });
@@ -90,17 +154,17 @@ test('stops loading and shows an error when projects request stalls', async () =
     </BrowserRouter>
   );
 
-  expect(screen.getByText('Loading your projects...')).toBeInTheDocument();
+  expect(await screen.findByText(/database relation "projects" does not exist/i)).toBeInTheDocument();
+  expect(screen.getByText(/Debug details: GET \/api\/projects\/ failed with HTTP 500 Internal Server Error/i)).toBeInTheDocument();
+  expect(screen.getByText(/trace-500/i)).toBeInTheDocument();
 
-  await act(async () => {
-    jest.advanceTimersByTime(30);
-    await Promise.resolve();
+  act(() => {
+    jest.advanceTimersByTime(6000);
   });
+  expect(screen.getByText(/database relation "projects" does not exist/i)).toBeInTheDocument();
 
-  expect(await screen.findByText(/Failed to fetch projects: Request timed out/i)).toBeInTheDocument();
-  expect(screen.queryByText('Loading your projects...')).not.toBeInTheDocument();
-
-  delete window.__VISTA_DASHBOARD_FETCH_TIMEOUT_MS;
+  await userEvent.setup({ advanceTimers: jest.advanceTimersByTime }).click(screen.getByRole('button', { name: 'Close notification' }));
+  expect(screen.queryByText(/database relation "projects" does not exist/i)).not.toBeInTheDocument();
   jest.useRealTimers();
 });
 
@@ -173,6 +237,8 @@ describe('project type UI exposure', () => {
   });
 
   test('previews and accepts a session Postgres URL from dashboard settings', async () => {
+    const originalClipboard = navigator.clipboard;
+    const writeText = jest.fn(() => Promise.resolve());
     let projects = [];
     global.fetch = jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
@@ -186,6 +252,13 @@ describe('project type UI exposure', () => {
       }
       if (url.endsWith('/api/projects/') && method === 'GET') {
         return Promise.resolve({ ok: true, status: 200, json: async () => projects });
+      }
+      if (url.endsWith('/api/dashboard/settings/version') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ gitlab_commit_sha: 'abc123def4567890abc123def4567890abc123de' }),
+        });
       }
       if (url.endsWith('/api/dashboard/settings/database-url') && method === 'GET') {
         return Promise.resolve({
@@ -241,22 +314,49 @@ describe('project type UI exposure', () => {
     );
 
     await screen.findByText('No projects yet');
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
 
     const settingsModal = screen.getByRole('dialog', { name: 'Dashboard Settings' });
-    expect(await within(settingsModal).findByText('Change Postgres')).toBeInTheDocument();
-    expect(within(settingsModal).getByText('postgresql+asyncpg://old:secret@localhost:5432/vista')).toBeInTheDocument();
+    const settingsBody = settingsModal.querySelector('.dashboard-settings-body');
+    expect(settingsBody).toBeInTheDocument();
+    expect(settingsBody).toHaveAttribute('role', 'region');
+    expect(settingsBody).toHaveAttribute('aria-label', 'Dashboard settings options');
+    expect(settingsBody).toHaveAttribute('tabindex', '0');
+    expect(settingsBody).toHaveClass('dashboard-settings-body');
+    expect(await within(settingsModal).findByText('Version Information')).toBeInTheDocument();
+    expect(await within(settingsModal).findByText('abc123def4567890abc123def4567890abc123de')).toBeInTheDocument();
+    await user.click(within(settingsModal).getByRole('button', { name: 'Copy SHA' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('abc123def4567890abc123def4567890abc123de'));
+    expect(screen.getByText('GitLab commit SHA copied to clipboard.')).toBeInTheDocument();
+    expect(await within(settingsModal).findByText('Debug Mode')).toBeInTheDocument();
+    const debugToggle = within(settingsModal).getByRole('switch', { name: 'Enable dashboard debug mode' });
+    expect(debugToggle).not.toBeChecked();
+    await user.click(debugToggle);
+    expect(window.localStorage.getItem('vista.dashboard.debugMode')).toBe('true');
+    expect(screen.getByText('Dashboard debug mode enabled.')).toBeInTheDocument();
+    expect(await screen.findByText('Change Postgres')).toBeInTheDocument();
+    const refreshedSettingsModal = screen.getByRole('dialog', { name: 'Dashboard Settings' });
+    expect(within(refreshedSettingsModal).getByText('postgresql+asyncpg://old:secret@localhost:5432/vista')).toBeInTheDocument();
 
-    const urlInput = within(settingsModal).getByLabelText('New Postgres URL');
+    expect(within(refreshedSettingsModal).getByRole('button', { name: 'Submit Postgres URL' })).toBeDisabled();
+    const urlInput = within(refreshedSettingsModal).getByLabelText('New Postgres URL');
     await user.clear(urlInput);
     await user.type(urlInput, 'postgresql+asyncpg://new:secret@localhost:5432/vista');
-    await user.click(within(settingsModal).getByRole('button', { name: 'Preview' }));
+    await user.click(within(refreshedSettingsModal).getByRole('button', { name: 'Preview' }));
 
     const previewModal = await screen.findByRole('dialog', { name: 'Dashboard Preview' });
+    expect(previewModal.querySelector('.database-preview-body')).toBeInTheDocument();
     expect(within(previewModal).getByText('Preview Project')).toBeInTheDocument();
-    expect(within(previewModal).getByText(/Images: 3 • Parts: 2/)).toBeInTheDocument();
+    expect(within(previewModal).getByText('ID: preview-project-1')).toBeInTheDocument();
+    expect(within(previewModal).getByText('Group: settings-group')).toBeInTheDocument();
+    expect(within(previewModal).getByText('Images: 3')).toBeInTheDocument();
+    expect(within(previewModal).getByText('Parts: 2')).toBeInTheDocument();
 
-    await user.click(within(previewModal).getByRole('button', { name: 'Accept This URL' }));
+    await user.click(within(previewModal).getByRole('button', { name: 'Submit This URL' }));
 
     expect(await screen.findByText('Accepted Project')).toBeInTheDocument();
     expect(screen.getByText(/Postgres database URL updated for this backend session/i)).toBeInTheDocument();
@@ -264,6 +364,333 @@ describe('project type UI exposure', () => {
       '/api/dashboard/settings/database-url/accept',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ database_url: 'postgresql+asyncpg://new:secret@localhost:5432/vista' }) })
     );
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: originalClipboard,
+    });
+  });
+
+  test('ignores a stale dashboard preview after the database URL changes', async () => {
+    const firstPreview = createDeferred();
+    const previewBodies = [];
+    global.fetch = jest.fn((input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/users/me')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'settings@example.com' }) });
+      }
+      if (url.endsWith('/api/users/me/groups')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ['settings-group'] });
+      }
+      if (url.endsWith('/api/projects/') && method === 'GET') {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://old/db' }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/preview') && method === 'POST') {
+        const body = JSON.parse(init.body);
+        previewBodies.push(body);
+        if (previewBodies.length === 1) return firstPreview.promise;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            database_url: body.database_url,
+            project_count: 1,
+            projects: [{
+              id: 'fresh-project',
+              name: 'Fresh Preview',
+              description: '',
+              meta_group_id: 'settings-group',
+              project_type: 'PT1',
+              image_count: 0,
+              part_count: 0,
+            }],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+
+    const user = userEvent.setup();
+    render(<BrowserRouter><App /></BrowserRouter>);
+    await screen.findByText('No projects yet');
+    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+
+    const urlInput = await screen.findByLabelText('New Postgres URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'postgresql+asyncpg://first/db');
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(screen.getByRole('button', { name: 'Previewing…' })).toBeDisabled();
+
+    await user.clear(urlInput);
+    await user.type(urlInput, 'postgresql+asyncpg://second/db');
+
+    await act(async () => {
+      firstPreview.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          database_url: 'postgresql+asyncpg://first/db',
+          project_count: 1,
+          projects: [{
+            id: 'stale-project',
+            name: 'Stale Preview',
+            description: '',
+            meta_group_id: 'settings-group',
+            project_type: 'PT1',
+          }],
+        }),
+      });
+      await firstPreview.promise;
+    });
+
+    expect(screen.queryByText('Stale Preview')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByText('Fresh Preview')).toBeInTheDocument();
+    expect(previewBodies).toEqual([
+      { database_url: 'postgresql+asyncpg://first/db' },
+      { database_url: 'postgresql+asyncpg://second/db' },
+    ]);
+  });
+
+  test('accepts exactly the displayed preview URL once and locks unsafe controls while switching', async () => {
+    const acceptRequest = createDeferred();
+    global.fetch = jest.fn((input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/users/me')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'settings@example.com' }) });
+      }
+      if (url.endsWith('/api/users/me/groups')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ['settings-group'] });
+      }
+      if (url.endsWith('/api/projects/') && method === 'GET') {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://old/db' }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/preview') && method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            database_url: 'postgresql+asyncpg://previewed/db',
+            project_count: 0,
+            projects: [],
+          }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/accept') && method === 'POST') {
+        return acceptRequest.promise;
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+
+    const user = userEvent.setup();
+    render(<BrowserRouter><App /></BrowserRouter>);
+    await screen.findByText('No projects yet');
+    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+
+    const urlInput = await screen.findByLabelText('New Postgres URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'postgresql://requested/db');
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+
+    const previewModal = await screen.findByRole('dialog', { name: 'Dashboard Preview' });
+    expect(within(previewModal).getByText('postgresql+asyncpg://previewed/db')).toBeInTheDocument();
+    const submitPreview = within(previewModal).getByRole('button', { name: 'Submit This URL' });
+    await user.click(submitPreview);
+    await user.click(submitPreview);
+
+    const acceptCalls = global.fetch.mock.calls.filter(([url]) => String(url).endsWith('/database-url/accept'));
+    expect(acceptCalls).toHaveLength(1);
+    expect(JSON.parse(acceptCalls[0][1].body)).toEqual({
+      database_url: 'postgresql+asyncpg://previewed/db',
+    });
+    expect(urlInput).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close dashboard settings' })).toBeDisabled();
+    expect(within(previewModal).getByRole('button', { name: 'Keep Editing' })).toBeDisabled();
+
+    await act(async () => {
+      acceptRequest.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ database_url: 'postgresql+asyncpg://previewed/db' }),
+      });
+      await acceptRequest.promise;
+    });
+
+    expect(await screen.findByText(/Postgres database URL updated for this backend session/i)).toBeInTheDocument();
+  });
+
+  test('reports a malformed dashboard preview response without rendering a broken modal', async () => {
+    global.fetch = jest.fn((input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/users/me')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'settings@example.com' }) });
+      }
+      if (url.endsWith('/api/users/me/groups')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ['settings-group'] });
+      }
+      if (url.endsWith('/api/projects/') && method === 'GET') {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://old/db' }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/preview') && method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://malformed/db', project_count: 1 }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+
+    const user = userEvent.setup();
+    render(<BrowserRouter><App /></BrowserRouter>);
+    await screen.findByText('No projects yet');
+    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+
+    const urlInput = await screen.findByLabelText('New Postgres URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'postgresql+asyncpg://malformed/db');
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The dashboard preview response was invalid.');
+    expect(screen.queryByRole('dialog', { name: 'Dashboard Preview' })).not.toBeInTheDocument();
+  });
+
+  test('keeps a successful database switch successful when the dashboard refresh fails', async () => {
+    const refreshRequest = createDeferred();
+    let projectLoadCount = 0;
+    global.fetch = jest.fn((input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/users/me')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'settings@example.com' }) });
+      }
+      if (url.endsWith('/api/users/me/groups')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ['settings-group'] });
+      }
+      if (url.endsWith('/api/projects/') && method === 'GET') {
+        projectLoadCount += 1;
+        if (projectLoadCount === 1) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+        }
+        return refreshRequest.promise;
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://old/db' }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/accept') && method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://accepted/db' }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+
+    const user = userEvent.setup();
+    render(<BrowserRouter><App /></BrowserRouter>);
+    await screen.findByText('No projects yet');
+    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    const urlInput = await screen.findByLabelText('New Postgres URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'postgresql+asyncpg://accepted/db');
+    await user.click(screen.getByRole('button', { name: 'Submit Postgres URL' }));
+    await waitFor(() => expect(projectLoadCount).toBe(2));
+
+    await act(async () => {
+      refreshRequest.resolve({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: 'refresh unavailable' }),
+      });
+      await refreshRequest.promise;
+    });
+
+    expect(await screen.findByText(/Postgres database URL updated for this backend session/i)).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Database switched successfully, but dashboard projects could not be refreshed.',
+    );
+    expect(screen.queryByText(/Unable to switch to that Postgres URL/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText('postgresql+asyncpg://accepted/db').length).toBeGreaterThan(0);
+  });
+
+  test('handles a malformed accepted database URL without putting a non-string into state', async () => {
+    global.fetch = jest.fn((input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/users/me')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'settings@example.com' }) });
+      }
+      if (url.endsWith('/api/users/me/groups')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ['settings-group'] });
+      }
+      if (url.endsWith('/api/projects/') && method === 'GET') {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 'postgresql+asyncpg://old/db' }),
+        });
+      }
+      if (url.endsWith('/api/dashboard/settings/database-url/accept') && method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ database_url: 42 }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+
+    const user = userEvent.setup();
+    render(<BrowserRouter><App /></BrowserRouter>);
+    await screen.findByText('No projects yet');
+    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    const urlInput = await screen.findByLabelText('New Postgres URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'postgresql+asyncpg://submitted/db');
+    await user.click(screen.getByRole('button', { name: 'Submit Postgres URL' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Database switched successfully, but the backend returned an invalid database URL.',
+    );
+    expect(urlInput).toHaveValue('postgresql+asyncpg://submitted/db');
+    expect(screen.getAllByText('postgresql+asyncpg://submitted/db').length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Postgres database URL updated for this backend session/i)).toBeInTheDocument();
   });
 
   test.each(projectTypes.flatMap((projectType) => simulatedUsers.map((userScenario) => ({ projectType, userScenario }))))(
@@ -278,7 +705,7 @@ describe('project type UI exposure', () => {
         </BrowserRouter>
       );
 
-      expect(await screen.findByText(new RegExp(`Type: ${projectType}`))).toBeInTheDocument();
+      expect(await screen.findByText(projectTypeCardMatcher(projectType))).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'New Project' }));
       await user.type(screen.getByLabelText('Project Name *'), `${projectType} ${userScenario.label} created`);
@@ -356,7 +783,7 @@ describe('project type UI exposure', () => {
     await user.selectOptions(screen.getByLabelText('Project Type *'), 'PT2');
     await user.click(screen.getByRole('button', { name: 'Create Project' }));
 
-    expect(await screen.findByText(/Type: PT2/)).toBeInTheDocument();
+    expect(await screen.findByText(projectTypeCardMatcher('PT2'))).toBeInTheDocument();
   });
 
   test('shows project card ellipsis menu and allows editing name and type', async () => {
@@ -429,7 +856,7 @@ describe('project type UI exposure', () => {
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
 
     expect(await screen.findByText('Project Edited')).toBeInTheDocument();
-    expect(screen.getByText(/Type: PT2/)).toBeInTheDocument();
+    expect(screen.getByText(projectTypeCardMatcher('PT2'))).toBeInTheDocument();
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
         '/api/projects/project-1',
@@ -533,14 +960,14 @@ describe('project type UI exposure', () => {
   });
 
   test.each(projectTypes.flatMap((projectType) => simulatedUsers.map((userScenario) => ({ projectType, userScenario }))))(
-    'requires explicit delete confirmation phrase for $projectType $userScenario.label simulated workflow',
+    'requires checkbox confirmation for $projectType $userScenario.label simulated delete workflow',
     async ({ projectType, userScenario }) => {
       let isDeleted = false;
+      const projectName = `${projectType} ${userScenario.label} delete target`;
+      const expectedPhrase = `DELETE ${projectName}`;
       global.fetch = jest.fn((input, init = {}) => {
         const url = typeof input === 'string' ? input : input.url;
         const method = (init.method || 'GET').toUpperCase();
-        const projectName = `${projectType} ${userScenario.label} delete target`;
-        const expectedPhrase = `DELETE ${projectName}`;
 
         if (url.endsWith('/api/users/me')) {
           return Promise.resolve({
@@ -604,15 +1031,15 @@ describe('project type UI exposure', () => {
       await user.click(screen.getByRole('button', { name: new RegExp(`Project options for ${projectType} ${userScenario.label} delete target`) }));
       await user.click(screen.getByRole('button', { name: 'Delete' }));
 
-      expect(screen.getByRole('button', { name: 'Delete Project' })).toBeDisabled();
       const deleteProjectButton = screen.getByRole('button', { name: 'Delete Project' });
-      await user.type(screen.getByLabelText('Confirmation phrase *'), 'DELETE wrong phrase');
-      await user.click(screen.getByLabelText(/I understand this is irreversible/i));
+      const confirmationCheckbox = screen.getByRole('checkbox', {
+        name: new RegExp(`I understand that deleting ${projectName} is irreversible`, 'i'),
+      });
+      expect(screen.queryByLabelText('Confirmation phrase *')).not.toBeInTheDocument();
       expect(deleteProjectButton).toBeDisabled();
+      expect(confirmationCheckbox).not.toBeChecked();
 
-      const refreshedPhraseInput = screen.getByLabelText('Confirmation phrase *');
-      await user.clear(refreshedPhraseInput);
-      await user.type(refreshedPhraseInput, `DELETE ${projectType} ${userScenario.label} delete target`);
+      await user.click(confirmationCheckbox);
       expect(deleteProjectButton).toBeEnabled();
       await user.click(deleteProjectButton);
 
