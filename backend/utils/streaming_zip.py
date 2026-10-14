@@ -8,9 +8,9 @@ import threading
 import zipfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Union
 
-ZipContent = Union[str, bytes, bytearray, Callable[[], Union[str, bytes, bytearray, None]]]
+ZipContent = str | bytes | bytearray | Callable[[], str | bytes | bytearray | None]
+ZipStreamWriter = Callable[[io.BufferedIOBase], None]
 
 
 @dataclass(frozen=True)
@@ -18,13 +18,14 @@ class StreamingZipEntry:
     """A ZIP archive member written lazily by :func:`iter_streaming_zip`."""
 
     arcname: str
-    content: ZipContent
+    content: ZipContent | ZipStreamWriter
+    stream: bool = False
 
 
 class _QueueWriter(io.RawIOBase):
     """File-like object that forwards ZIP bytes into a queue."""
 
-    def __init__(self, output_queue: "queue.Queue[bytes | BaseException | None]") -> None:
+    def __init__(self, output_queue: queue.Queue[bytes | BaseException | None]) -> None:
         super().__init__()
         self._queue = output_queue
         self._position = 0
@@ -70,14 +71,20 @@ def iter_streaming_zip(entries: Iterable[StreamingZipEntry]) -> Iterator[bytes]:
     ``BytesIO`` buffer.
     """
 
-    output_queue: "queue.Queue[bytes | BaseException | None]" = queue.Queue(maxsize=8)
+    output_queue: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=8)
 
     def _writer() -> None:
         try:
             queue_writer = _QueueWriter(output_queue)
-            with zipfile.ZipFile(queue_writer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            with zipfile.ZipFile(
+                queue_writer, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as archive:
                 for entry in entries:
-                    archive.writestr(entry.arcname, _coerce_content(entry.content))
+                    if entry.stream:
+                        with archive.open(entry.arcname, mode="w") as member:
+                            entry.content(member)
+                    else:
+                        archive.writestr(entry.arcname, _coerce_content(entry.content))
         except BaseException as exc:  # propagate failures to the response iterator
             output_queue.put(exc)
         finally:

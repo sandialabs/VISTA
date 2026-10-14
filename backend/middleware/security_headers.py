@@ -9,12 +9,14 @@ Sets common security headers:
 Each header is individually togglable via settings. HSTS is intentionally omitted.
 """
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
-from starlette.responses import Response
-from fastapi import Request
-import secrets
 import logging
+import secrets
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+from starlette.types import ASGIApp
+
 from core.config import settings
 
 
@@ -26,9 +28,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response: Response = await call_next(request)
 
         # X-Content-Type-Options
-        if getattr(settings, "SECURITY_NOSNIFF_ENABLED", True):
-            if "X-Content-Type-Options" not in response.headers:
-                response.headers["X-Content-Type-Options"] = "nosniff"
+        if (
+            getattr(settings, "SECURITY_NOSNIFF_ENABLED", True)
+            and "X-Content-Type-Options" not in response.headers
+        ):
+            response.headers["X-Content-Type-Options"] = "nosniff"
 
         # X-Frame-Options
         if getattr(settings, "SECURITY_XFO_ENABLED", True):
@@ -50,12 +54,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
             # If requesting FastAPI docs or OpenAPI assets, relax CSP to allow required CDNs
             path = request.url.path
-            if path.startswith("/docs") or path.startswith("/redoc") or path == "/openapi.json":
+            if (
+                path.startswith("/docs")
+                or path.startswith("/redoc")
+                or path == "/openapi.json"
+            ):
                 # Generate a nonce for any inline scripts FastAPI docs might use
                 nonce = secrets.token_hex(16)
                 # Store nonce in request state for potential template usage (if needed later)
                 try:
-                    request.state.csp_nonce = nonce  # type: ignore[attr-defined]
+                    request.state.csp_nonce = nonce
                 except Exception as exc:
                     logging.warning("Could not set CSP nonce on request state: %s", exc)
                 # Allow jsdelivr for swagger ui assets, and fastapi.tiangolo.com images
