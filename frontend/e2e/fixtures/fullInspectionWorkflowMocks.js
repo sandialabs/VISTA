@@ -6,6 +6,7 @@ const initialProject = {
   description: 'Synthetic project for end-to-end inspection workflow coverage',
   meta_group_id: 'qa-team',
   project_type: 'PT1',
+  is_archived: false,
 };
 
 function buildReviewStatus(parts, imageCount) {
@@ -31,6 +32,48 @@ function buildReviewStatus(parts, imageCount) {
   return summary;
 }
 
+function buildCanonicalReport(project, parts) {
+  const reportParts = [...parts]
+    .sort((left, right) => (
+      left.serial_number.localeCompare(right.serial_number)
+      || left.id.localeCompare(right.id)
+    ))
+    .map((part) => {
+      let inspectionResult = 'unreviewed';
+      if (part.review_state === 'pass') inspectionResult = 'pass';
+      else if (['reject', 'reject_pending', 'reject_confirmed'].includes(part.review_state)) {
+        inspectionResult = 'reject';
+      }
+      return {
+        part_id: part.id,
+        part_identifier: part.serial_number,
+        inspection_result: inspectionResult,
+      };
+    });
+  const partStatusCounts = {
+    pass: reportParts.filter((part) => part.inspection_result === 'pass').length,
+    reject: reportParts.filter((part) => part.inspection_result === 'reject').length,
+    unreviewed: reportParts.filter((part) => part.inspection_result === 'unreviewed').length,
+  };
+
+  return {
+    schema_version: 3,
+    project: {
+      id: project.id,
+      name: project.name,
+      project_type: project.project_type,
+      meta_group_id: project.meta_group_id,
+    },
+    summary: {
+      total_parts: reportParts.length,
+      reviewed_parts: partStatusCounts.pass + partStatusCounts.reject,
+      unreviewed_parts: partStatusCounts.unreviewed,
+      part_status_counts: partStatusCounts,
+    },
+    parts: reportParts,
+  };
+}
+
 async function mockFullInspectionWorkflowRoutes(page) {
   const projects = [];
   const uploadedImages = [];
@@ -52,8 +95,8 @@ async function mockFullInspectionWorkflowRoutes(page) {
       metadata: {
         defects: [{ severity: 'minor' }],
         view_images: {
-          front: 'housing-e2e-a-front.png',
-          back: 'housing-e2e-a-back.png',
+          front: 'part-a-front.png',
+          back: 'part-a-back.png',
         },
       },
     },
@@ -66,8 +109,19 @@ async function mockFullInspectionWorkflowRoutes(page) {
       metadata: {
         defects: [{ severity: 'critical' }],
         view_images: {
-          front: 'housing-e2e-b-front.png',
+          front: 'part-b-front.png',
         },
+      },
+    },
+    {
+      id: 'part-e2e-003',
+      batch_id: 'batch-e2e-1',
+      serial_number: 'SN-E2E-003',
+      display_name: 'Housing E2E C',
+      review_state: 'unreviewed',
+      metadata: {
+        defects: [],
+        view_images: {},
       },
     },
   ];
@@ -134,6 +188,35 @@ async function mockFullInspectionWorkflowRoutes(page) {
               inspection: { required_annotations: 1 },
             },
           },
+        }),
+      });
+      return;
+    }
+
+    if (url.endsWith(`/api/projects/${projectId}/data-summary`) && method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          part_count: mutableParts.length,
+          active_image_count: uploadedImages.length,
+          image_metadata_fields: 0,
+          overlay_layer_count: bundleSummary.overlaysConfiguredLayers,
+          annotation_count: bundleSummary.annotationsTotal,
+        }),
+      });
+      return;
+    }
+
+    if (new URL(url).pathname === `/api/projects/${projectId}/images-page` && method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: uploadedImages,
+          total: uploadedImages.length,
+          next_cursor: null,
+          has_more: false,
         }),
       });
       return;
@@ -236,28 +319,30 @@ async function mockFullInspectionWorkflowRoutes(page) {
       return;
     }
 
-    if (url.endsWith(`/api/projects/${projectId}/report-json`) && method === 'GET') {
-      const summary = buildReviewStatus(mutableParts, uploadedImages.length);
-      reportRequests.push({ method: 'json', summary });
+    if (url.endsWith(`/api/projects/${projectId}/report-json?schema_version=3`) && method === 'GET') {
+      const payload = buildCanonicalReport(projects[0] || initialProject, mutableParts);
+      reportRequests.push({ method: 'json', payload });
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          project: { id: projectId },
-          summary,
-          parts: mutableParts.map((part) => ({
-            part_id: part.id,
-            part_name: part.display_name,
-            review_state: part.review_state,
-          })),
-        }),
+        body: JSON.stringify(payload),
       });
       return;
     }
 
-    if (url.endsWith(`/api/projects/${projectId}/report-pdf`) && method === 'GET') {
+    if (url.endsWith(`/api/projects/${projectId}/report-pdf?schema_version=3`) && method === 'GET') {
       reportRequests.push({ method: 'pdf' });
       await route.fulfill({ status: 200, headers: { 'content-type': 'application/pdf' }, body: '%PDF-1.4 synthetic' });
+      return;
+    }
+
+    if (url.endsWith(`/api/projects/${projectId}/report-with-images-pdf`) && method === 'GET') {
+      reportRequests.push({ method: 'pdf-images' });
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'application/pdf' },
+        body: '%PDF-1.4 synthetic image evidence',
+      });
       return;
     }
 
