@@ -1,0 +1,2896 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type " pt1 " 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT1\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT1\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT1\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": false,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": false,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type "" 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT1\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT1\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT1\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": false,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": false,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type "PT1" 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT1\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT1\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT1\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": false,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": false,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type "PT2" 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT2\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT2\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT2\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type "PT3" 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT3\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT3\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT3\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type "pt3" 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT3\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT3\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT3\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type null 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT1\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT1\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT1\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": false,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": false,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type undefined 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT1\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT1\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT1\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": false,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": false,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a valid configuration for PT1 1`] = `
+"{
+  \\"image_modalities\\": [
+    {
+      \\"id\\": \\"Visible\\",
+      \\"label\\": \\"Visible light\\",
+      \\"calibration_required\\": false
+    },
+    {
+      \\"id\\": \\"ir\\",
+      \\"label\\": \\"Infrared\\"
+    }
+  ],
+  \\"part_views\\": [
+    {
+      \\"id\\": \\"Top\\",
+      \\"label\\": \\"Top\\",
+      \\"required_modalities\\": [
+        \\"visible\\"
+      ],
+      \\"source\\": \\"manual\\"
+    },
+    {
+      \\"id\\": \\"bottom\\",
+      \\"label\\": \\"Bottom\\",
+      \\"required_modalities\\": []
+    }
+  ],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"Crack\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"A crack\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": false,
+    \\"require_measurement_for_critical\\": true,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"A\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"1\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"magma\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": false,
+    \\"inspection_tile_max_columns\\": 12,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    },
+    \\"custom_flag\\": true
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": false,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": false,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"calibration\\": {
+    \\"pixels_per_mm\\": 10,
+    \\"pixels_per_inch\\": 254,
+    \\"unit\\": \\"mm\\",
+    \\"updated_at\\": \\"2026-01-01T00:00:00Z\\"
+  },
+  \\"extra_top_level\\": {
+    \\"kept\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes a valid configuration for PT2 1`] = `
+"{
+  \\"image_modalities\\": [
+    {
+      \\"id\\": \\"Visible\\",
+      \\"label\\": \\"Visible light\\",
+      \\"calibration_required\\": false
+    },
+    {
+      \\"id\\": \\"ir\\",
+      \\"label\\": \\"Infrared\\"
+    }
+  ],
+  \\"part_views\\": [
+    {
+      \\"id\\": \\"Top\\",
+      \\"label\\": \\"Top\\",
+      \\"required_modalities\\": [
+        \\"visible\\"
+      ],
+      \\"source\\": \\"manual\\"
+    },
+    {
+      \\"id\\": \\"bottom\\",
+      \\"label\\": \\"Bottom\\",
+      \\"required_modalities\\": []
+    }
+  ],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"Crack\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"A crack\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": false,
+    \\"require_measurement_for_critical\\": true,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"A\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"1\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"magma\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": false,
+    \\"inspection_tile_max_columns\\": 12,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    },
+    \\"custom_flag\\": true
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  },
+  \\"calibration\\": {
+    \\"pixels_per_mm\\": 10,
+    \\"pixels_per_inch\\": 254,
+    \\"unit\\": \\"mm\\",
+    \\"updated_at\\": \\"2026-01-01T00:00:00Z\\"
+  },
+  \\"extra_top_level\\": {
+    \\"kept\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes invalid values for PT1 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT1\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT1\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT1\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 100,
+      \\"crosshair_line_width_px\\": 0.5,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": true,
+    \\"part_sn_enabled\\": false
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\",
+      \\"extra\\": 1
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": false,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": false,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes invalid values for PT3 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT3\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT3\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT3\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 100,
+      \\"crosshair_line_width_px\\": 0.5,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": true,
+    \\"part_sn_enabled\\": false
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\",
+      \\"extra\\": 1
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": false,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"other\\",
+        \\"label\\": \\"Lot\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"other\\",
+        \\"label\\": \\"\\",
+        \\"abbreviation\\": \\"\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"-\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": false,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"a\\",
+        \\"b\\"
+      ],
+      \\"remove_from_base_filename\\": false
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes non-object input "string" 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT2\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT2\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT2\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes non-object input [1, 2] 1`] = `
+"{
+  \\"0\\": 1,
+  \\"1\\": 2,
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT2\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT2\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT2\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes non-object input 42 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT2\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT2\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT2\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization normalizes non-object input null 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [
+    {
+      \\"name\\": \\"DefectType1_PT2\\",
+      \\"color\\": \\"#ef4444\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType2_PT2\\",
+      \\"color\\": \\"#f59e0b\\",
+      \\"definition\\": \\"\\"
+    },
+    {
+      \\"name\\": \\"DefectType3_PT2\\",
+      \\"color\\": \\"#3b82f6\\",
+      \\"definition\\": \\"\\"
+    }
+  ],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`normalizeProjectConfiguration characterization pins EMPTY_CONFIG 1`] = `
+"{
+  \\"image_modalities\\": [],
+  \\"part_views\\": [],
+  \\"defect_types\\": [],
+  \\"process_settings\\": {
+    \\"require_disposition_on_submit\\": true,
+    \\"require_measurement_for_critical\\": false,
+    \\"require_second_reviewer_for_reject\\": false,
+    \\"configurable_hotkeys\\": {
+      \\"accept_classification\\": \\"a\\",
+      \\"reject_classification\\": \\"r\\",
+      \\"toggle_shortcut_help\\": \\"h\\"
+    }
+  },
+  \\"display_settings\\": {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  \\"serial_number_scheme\\": {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  \\"phase_settings\\": {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  \\"metadata_parsers\\": {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  \\"project_owner\\": {
+    \\"name\\": \\"\\",
+    \\"email\\": \\"\\"
+  },
+  \\"current_user\\": {
+    \\"username\\": \\"\\",
+    \\"sso_authenticated\\": false
+  },
+  \\"ui_sections\\": {
+    \\"main.project_configuration\\": true,
+    \\"project_configuration.general\\": true,
+    \\"project_configuration.filename_convention\\": true,
+    \\"project_configuration.hotkeys\\": true,
+    \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.owner_section\\": true,
+    \\"project_configuration.user_section\\": true,
+    \\"project_configuration.calibration\\": true,
+    \\"project_configuration.process_settings\\": true,
+    \\"project_configuration.serial_scheme\\": true,
+    \\"project_configuration.project_phase_settings\\": true,
+    \\"project_configuration.available_ui_sections\\": true,
+    \\"project_configuration.defect_types\\": true,
+    \\"project_configuration.view_options\\": true,
+    \\"project_configuration.display_options\\": true,
+    \\"project_configuration.copy_configuration\\": true,
+    \\"main.project_data\\": true,
+    \\"project_data.summary\\": true,
+    \\"project_data.load_images\\": true,
+    \\"project_data.images_to_parts\\": true,
+    \\"project_data.overlays\\": true,
+    \\"project_data.metadata\\": true,
+    \\"project_data.batches\\": true,
+    \\"project_data.unload_parts\\": true,
+    \\"project_data.remove_images\\": true,
+    \\"project_data.recently_deleted\\": true,
+    \\"project_data.data_validation\\": true,
+    \\"main.analyze\\": true,
+    \\"analyze.toolbox\\": true,
+    \\"analyze.canvas\\": true,
+    \\"analyze.inspector\\": true,
+    \\"main.inspection\\": true,
+    \\"inspection.part_summary\\": true,
+    \\"inspection.part_summary.views_row\\": true,
+    \\"inspection.part_summary.modalities_row\\": true,
+    \\"inspection.part_summary.layers_row\\": true,
+    \\"inspection.mpr\\": true,
+    \\"inspection.inspector\\": true,
+    \\"inspection.image_metadata\\": true,
+    \\"inspection.annotations\\": true,
+    \\"inspection.visual_workspace\\": true,
+    \\"main.report\\": true,
+    \\"report.project_report\\": true
+  },
+  \\"file_naming_scheme\\": {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  }
+}"
+`;
+
+exports[`section normalizers characterization normalizes display_settings from empty, valid, and invalid input 1`] = `
+"[
+  {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  },
+  {
+    \\"default_colormap\\": \\"magma\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": false,
+    \\"inspection_tile_max_columns\\": 12,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 50,
+      \\"crosshair_line_width_px\\": 1.25,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    },
+    \\"custom_flag\\": true
+  },
+  {
+    \\"default_colormap\\": \\"grayscale\\",
+    \\"anomaly_colormap\\": \\"viridis\\",
+    \\"grayscale_base_image\\": true,
+    \\"inspection_tile_max_columns\\": 8,
+    \\"pt3_3d_guides\\": {
+      \\"crosshair_transparency_percent\\": 100,
+      \\"crosshair_line_width_px\\": 0.5,
+      \\"plane_outline_transparency_percent\\": 0,
+      \\"plane_outline_line_width_px\\": 1.25
+    }
+  }
+]"
+`;
+
+exports[`section normalizers characterization normalizes file_naming_scheme from empty, valid, and invalid input 1`] = `
+"[
+  {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  },
+  {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  },
+  {
+    \\"use_filename_convention\\": true,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"drawing_number\\",
+        \\"label\\": \\"Drawing Number\\",
+        \\"abbreviation\\": \\"D\\"
+      },
+      {
+        \\"id\\": \\"part_number\\",
+        \\"label\\": \\"Part Number\\",
+        \\"abbreviation\\": \\"P\\"
+      },
+      {
+        \\"id\\": \\"lot_number\\",
+        \\"label\\": \\"Lot Number\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"serial_number\\",
+        \\"label\\": \\"Serial Number\\",
+        \\"abbreviation\\": \\"S\\"
+      },
+      {
+        \\"id\\": \\"revision\\",
+        \\"label\\": \\"Revision\\",
+        \\"abbreviation\\": \\"R\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"_\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": true,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"true\\",
+        \\"overlay\\",
+        \\"ov\\",
+        \\"mask\\",
+        \\"heatmap\\"
+      ],
+      \\"remove_from_base_filename\\": true
+    }
+  },
+  {
+    \\"use_filename_convention\\": false,
+    \\"hierarchy_levels\\": [
+      {
+        \\"id\\": \\"other\\",
+        \\"label\\": \\"Lot\\",
+        \\"abbreviation\\": \\"L\\"
+      },
+      {
+        \\"id\\": \\"other\\",
+        \\"label\\": \\"\\",
+        \\"abbreviation\\": \\"\\"
+      }
+    ],
+    \\"image_descriptors\\": [
+      {
+        \\"id\\": \\"view\\",
+        \\"label\\": \\"View\\",
+        \\"abbreviation\\": \\"V\\"
+      },
+      {
+        \\"id\\": \\"modality\\",
+        \\"label\\": \\"Modality\\",
+        \\"abbreviation\\": \\"M\\"
+      }
+    ],
+    \\"delimiter\\": \\"-\\",
+    \\"metadata_extractor\\": null,
+    \\"overlay_indicator\\": {
+      \\"enabled\\": false,
+      \\"field_key\\": \\"overlay\\",
+      \\"values\\": [
+        \\"a\\",
+        \\"b\\"
+      ],
+      \\"remove_from_base_filename\\": false
+    }
+  }
+]"
+`;
+
+exports[`section normalizers characterization normalizes metadata_parsers from empty, valid, and invalid input 1`] = `
+"[
+  {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\"
+    }
+  },
+  {
+    \\"nsipro\\": {
+      \\"parser_id\\": \\"default\\",
+      \\"extra\\": 1
+    }
+  }
+]"
+`;
+
+exports[`section normalizers characterization normalizes phase_settings from empty, valid, and invalid input 1`] = `
+"[
+  {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  },
+  {
+    \\"manual_phase_selection_enabled\\": false,
+    \\"manual_phase\\": \\"data_ingestion\\"
+  }
+]"
+`;
+
+exports[`section normalizers characterization normalizes serial_number_scheme from empty, valid, and invalid input 1`] = `
+"[
+  {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": false,
+    \\"part_sn_enabled\\": true
+  },
+  {
+    \\"batch_sn_enabled\\": true,
+    \\"sub_batching_enabled\\": false,
+    \\"sub_batch_sn_enabled\\": true,
+    \\"part_sn_enabled\\": false
+  }
+]"
+`;
+
+exports[`validateConfiguration characterization pins messages for array calibration 1`] = `
+Array [
+  "Project calibration requires positive finite pixel scales and a valid unit.",
+]
+`;
+
+exports[`validateConfiguration characterization pins messages for bad calibration timestamp 1`] = `
+Array [
+  "Project calibration requires positive finite pixel scales and a valid unit.",
+]
+`;
+
+exports[`validateConfiguration characterization pins messages for bad calibration unit 1`] = `
+Array [
+  "Project calibration requires positive finite pixel scales and a valid unit.",
+]
+`;
+
+exports[`validateConfiguration characterization pins messages for blank modality id 1`] = `
+Array [
+  "Each modality requires both a filename value and label.",
+  "Stored side modality requirements must reference configured modalities.",
+]
+`;
+
+exports[`validateConfiguration characterization pins messages for empty collections 1`] = `Array []`;
+
+exports[`validateConfiguration characterization pins messages for inconsistent calibration 1`] = `
+Array [
+  "Project calibration requires positive finite pixel scales and a valid unit.",
+]
+`;
+
+exports[`validateConfiguration characterization pins messages for missing hotkeys 1`] = `
+Array [
+  "Hotkeys must be single alphanumeric characters.",
+  "Hotkeys must be unique across accept, reject, and help actions.",
+]
+`;
