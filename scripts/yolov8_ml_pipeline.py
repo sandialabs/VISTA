@@ -10,39 +10,45 @@ Authentication: API key (Bearer token) or debug-mode headers (X-User-Email).
 All endpoints use the unified /api prefix.
 """
 
+import argparse
 import os
 import sys
-import json
-import argparse
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 from io import BytesIO
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
 # Load environment variables from .env file in project root
 project_root = Path(__file__).parent.parent
-load_dotenv(project_root / '.env')
+load_dotenv(project_root / ".env")
 
-import requests
-from PIL import Image
+import contextlib
+
 import cv2
 import numpy as np
+import requests
+from PIL import Image
 
 try:
     from ultralytics import YOLO
 except ImportError:
-    print("Error: ultralytics not installed. Run: pip install ultralytics opencv-python")
+    print(
+        "Error: ultralytics not installed. Run: pip install ultralytics opencv-python"
+    )
     sys.exit(1)
 
 
 class YOLOv8Pipeline:
     """YOLOv8 object detection pipeline with ML API integration"""
 
-    def __init__(self, api_base_url: str, api_key: Optional[str] = None,
-                 user_email: str = "test@example.com"):
-        self.api_base_url = api_base_url.rstrip('/')
+    def __init__(
+        self,
+        api_base_url: str,
+        api_key: str | None = None,
+        user_email: str = "test@example.com",
+    ):
+        self.api_base_url = api_base_url.rstrip("/")
         self.api_key = api_key
         self.user_email = user_email
         self.model = None
@@ -50,10 +56,10 @@ class YOLOv8Pipeline:
 
         # Set up authentication headers
         if self.api_key:
-            self.session.headers.update({'Authorization': f'Bearer {self.api_key}'})
+            self.session.headers.update({"Authorization": f"Bearer {self.api_key}"})
         else:
             # For dev/testing without API key -- assumes DEBUG=true on backend
-            self.session.headers.update({'X-User-Email': self.user_email})
+            self.session.headers.update({"X-User-Email": self.user_email})
 
     def _get_url(self, path: str) -> str:
         """
@@ -65,22 +71,24 @@ class YOLOv8Pipeline:
         Returns:
             Full URL with /api prefix
         """
-        path = path.lstrip('/')
+        path = path.lstrip("/")
         return f"{self.api_base_url}/api/{path}"
 
-    def load_model(self, model_size: str = 'n'):
+    def load_model(self, model_size: str = "n"):
         """Load YOLOv8 model (n=nano, s=small, m=medium, l=large, x=xlarge)"""
-        model_name = f'yolov8{model_size}.pt'
+        model_name = f"yolov8{model_size}.pt"
         print(f"Loading YOLOv8 model: {model_name}")
         self.model = YOLO(model_name)
         print("Model loaded successfully")
 
-    def get_project_images(self, project_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_project_images(
+        self, project_id: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
         """Fetch images from a project"""
         print(f"Fetching images from project {project_id}")
 
         url = self._get_url(f"projects/{project_id}/images")
-        params = {'skip': 0, 'limit': limit}
+        params = {"skip": 0, "limit": limit}
 
         response = self.session.get(url, params=params)
         response.raise_for_status()
@@ -89,7 +97,7 @@ class YOLOv8Pipeline:
         print(f"Found {len(images)} images")
         return images
 
-    def get_image_analyses(self, image_id: str) -> List[Dict[str, Any]]:
+    def get_image_analyses(self, image_id: str) -> list[dict[str, Any]]:
         """Fetch existing analyses for an image"""
         url = self._get_url(f"images/{image_id}/analyses")
 
@@ -98,12 +106,12 @@ class YOLOv8Pipeline:
             response.raise_for_status()
             data = response.json()
             # API returns {"analyses": [...], "total": N}
-            return data.get('analyses', [])
+            return data.get("analyses", [])
         except Exception as e:
             print(f"  Failed to fetch analyses for image {image_id}: {e}")
             return []
 
-    def download_image(self, image_id: str) -> tuple[np.ndarray, Dict[str, Any]]:
+    def download_image(self, image_id: str) -> tuple[np.ndarray, dict[str, Any]]:
         """Download image from API and return as numpy array"""
         print(f"  Downloading image {image_id}")
 
@@ -113,14 +121,14 @@ class YOLOv8Pipeline:
         info_response.raise_for_status()
 
         download_info = info_response.json()
-        content_url = download_info.get('url')
+        content_url = download_info.get("url")
 
         if not content_url:
             raise ValueError(f"No content URL in download response: {download_info}")
 
         # Now download the actual image content
-        if not content_url.startswith('http'):
-            if not content_url.startswith('/api/'):
+        if not content_url.startswith("http"):
+            if not content_url.startswith("/api/"):
                 content_url = f"/api{content_url}"
             content_url = f"{self.api_base_url}{content_url}"
 
@@ -129,9 +137,10 @@ class YOLOv8Pipeline:
 
         # Get image metadata from headers
         metadata = {
-            'content_type': response.headers.get('Content-Type', 'image/jpeg'),
-            'filename': download_info.get('object_key', '').split('/')[-1] or f"{image_id}.jpg",
-            'object_key': download_info.get('object_key', '')
+            "content_type": response.headers.get("Content-Type", "image/jpeg"),
+            "filename": download_info.get("object_key", "").split("/")[-1]
+            or f"{image_id}.jpg",
+            "object_key": download_info.get("object_key", ""),
         }
 
         # Convert to numpy array for OpenCV
@@ -139,21 +148,27 @@ class YOLOv8Pipeline:
 
         # Debug: check if we got any content
         if len(response.content) == 0:
-            raise ValueError(f"Empty response from {content_url}. Status: {response.status_code}, Headers: {dict(response.headers)}")
+            raise ValueError(
+                f"Empty response from {content_url}. Status: {response.status_code}, Headers: {dict(response.headers)}"
+            )
 
-        content_type = response.headers.get('Content-Type', '')
+        content_type = response.headers.get("Content-Type", "")
         print(f"  Received {len(response.content)} bytes, content-type: {content_type}")
 
         # Check if we got HTML (error page) instead of image
-        if 'text/html' in content_type:
-            error_body = response.content.decode('utf-8', errors='ignore')[:500]
-            raise ValueError(f"Got HTML error page instead of image from {content_url}:\n{error_body}")
+        if "text/html" in content_type:
+            error_body = response.content.decode("utf-8", errors="ignore")[:500]
+            raise ValueError(
+                f"Got HTML error page instead of image from {content_url}:\n{error_body}"
+            )
 
         pil_image = Image.open(image_bytes)
         image_array = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
         print(f"  Downloaded {metadata['filename']}")
-        print(f"  Image dimensions - Height: {image_array.shape[0]}, Width: {image_array.shape[1]}")
+        print(
+            f"  Image dimensions - Height: {image_array.shape[0]}, Width: {image_array.shape[1]}"
+        )
 
         return image_array, metadata
 
@@ -169,8 +184,8 @@ class YOLOv8Pipeline:
             "parameters": {
                 "conf_threshold": 0.25,
                 "iou_threshold": 0.45,
-                "model_size": model_version.split('_')[-1]
-            }
+                "model_size": model_version.split("_")[-1],
+            },
         }
 
         response = self.session.post(url, json=data)
@@ -178,10 +193,12 @@ class YOLOv8Pipeline:
         # Add better error handling
         if not response.ok:
             error_detail = response.text
-            raise ValueError(f"Failed to create analysis: {response.status_code} - {error_detail}")
+            raise ValueError(
+                f"Failed to create analysis: {response.status_code} - {error_detail}"
+            )
 
         analysis = response.json()
-        analysis_id = analysis['id']
+        analysis_id = analysis["id"]
         print(f"  Created analysis {analysis_id}")
         return analysis_id
 
@@ -196,9 +213,11 @@ class YOLOv8Pipeline:
         response.raise_for_status()
         print(f"  Status updated to {status}")
 
-    def run_detection(self, image: np.ndarray, conf_threshold: float = 0.25) -> List[Dict[str, Any]]:
+    def run_detection(
+        self, image: np.ndarray, conf_threshold: float = 0.25
+    ) -> list[dict[str, Any]]:
         """Run YOLOv8 detection on image"""
-        print(f"  Running YOLOv8 detection...")
+        print("  Running YOLOv8 detection...")
 
         results = self.model(image, conf=conf_threshold, verbose=False)[0]
 
@@ -209,49 +228,60 @@ class YOLOv8Pipeline:
             class_id = int(box.cls[0].cpu().numpy())
             class_name = results.names[class_id]
 
-            detections.append({
-                'class_name': class_name,
-                'confidence': confidence,
-                'bbox': {
-                    'x_min': float(x1),
-                    'y_min': float(y1),
-                    'x_max': float(x2),
-                    'y_max': float(y2),
-                    'width': float(x2 - x1),
-                    'height': float(y2 - y1)
+            detections.append(
+                {
+                    "class_name": class_name,
+                    "confidence": confidence,
+                    "bbox": {
+                        "x_min": float(x1),
+                        "y_min": float(y1),
+                        "x_max": float(x2),
+                        "y_max": float(y2),
+                        "width": float(x2 - x1),
+                        "height": float(y2 - y1),
+                    },
                 }
-            })
+            )
 
         print(f"  Detected {len(detections)} objects")
         return detections
 
-    def create_visualizations(self, image: np.ndarray, detections: List[Dict[str, Any]]) -> tuple[bytes, bytes]:
+    def create_visualizations(
+        self, image: np.ndarray, detections: list[dict[str, Any]]
+    ) -> tuple[bytes, bytes]:
         """Create annotated image and heatmap"""
         # Annotated image with bounding boxes
         annotated = image.copy()
         for det in detections:
-            bbox = det['bbox']
-            x1, y1 = int(bbox['x_min']), int(bbox['y_min'])
-            x2, y2 = int(bbox['x_max']), int(bbox['y_max'])
+            bbox = det["bbox"]
+            x1, y1 = int(bbox["x_min"]), int(bbox["y_min"])
+            x2, y2 = int(bbox["x_max"]), int(bbox["y_max"])
 
             # Draw bounding box
             cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
             # Draw label
             label = f"{det['class_name']} {det['confidence']:.2f}"
-            cv2.putText(annotated, label, (x1, y1 - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            cv2.putText(
+                annotated,
+                label,
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                2,
+            )
 
         # Convert to JPEG bytes
-        _, annotated_bytes = cv2.imencode('.jpg', annotated)
+        _, annotated_bytes = cv2.imencode(".jpg", annotated)
 
         # Create simple heatmap (confidence-based)
         heatmap = np.zeros(image.shape[:2], dtype=np.float32)
         for det in detections:
-            bbox = det['bbox']
-            x1, y1 = int(bbox['x_min']), int(bbox['y_min'])
-            x2, y2 = int(bbox['x_max']), int(bbox['y_max'])
-            heatmap[y1:y2, x1:x2] += det['confidence']
+            bbox = det["bbox"]
+            x1, y1 = int(bbox["x_min"]), int(bbox["y_min"])
+            x2, y2 = int(bbox["x_max"]), int(bbox["y_max"])
+            heatmap[y1:y2, x1:x2] += det["confidence"]
 
         # Normalize and colorize
         if heatmap.max() > 0:
@@ -259,20 +289,19 @@ class YOLOv8Pipeline:
         else:
             heatmap = heatmap.astype(np.uint8)
         heatmap_color = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-        _, heatmap_bytes = cv2.imencode('.png', heatmap_color)
+        _, heatmap_bytes = cv2.imencode(".png", heatmap_color)
 
         return annotated_bytes.tobytes(), heatmap_bytes.tobytes()
 
-    def upload_artifact(self, analysis_id: str, artifact_type: str, filename: str, data: bytes):
+    def upload_artifact(
+        self, analysis_id: str, artifact_type: str, filename: str, data: bytes
+    ):
         """Upload artifact to S3 via presigned URL"""
         print(f"  Uploading {artifact_type}: {filename}")
 
         # Get presigned URL
         url = self._get_url(f"analyses/{analysis_id}/artifacts/presign")
-        presign_data = {
-            "artifact_type": artifact_type,
-            "filename": filename
-        }
+        presign_data = {"artifact_type": artifact_type, "filename": filename}
 
         response = self.session.post(url, json=presign_data)
 
@@ -283,19 +312,26 @@ class YOLOv8Pipeline:
         response.raise_for_status()
 
         presign_response = response.json()
-        upload_url = presign_response['upload_url']
-        storage_path = presign_response['storage_path']
+        upload_url = presign_response["upload_url"]
+        storage_path = presign_response["storage_path"]
 
         # Upload to S3
-        headers = {'Content-Type': 'image/png' if artifact_type == 'heatmap' else 'image/jpeg'}
+        headers = {
+            "Content-Type": "image/png" if artifact_type == "heatmap" else "image/jpeg"
+        }
         upload_response = requests.put(upload_url, data=data, headers=headers)
         upload_response.raise_for_status()
 
         print(f"  Uploaded to {storage_path}")
         return storage_path
 
-    def submit_annotations(self, analysis_id: str, detections: List[Dict[str, Any]],
-                          heatmap_path: str, image_shape: tuple):
+    def submit_annotations(
+        self,
+        analysis_id: str,
+        detections: list[dict[str, Any]],
+        heatmap_path: str,
+        image_shape: tuple,
+    ):
         """Submit detection annotations"""
         print(f"  Submitting {len(detections)} annotations")
 
@@ -307,41 +343,41 @@ class YOLOv8Pipeline:
         # Add bounding box annotations
         for i, det in enumerate(detections):
             # Include image dimensions in bbox data for proper scaling on frontend
-            bbox_data = det['bbox'].copy()
-            bbox_data['image_width'] = image_width
-            bbox_data['image_height'] = image_height
+            bbox_data = det["bbox"].copy()
+            bbox_data["image_width"] = image_width
+            bbox_data["image_height"] = image_height
 
-            annotations.append({
-                "annotation_type": "bounding_box",
-                "class_name": det['class_name'],
-                "confidence": det['confidence'],
-                "data": bbox_data,
-                "ordering": i
-            })
+            annotations.append(
+                {
+                    "annotation_type": "bounding_box",
+                    "class_name": det["class_name"],
+                    "confidence": det["confidence"],
+                    "data": bbox_data,
+                    "ordering": i,
+                }
+            )
 
         # Add heatmap annotation
-        annotations.append({
-            "annotation_type": "heatmap",
-            "data": {
-                "width": image_width,
-                "height": image_height
-            },
-            "storage_path": heatmap_path,
-            "ordering": len(detections)
-        })
+        annotations.append(
+            {
+                "annotation_type": "heatmap",
+                "data": {"width": image_width, "height": image_height},
+                "storage_path": heatmap_path,
+                "ordering": len(detections),
+            }
+        )
 
         url = self._get_url(f"analyses/{analysis_id}/annotations:bulk")
-        data = {
-            "annotations": annotations,
-            "mode": "append"
-        }
+        data = {"annotations": annotations, "mode": "append"}
 
         response = self.session.post(url, json=data)
         response.raise_for_status()
 
         print(f"  Submitted {len(annotations)} annotations")
 
-    def finalize_analysis(self, analysis_id: str, status: str = "completed", error_message: str = None):
+    def finalize_analysis(
+        self, analysis_id: str, status: str = "completed", error_message: str = None
+    ):
         """Finalize analysis"""
         print(f"  Finalizing analysis as {status}")
 
@@ -352,13 +388,13 @@ class YOLOv8Pipeline:
 
         response = self.session.post(url, json=data)
         response.raise_for_status()
-        print(f"  Analysis finalized")
+        print("  Analysis finalized")
 
     def process_image(self, image_id: str, model_version: str):
         """Process a single image end-to-end"""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Processing image: {image_id}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         analysis_id = None
         try:
@@ -375,11 +411,13 @@ class YOLOv8Pipeline:
             detections = self.run_detection(image)
 
             # Create visualizations
-            annotated_bytes, heatmap_bytes = self.create_visualizations(image, detections)
+            annotated_bytes, heatmap_bytes = self.create_visualizations(
+                image, detections
+            )
 
             # Upload artifacts
             heatmap_path = self.upload_artifact(
-                analysis_id, 'heatmap', f'heatmap_{analysis_id}.png', heatmap_bytes
+                analysis_id, "heatmap", f"heatmap_{analysis_id}.png", heatmap_bytes
             )
 
             # Submit annotations
@@ -393,21 +431,24 @@ class YOLOv8Pipeline:
         except Exception as e:
             print(f"Error processing image {image_id}: {e}")
             if analysis_id:
-                try:
+                with contextlib.suppress(BaseException):
                     self.finalize_analysis(analysis_id, "failed", str(e))
-                except:
-                    pass
             raise
 
-    def run_project_pipeline(self, project_id: str, model_size: str = 'n',
-                            limit: int = 50, skip_existing: bool = False):
+    def run_project_pipeline(
+        self,
+        project_id: str,
+        model_size: str = "n",
+        limit: int = 50,
+        skip_existing: bool = False,
+    ):
         """Run pipeline on all images in a project"""
-        print(f"\nStarting YOLOv8 Pipeline")
+        print("\nStarting YOLOv8 Pipeline")
         print(f"Project ID: {project_id}")
         print(f"Model Size: yolov8{model_size}")
         print(f"Image Limit: {limit}")
         print(f"Skip Existing: {skip_existing}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Load model
         self.load_model(model_size)
@@ -425,20 +466,28 @@ class YOLOv8Pipeline:
         skipped_count = 0
 
         if skip_existing:
-            print(f"Checking for existing analyses...")
+            print("Checking for existing analyses...")
             for image in images:
-                analyses = self.get_image_analyses(image['id'])
+                analyses = self.get_image_analyses(image["id"])
                 # Only skip if there's at least one completed analysis
-                completed_analyses = [a for a in analyses if a.get('status') == 'completed']
+                completed_analyses = [
+                    a for a in analyses if a.get("status") == "completed"
+                ]
                 if completed_analyses:
-                    print(f"  Skipping {image['id']} (has {len(completed_analyses)} completed analysis/analyses)")
+                    print(
+                        f"  Skipping {image['id']} (has {len(completed_analyses)} completed analysis/analyses)"
+                    )
                     skipped_count += 1
                 else:
                     if analyses:
-                        non_completed = [a.get('status') for a in analyses]
-                        print(f"  Including {image['id']} (has analyses but none completed: {non_completed})")
+                        non_completed = [a.get("status") for a in analyses]
+                        print(
+                            f"  Including {image['id']} (has analyses but none completed: {non_completed})"
+                        )
                     images_to_process.append(image)
-            print(f"Filtered {len(images)} images -> {len(images_to_process)} to process ({skipped_count} skipped)\n")
+            print(
+                f"Filtered {len(images)} images -> {len(images_to_process)} to process ({skipped_count} skipped)\n"
+            )
         else:
             images_to_process = images
 
@@ -451,15 +500,15 @@ class YOLOv8Pipeline:
         for i, image in enumerate(images_to_process, 1):
             print(f"\n[{i}/{len(images_to_process)}] Processing image...")
             try:
-                self.process_image(image['id'], model_version)
+                self.process_image(image["id"], model_version)
                 success_count += 1
             except Exception as e:
                 print(f"Failed to process image: {e}")
 
         # Summary
-        print(f"\n{'='*60}")
-        print(f"Pipeline Complete!")
-        print(f"{'='*60}")
+        print(f"\n{'=' * 60}")
+        print("Pipeline Complete!")
+        print(f"{'=' * 60}")
         print(f"Total Images: {len(images)}")
         if skip_existing:
             print(f"Skipped (existing): {skipped_count}")
@@ -469,30 +518,46 @@ class YOLOv8Pipeline:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='YOLOv8 ML Pipeline Integration Test')
-    parser.add_argument('project_id', help='Project ID to process')
-    parser.add_argument('--api-url', default='http://localhost:8000',
-                       help='API base URL (default: http://localhost:8000)')
-    parser.add_argument('--api-key', help='API key for Bearer token authentication')
-    parser.add_argument('--model-size', default='n', choices=['n', 's', 'm', 'l', 'x'],
-                       help='YOLOv8 model size (n=nano, s=small, m=medium, l=large, x=xlarge)')
-    parser.add_argument('--limit', type=int, default=50,
-                       help='Maximum number of images to process (default: 50)')
-    parser.add_argument('--skip-existing', action='store_true',
-                       help='Skip images that already have ML analysis results')
+    parser = argparse.ArgumentParser(description="YOLOv8 ML Pipeline Integration Test")
+    parser.add_argument("project_id", help="Project ID to process")
+    parser.add_argument(
+        "--api-url",
+        default="http://localhost:8000",
+        help="API base URL (default: http://localhost:8000)",
+    )
+    parser.add_argument("--api-key", help="API key for Bearer token authentication")
+    parser.add_argument(
+        "--model-size",
+        default="n",
+        choices=["n", "s", "m", "l", "x"],
+        help="YOLOv8 model size (n=nano, s=small, m=medium, l=large, x=xlarge)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of images to process (default: 50)",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip images that already have ML analysis results",
+    )
 
     args = parser.parse_args()
 
     # Get API key from args or environment
-    api_key = args.api_key or os.environ.get('API_KEY')
+    api_key = args.api_key or os.environ.get("API_KEY")
 
     # Get user email from environment or default
-    user_email = os.environ.get('MOCK_USER_EMAIL', 'test@example.com')
+    user_email = os.environ.get("MOCK_USER_EMAIL", "test@example.com")
 
     # Run pipeline
     pipeline = YOLOv8Pipeline(args.api_url, api_key, user_email=user_email)
-    pipeline.run_project_pipeline(args.project_id, args.model_size, args.limit, args.skip_existing)
+    pipeline.run_project_pipeline(
+        args.project_id, args.model_size, args.limit, args.skip_existing
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

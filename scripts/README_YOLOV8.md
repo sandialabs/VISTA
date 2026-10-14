@@ -264,17 +264,13 @@ from scripts.yolov8_ml_pipeline import YOLOv8Pipeline
 
 # Initialize pipeline
 pipeline = YOLOv8Pipeline(
-    api_base_url='http://localhost:8000',
-    hmac_secret='your-secret',
-    api_key='optional-api-key'
+    api_base_url="http://localhost:8000",
+    hmac_secret="your-secret",
+    api_key="optional-api-key",
 )
 
 # Run on project
-pipeline.run_project_pipeline(
-    project_id='abc-123-def',
-    model_size='n',
-    limit=50
-)
+pipeline.run_project_pipeline(project_id="abc-123-def", model_size="n", limit=50)
 ```
 
 ## Performance Tips

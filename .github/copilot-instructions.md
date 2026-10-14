@@ -61,6 +61,13 @@ These guidelines are for AI coding agents (like GitHub Copilot Chat) working in 
   - Headers validated by `utils.dependencies.require_hmac_auth` (do not bypass; reuse in new ML‑facing routes).
 - When modifying this flow, mirror existing patterns in `backend/routers/ml_analyses.py` and tests under `backend/tests/test_image_classifications_router.py`, `test_ml_pipeline.py` (in `scripts/`).
 
+## Analyze Pipeline Studio
+
+- Pipeline Studio methods live under `backend/analyze_toolbox/`; OpenCV and SAM blocks are toolkit-backed adapters in `backend/utils/segmentation_integrations/`.
+- Keep OpenCV/SAM native toolkit imports lazy in adapter runtime loaders so pytest-xdist collection does not import native extensions in worker startup.
+- GitLab CI runs backend tests through `test/run_tests.sh --backend` with `BACKEND_TEST_WORKERS=2`; keep CI-compatible backend coverage in that wrapper rather than adding separate pytest commands.
+- Analyze execution must accept ordinary image bytes and representative slices from `.npy`, `.npz`, `.inspiro`, and multi-frame TIFF volume images. Source bytes may come from object storage or inline metadata as raw base64/data URLs; strip and validate data URL wrappers before decoding. Preserve the default OpenCV `options.min_peak_distance_px = 1` and SAM foreground fallback behavior so Run Example works with no custom parameters.
+
 ## Frontend Architecture & Patterns
 
 - React app under `frontend/`:
@@ -86,12 +93,20 @@ Images can be organized into named groups (e.g., by part or serial number) using
 - `image_groups`: `id`, `project_id`, `identifier` (unique per project), `display_name`; `data_instances.group_id` FK added (nullable).
 - Migration: `backend/alembic/versions/20260306_0004_add_image_groups.py`.
 - Backend router: `routers/groups.py` -- CRUD endpoints at `/api/projects/{id}/groups`, `/api/groups/{id}`, `/api/groups/{id}/images`, `/api/projects/{id}/has-groups`.
-- Upload (`POST /api/projects/{id}/images`) accepts optional `group_identifier` form field to auto-assign the uploaded image to a group (find-or-create).
+- Upload (`POST /api/projects/{id}/images`) accepts optional `group_identifier` for non-PT1 group assignment. PT1 uploads must not pre-assign images to groups or inspection parts; PT1 image-to-part assignment happens in Project Data -> Images to Parts.
 - List images supports `?group_id=` and `?ungrouped=true` filters.
 - Frontend: `GroupedImagesPage.js` (project groups overview), `GroupGalleryView.js` (gallery for one group), `ImageGroupPanel.js` (sidebar in ImageView).
 - `Project.js` calls `/api/projects/{id}/has-groups` on load; if true, renders `GroupedImagesPage` instead of the flat `ImageGallery`.
-- `ImageUploader.js` shows a "Use as Group Identifier" dropdown when `FilenameMetadataExtractor` keys are configured.
+- `ImageUploader.js` shows a "Use as Group Identifier" dropdown for non-PT1 projects when `FilenameMetadataExtractor` keys are configured.
 - Tests: `backend/tests/test_groups.py`.
+
+## Inspection Workbench All Part
+
+- `InspectionWorkbenchPanel` renders a frontend-only `All` row above real inspection parts using the reserved selection ID `__all_parts__`.
+- `All` aggregates mapped, loaded images from the currently visible/filtered parts so view and modality toggles can show the same view, such as optical top, across every matching part.
+- Do not send `__all_parts__` to backend part mutation endpoints. Review updates, annotation edits, image ordering, crop creation, and source-image visibility changes must remain scoped to real parts.
+- Real parts use the `Sort images` dropdown for common persisted tile orders; keep it backed by the existing image display order endpoint and hidden for `All` or read-only inspection.
+- The `All` row and real part rows are collapsible; collapsed rows should stay single-line summaries.
 
 ## Conventions & Constraints
 
@@ -102,6 +117,7 @@ Images can be organized into named groups (e.g., by part or serial number) using
 - When adding features:
   - Backend: router + CRUD + schemas + tests (`backend/tests/`), and migrations if DB models change.
   - Frontend: view + components under `frontend/src/components/` with matching tests if applicable.
+- Dashboard Settings exposes read-only deployment build metadata from `GITLAB_COMMIT_SHA`; GitLab CI passes the commit SHA into container images during builds.
 
 ## Pull Request Checklist
 

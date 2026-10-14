@@ -10,32 +10,38 @@ Authentication: API key (Bearer token) or debug-mode headers (X-User-Email).
 All endpoints use the unified /api prefix.
 """
 
+import argparse
 import os
 import sys
-import json
-import argparse
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 from io import BytesIO
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
 # Load environment variables from .env file in project root
 project_root = Path(__file__).parent.parent
-load_dotenv(project_root / '.env')
+load_dotenv(project_root / ".env")
 
-import requests
-from PIL import Image
+import contextlib
+
 import cv2
 import numpy as np
+import requests
+from PIL import Image
 
 
 class HeatmapPipeline:
     """Heatmap generation pipeline with ML API integration"""
 
-    def __init__(self, api_base_url: str, api_key: Optional[str] = None,
-                 user_email: str = "test@example.com", output_dir: Optional[str] = None):
-        self.api_base_url = api_base_url.rstrip('/')
+    def __init__(
+        self,
+        api_base_url: str,
+        api_key: str | None = None,
+        user_email: str = "test@example.com",
+        output_dir: str | None = None,
+    ):
+        self.api_base_url = api_base_url.rstrip("/")
         self.api_key = api_key
         self.user_email = user_email
         self.output_dir = output_dir
@@ -48,10 +54,10 @@ class HeatmapPipeline:
 
         # Set up authentication headers
         if self.api_key:
-            self.session.headers.update({'Authorization': f'Bearer {self.api_key}'})
+            self.session.headers.update({"Authorization": f"Bearer {self.api_key}"})
         else:
             # For dev/testing without API key -- assumes DEBUG=true on backend
-            self.session.headers.update({'X-User-Email': self.user_email})
+            self.session.headers.update({"X-User-Email": self.user_email})
 
     def _get_url(self, path: str) -> str:
         """
@@ -63,15 +69,17 @@ class HeatmapPipeline:
         Returns:
             Full URL with /api prefix
         """
-        path = path.lstrip('/')
+        path = path.lstrip("/")
         return f"{self.api_base_url}/api/{path}"
 
-    def get_project_images(self, project_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_project_images(
+        self, project_id: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
         """Fetch images from a project"""
         print(f"Fetching images from project {project_id}")
 
         url = self._get_url(f"projects/{project_id}/images")
-        params = {'skip': 0, 'limit': limit}
+        params = {"skip": 0, "limit": limit}
 
         response = self.session.get(url, params=params)
         response.raise_for_status()
@@ -80,7 +88,7 @@ class HeatmapPipeline:
         print(f"Found {len(images)} images")
         return images
 
-    def get_image_analyses(self, image_id: str) -> List[Dict[str, Any]]:
+    def get_image_analyses(self, image_id: str) -> list[dict[str, Any]]:
         """Fetch existing analyses for an image"""
         url = self._get_url(f"images/{image_id}/analyses")
 
@@ -89,12 +97,12 @@ class HeatmapPipeline:
             response.raise_for_status()
             data = response.json()
             # API returns {"analyses": [...], "total": N}
-            return data.get('analyses', [])
+            return data.get("analyses", [])
         except Exception as e:
             print(f"  Failed to fetch analyses for image {image_id}: {e}")
             return []
 
-    def download_image(self, image_id: str) -> tuple[np.ndarray, Dict[str, Any]]:
+    def download_image(self, image_id: str) -> tuple[np.ndarray, dict[str, Any]]:
         """Download image from API and return as numpy array"""
         print(f"  Downloading image {image_id}")
 
@@ -104,14 +112,14 @@ class HeatmapPipeline:
         info_response.raise_for_status()
 
         download_info = info_response.json()
-        content_url = download_info.get('url')
+        content_url = download_info.get("url")
 
         if not content_url:
             raise ValueError(f"No content URL in download response: {download_info}")
 
         # Now download the actual image content
-        if not content_url.startswith('http'):
-            if not content_url.startswith('/api/'):
+        if not content_url.startswith("http"):
+            if not content_url.startswith("/api/"):
                 content_url = f"/api{content_url}"
             content_url = f"{self.api_base_url}{content_url}"
 
@@ -120,9 +128,10 @@ class HeatmapPipeline:
 
         # Get image metadata from headers
         metadata = {
-            'content_type': response.headers.get('Content-Type', 'image/jpeg'),
-            'filename': download_info.get('object_key', '').split('/')[-1] or f"{image_id}.jpg",
-            'object_key': download_info.get('object_key', '')
+            "content_type": response.headers.get("Content-Type", "image/jpeg"),
+            "filename": download_info.get("object_key", "").split("/")[-1]
+            or f"{image_id}.jpg",
+            "object_key": download_info.get("object_key", ""),
         }
 
         # Convert to numpy array for OpenCV
@@ -130,25 +139,33 @@ class HeatmapPipeline:
 
         # Debug: check if we got any content
         if len(response.content) == 0:
-            raise ValueError(f"Empty response from {content_url}. Status: {response.status_code}, Headers: {dict(response.headers)}")
+            raise ValueError(
+                f"Empty response from {content_url}. Status: {response.status_code}, Headers: {dict(response.headers)}"
+            )
 
-        content_type = response.headers.get('Content-Type', '')
+        content_type = response.headers.get("Content-Type", "")
         print(f"  Received {len(response.content)} bytes, content-type: {content_type}")
 
         # Check if we got HTML (error page) instead of image
-        if 'text/html' in content_type:
-            error_body = response.content.decode('utf-8', errors='ignore')[:500]
-            raise ValueError(f"Got HTML error page instead of image from {content_url}:\n{error_body}")
+        if "text/html" in content_type:
+            error_body = response.content.decode("utf-8", errors="ignore")[:500]
+            raise ValueError(
+                f"Got HTML error page instead of image from {content_url}:\n{error_body}"
+            )
 
         pil_image = Image.open(image_bytes)
         image_array = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
         print(f"  Downloaded {metadata['filename']}")
-        print(f"  Image dimensions - Height: {image_array.shape[0]}, Width: {image_array.shape[1]}")
+        print(
+            f"  Image dimensions - Height: {image_array.shape[0]}, Width: {image_array.shape[1]}"
+        )
 
         return image_array, metadata
 
-    def create_analysis(self, image_id: str, model_version: str, heatmap_type: str) -> str:
+    def create_analysis(
+        self, image_id: str, model_version: str, heatmap_type: str
+    ) -> str:
         """Create ML analysis entry"""
         print(f"  Creating analysis for image {image_id}")
 
@@ -159,8 +176,8 @@ class HeatmapPipeline:
             "model_version": model_version,
             "parameters": {
                 "heatmap_type": heatmap_type,
-                "method": "random" if heatmap_type == "random" else "unknown"
-            }
+                "method": "random" if heatmap_type == "random" else "unknown",
+            },
         }
 
         response = self.session.post(url, json=data)
@@ -168,10 +185,12 @@ class HeatmapPipeline:
         # Add better error handling
         if not response.ok:
             error_detail = response.text
-            raise ValueError(f"Failed to create analysis: {response.status_code} - {error_detail}")
+            raise ValueError(
+                f"Failed to create analysis: {response.status_code} - {error_detail}"
+            )
 
         analysis = response.json()
-        analysis_id = analysis['id']
+        analysis_id = analysis["id"]
         print(f"  Created analysis {analysis_id}")
         return analysis_id
 
@@ -223,7 +242,7 @@ class HeatmapPipeline:
             # Create meshgrid for Gaussian
             y, x = np.ogrid[:height, :width]
             gaussian = intensity * np.exp(
-                -((x - cx)**2 / (2 * sigma_x**2) + (y - cy)**2 / (2 * sigma_y**2))
+                -((x - cx) ** 2 / (2 * sigma_x**2) + (y - cy) ** 2 / (2 * sigma_y**2))
             )
 
             # Add to heatmap (accumulate)
@@ -249,7 +268,9 @@ class HeatmapPipeline:
         mask_transition = ~mask_low & ~mask_high
 
         binary_heatmap[mask_high] = 1.0
-        binary_heatmap[mask_transition] = (heatmap[mask_transition] - threshold_low) / (threshold_high - threshold_low)
+        binary_heatmap[mask_transition] = (heatmap[mask_transition] - threshold_low) / (
+            threshold_high - threshold_low
+        )
 
         # Apply additional Gaussian blur for softer edges
         binary_heatmap = cv2.GaussianBlur(binary_heatmap, (15, 15), 0)
@@ -266,32 +287,43 @@ class HeatmapPipeline:
         # Draw iso curves around key regions
         # Define threshold levels for iso curves (as percentages of max intensity)
         iso_levels = [0.3, 0.5, 0.7]  # 30%, 50%, 70% intensity levels
-        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]  # Blue, Green, Red for different levels
+        colors = [
+            (255, 0, 0),
+            (0, 255, 0),
+            (0, 0, 255),
+        ]  # Blue, Green, Red for different levels
 
-        for level, color in zip(iso_levels, colors):
+        for level, color in zip(iso_levels, colors, strict=False):
             # Create binary mask for this iso level
             threshold_value = int(level * 255)
-            _, threshold_mask = cv2.threshold(heatmap_uint8, threshold_value, 255, cv2.THRESH_BINARY)
+            _, threshold_mask = cv2.threshold(
+                heatmap_uint8, threshold_value, 255, cv2.THRESH_BINARY
+            )
 
             # Find contours
-            contours, _ = cv2.findContours(threshold_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours, _ = cv2.findContours(
+                threshold_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
 
             # Draw contours on the heatmap
-            cv2.drawContours(heatmap_color, contours, -1, color, 2)  # -1 means all contours, 2 is thickness
+            cv2.drawContours(
+                heatmap_color, contours, -1, color, 2
+            )  # -1 means all contours, 2 is thickness
 
-        print(f"  Generated binary heatmap with iso curves shape: {heatmap_color.shape}")
+        print(
+            f"  Generated binary heatmap with iso curves shape: {heatmap_color.shape}"
+        )
         return heatmap_color
 
-    def upload_artifact(self, analysis_id: str, artifact_type: str, filename: str, data: bytes):
+    def upload_artifact(
+        self, analysis_id: str, artifact_type: str, filename: str, data: bytes
+    ):
         """Upload artifact to S3 via presigned URL"""
         print(f"  Uploading {artifact_type}: {filename}")
 
         # Get presigned URL
         url = self._get_url(f"analyses/{analysis_id}/artifacts/presign")
-        presign_data = {
-            "artifact_type": artifact_type,
-            "filename": filename
-        }
+        presign_data = {"artifact_type": artifact_type, "filename": filename}
 
         response = self.session.post(url, json=presign_data)
 
@@ -302,21 +334,22 @@ class HeatmapPipeline:
         response.raise_for_status()
 
         presign_response = response.json()
-        upload_url = presign_response['upload_url']
-        storage_path = presign_response['storage_path']
+        upload_url = presign_response["upload_url"]
+        storage_path = presign_response["storage_path"]
 
         # Upload to S3
-        headers = {'Content-Type': 'image/png'}
+        headers = {"Content-Type": "image/png"}
         upload_response = requests.put(upload_url, data=data, headers=headers)
         upload_response.raise_for_status()
 
         print(f"  Uploaded to {storage_path}")
         return storage_path
 
-    def submit_annotations(self, analysis_id: str, heatmap_path: str,
-                          image_shape: tuple, heatmap_type: str):
+    def submit_annotations(
+        self, analysis_id: str, heatmap_path: str, image_shape: tuple, heatmap_type: str
+    ):
         """Submit heatmap annotation"""
-        print(f"  Submitting heatmap annotation")
+        print("  Submitting heatmap annotation")
 
         # Get image dimensions (height, width, channels)
         image_height, image_width = image_shape[0], image_shape[1]
@@ -324,31 +357,32 @@ class HeatmapPipeline:
         print(f"  Image dimensions - Width: {image_width}, Height: {image_height}")
 
         # Create heatmap annotation
-        annotations = [{
-            "annotation_type": "heatmap",
-            "data": {
-                "width": image_width,
-                "height": image_height,
-                "method": heatmap_type,
-                "model_name": "random_heatmap_generator",
-                "description": f"Randomly generated heatmap for testing ({heatmap_type})"
-            },
-            "storage_path": heatmap_path,
-            "ordering": 0
-        }]
+        annotations = [
+            {
+                "annotation_type": "heatmap",
+                "data": {
+                    "width": image_width,
+                    "height": image_height,
+                    "method": heatmap_type,
+                    "model_name": "random_heatmap_generator",
+                    "description": f"Randomly generated heatmap for testing ({heatmap_type})",
+                },
+                "storage_path": heatmap_path,
+                "ordering": 0,
+            }
+        ]
 
         url = self._get_url(f"analyses/{analysis_id}/annotations:bulk")
-        data = {
-            "annotations": annotations,
-            "mode": "append"
-        }
+        data = {"annotations": annotations, "mode": "append"}
 
         response = self.session.post(url, json=data)
         response.raise_for_status()
 
         print(f"  Submitted {len(annotations)} annotation(s)")
 
-    def finalize_analysis(self, analysis_id: str, status: str = "completed", error_message: str = None):
+    def finalize_analysis(
+        self, analysis_id: str, status: str = "completed", error_message: str = None
+    ):
         """Finalize analysis"""
         print(f"  Finalizing analysis as {status}")
 
@@ -359,13 +393,13 @@ class HeatmapPipeline:
 
         response = self.session.post(url, json=data)
         response.raise_for_status()
-        print(f"  Analysis finalized")
+        print("  Analysis finalized")
 
     def process_image(self, image_id: str, model_version: str, heatmap_type: str):
         """Process a single image end-to-end"""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Processing image: {image_id}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         analysis_id = None
         try:
@@ -403,15 +437,20 @@ class HeatmapPipeline:
                 print(f"  Saved overlay to: {overlay_path}")
 
             # Encode as PNG
-            _, heatmap_bytes = cv2.imencode('.png', heatmap)
+            _, heatmap_bytes = cv2.imencode(".png", heatmap)
 
             # Upload heatmap artifact
             heatmap_path = self.upload_artifact(
-                analysis_id, 'heatmap', f'heatmap_{analysis_id}.png', heatmap_bytes.tobytes()
+                analysis_id,
+                "heatmap",
+                f"heatmap_{analysis_id}.png",
+                heatmap_bytes.tobytes(),
             )
 
             # Submit annotations
-            self.submit_annotations(analysis_id, heatmap_path, image.shape, heatmap_type)
+            self.submit_annotations(
+                analysis_id, heatmap_path, image.shape, heatmap_type
+            )
 
             # Finalize
             self.finalize_analysis(analysis_id, "completed")
@@ -421,23 +460,26 @@ class HeatmapPipeline:
         except Exception as e:
             print(f"Error processing image {image_id}: {e}")
             if analysis_id:
-                try:
+                with contextlib.suppress(BaseException):
                     self.finalize_analysis(analysis_id, "failed", str(e))
-                except:
-                    pass
             raise
 
-    def run_project_pipeline(self, project_id: str, heatmap_type: str = 'random',
-                           limit: int = 50, skip_existing: bool = False):
+    def run_project_pipeline(
+        self,
+        project_id: str,
+        heatmap_type: str = "random",
+        limit: int = 50,
+        skip_existing: bool = False,
+    ):
         """Run pipeline on all images in a project"""
-        print(f"\nStarting Heatmap Pipeline")
+        print("\nStarting Heatmap Pipeline")
         print(f"Project ID: {project_id}")
         print(f"Heatmap Type: {heatmap_type}")
         print(f"Image Limit: {limit}")
         print(f"Skip Existing: {skip_existing}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
-        model_version = f"random_v1.0"
+        model_version = "random_v1.0"
 
         # Get project images
         images = self.get_project_images(project_id, limit)
@@ -451,20 +493,28 @@ class HeatmapPipeline:
         skipped_count = 0
 
         if skip_existing:
-            print(f"Checking for existing analyses...")
+            print("Checking for existing analyses...")
             for image in images:
-                analyses = self.get_image_analyses(image['id'])
+                analyses = self.get_image_analyses(image["id"])
                 # Only skip if there's at least one completed analysis
-                completed_analyses = [a for a in analyses if a.get('status') == 'completed']
+                completed_analyses = [
+                    a for a in analyses if a.get("status") == "completed"
+                ]
                 if completed_analyses:
-                    print(f"  Skipping {image['id']} (has {len(completed_analyses)} completed analysis/analyses)")
+                    print(
+                        f"  Skipping {image['id']} (has {len(completed_analyses)} completed analysis/analyses)"
+                    )
                     skipped_count += 1
                 else:
                     if analyses:
-                        non_completed = [a.get('status') for a in analyses]
-                        print(f"  Including {image['id']} (has analyses but none completed: {non_completed})")
+                        non_completed = [a.get("status") for a in analyses]
+                        print(
+                            f"  Including {image['id']} (has analyses but none completed: {non_completed})"
+                        )
                     images_to_process.append(image)
-            print(f"Filtered {len(images)} images -> {len(images_to_process)} to process ({skipped_count} skipped)\n")
+            print(
+                f"Filtered {len(images)} images -> {len(images_to_process)} to process ({skipped_count} skipped)\n"
+            )
         else:
             images_to_process = images
 
@@ -477,16 +527,16 @@ class HeatmapPipeline:
         for i, image in enumerate(images_to_process, 1):
             print(f"\n[{i}/{len(images_to_process)}] Processing image...")
             try:
-                self.process_image(image['id'], model_version, heatmap_type)
+                self.process_image(image["id"], model_version, heatmap_type)
                 success_count += 1
             except Exception as e:
                 print(f"Failed to process image: {e}")
                 # Continue processing other images but track failures
 
         # Summary
-        print(f"\n{'='*60}")
-        print(f"Pipeline Complete!")
-        print(f"{'='*60}")
+        print(f"\n{'=' * 60}")
+        print("Pipeline Complete!")
+        print(f"{'=' * 60}")
         print(f"Total Images: {len(images)}")
         if skip_existing:
             print(f"Skipped (existing): {skipped_count}")
@@ -501,32 +551,54 @@ class HeatmapPipeline:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Heatmap ML Pipeline Integration Test')
-    parser.add_argument('project_id', help='Project ID to process')
-    parser.add_argument('--api-url', default='http://localhost:8000',
-                       help='API base URL (default: http://localhost:8000)')
-    parser.add_argument('--api-key', help='API key for Bearer token authentication')
-    parser.add_argument('--heatmap-type', default='random', choices=['random'],
-                       help='Heatmap type (currently only random is supported)')
-    parser.add_argument('--limit', type=int, default=50,
-                       help='Maximum number of images to process (default: 50)')
-    parser.add_argument('--skip-existing', action='store_true',
-                       help='Skip images that already have ML analysis results')
-    parser.add_argument('--output-dir', type=str, default=None,
-                       help='Directory to save heatmaps locally for inspection (optional)')
+    parser = argparse.ArgumentParser(description="Heatmap ML Pipeline Integration Test")
+    parser.add_argument("project_id", help="Project ID to process")
+    parser.add_argument(
+        "--api-url",
+        default="http://localhost:8000",
+        help="API base URL (default: http://localhost:8000)",
+    )
+    parser.add_argument("--api-key", help="API key for Bearer token authentication")
+    parser.add_argument(
+        "--heatmap-type",
+        default="random",
+        choices=["random"],
+        help="Heatmap type (currently only random is supported)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of images to process (default: 50)",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip images that already have ML analysis results",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory to save heatmaps locally for inspection (optional)",
+    )
 
     args = parser.parse_args()
 
     # Get API key from args or environment
-    api_key = args.api_key or os.environ.get('API_KEY')
+    api_key = args.api_key or os.environ.get("API_KEY")
 
     # Get user email from environment or default
-    user_email = os.environ.get('MOCK_USER_EMAIL', 'test@example.com')
+    user_email = os.environ.get("MOCK_USER_EMAIL", "test@example.com")
 
     # Run pipeline
-    pipeline = HeatmapPipeline(args.api_url, api_key, user_email=user_email, output_dir=args.output_dir)
-    pipeline.run_project_pipeline(args.project_id, args.heatmap_type, args.limit, args.skip_existing)
+    pipeline = HeatmapPipeline(
+        args.api_url, api_key, user_email=user_email, output_dir=args.output_dir
+    )
+    pipeline.run_project_pipeline(
+        args.project_id, args.heatmap_type, args.limit, args.skip_existing
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
