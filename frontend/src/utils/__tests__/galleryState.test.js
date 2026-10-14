@@ -7,6 +7,9 @@ import {
   filterByReviewStatus,
   sortImages,
   applyGalleryFilters,
+  loadGalleryStateFromUrl,
+  getGalleryStateFromUrlOrStorage,
+  preserveGalleryQueryParams,
   STORAGE_PREFIX,
   MAX_ENTRIES,
   MAX_AGE_MS,
@@ -138,6 +141,55 @@ describe('galleryState utilities', () => {
     });
   });
 
+  describe('URL-backed gallery state', () => {
+    test('URL query params override localStorage state without thumbnail preference', () => {
+      saveGalleryState('url-key', {
+        sortBy: 'size',
+        sortOrder: 'asc',
+        searchField: 'filename',
+        searchValue: 'stored',
+        reviewFilter: 'all',
+        thumbnailSize: 300,
+      });
+      const params = new URLSearchParams('searchField=content_type&searchValue=png&sortBy=name&sortOrder=desc&reviewFilter=pass');
+
+      const state = getGalleryStateFromUrlOrStorage(params, 'url-key');
+
+      expect(state).toMatchObject({
+        searchField: 'content_type',
+        searchValue: 'png',
+        sortBy: 'name',
+        sortOrder: 'desc',
+        reviewFilter: 'pass',
+        thumbnailSize: 300,
+      });
+    });
+
+    test('copied URL state can be parsed without preexisting localStorage', () => {
+      const params = new URLSearchParams('q=brick&searchField=metadata&sortBy=size&sortOrder=asc&reviewFilter=unreviewed');
+
+      expect(loadGalleryStateFromUrl(params)).toEqual({
+        searchField: 'metadata',
+        searchValue: 'brick',
+        sortBy: 'size',
+        sortOrder: 'asc',
+        reviewFilter: 'unreviewed',
+      });
+    });
+
+    test('preserves only recognized gallery params plus explicit extras', () => {
+      const params = new URLSearchParams('project=p1&galleryKey=g1&searchValue=brick&sortBy=name&thumbnailSize=500&unknown=x');
+      const preserved = preserveGalleryQueryParams(params, { project: 'p1' });
+
+      expect(preserved.toString()).toContain('project=p1');
+      expect(preserved.toString()).toContain('galleryKey=g1');
+      expect(preserved.toString()).toContain('searchValue=brick');
+      expect(preserved.toString()).toContain('sortBy=name');
+      expect(preserved.has('thumbnailSize')).toBe(false);
+      expect(preserved.has('unknown')).toBe(false);
+    });
+  });
+
   describe('filterBySearch', () => {
     test('returns all images when searchValue is empty', () => {
       expect(filterBySearch(mockImages, 'filename', '')).toBe(mockImages);
@@ -234,6 +286,22 @@ describe('galleryState utilities', () => {
     test('sorts by name ascending', () => {
       const result = sortImages(mockImages, 'name');
       expect(result.map(i => i.id)).toEqual(['img-1', 'img-2', 'img-3']);
+    });
+
+    test('sorts by name using natural order for numeric filenames', () => {
+      const numericImages = [
+        { id: 'a', filename: 'image10.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+        { id: 'b', filename: 'image2.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+        { id: 'c', filename: 'image1.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+        { id: 'd', filename: 'image20.jpg', size_bytes: 100, created_at: '2023-01-01T00:00:00Z' },
+      ];
+      const result = sortImages(numericImages, 'name');
+      expect(result.map(i => i.filename)).toEqual([
+        'image1.jpg',
+        'image2.jpg',
+        'image10.jpg',
+        'image20.jpg',
+      ]);
     });
 
     test('sorts by size descending', () => {

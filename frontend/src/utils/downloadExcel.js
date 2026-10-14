@@ -1,3 +1,5 @@
+import { fetchProjectExcelExportResponse } from '../api/exports';
+
 /**
  * Download an Excel export for a project.
  *
@@ -6,7 +8,7 @@
  * @returns {Promise<void>}
  */
 export async function downloadExcel(projectId, projectName) {
-  const response = await fetch(`/api/projects/${projectId}/export-excel`);
+  const response = await fetchProjectExcelExportResponse(projectId);
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
     throw new Error(errData.detail || `Export failed (${response.status})`);

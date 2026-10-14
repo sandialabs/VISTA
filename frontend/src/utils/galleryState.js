@@ -9,10 +9,84 @@ const STORAGE_PREFIX = 'gallery_state_';
 const MAX_ENTRIES = 100;
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+const GALLERY_QUERY_PARAM_NAMES = [
+  'galleryKey',
+  'groupId',
+  'ungrouped',
+  'searchField',
+  'searchValue',
+  'q',
+  'sortBy',
+  'sortOrder',
+  'reviewFilter',
+];
+
+function hasGalleryQueryParams(searchParams) {
+  return GALLERY_QUERY_PARAM_NAMES.some(name => searchParams.has(name));
+}
+
+function defaultSortOrderFor(sortBy) {
+  return sortBy === 'name' ? 'asc' : 'desc';
+}
+
+function normalizeSortOrder(sortOrder, sortBy = 'date') {
+  if (sortOrder === 'asc' || sortOrder === 'desc') return sortOrder;
+  return defaultSortOrderFor(sortBy);
+}
+
+function loadGalleryStateFromUrl(searchParams) {
+  const state = {};
+  if (searchParams.has('searchField')) state.searchField = searchParams.get('searchField') || GALLERY_STATE_DEFAULTS.searchField;
+  if (searchParams.has('searchValue') || searchParams.has('q')) {
+    state.searchValue = searchParams.get('searchValue') ?? searchParams.get('q') ?? '';
+  }
+  if (searchParams.has('sortBy')) state.sortBy = searchParams.get('sortBy') || GALLERY_STATE_DEFAULTS.sortBy;
+  if (searchParams.has('sortOrder')) state.sortOrder = normalizeSortOrder(searchParams.get('sortOrder'), state.sortBy);
+  if (searchParams.has('reviewFilter')) state.reviewFilter = searchParams.get('reviewFilter') || GALLERY_STATE_DEFAULTS.reviewFilter;
+  return state;
+}
+
+function getGalleryStateFromUrlOrStorage(searchParams, key) {
+  return {
+    ...loadGalleryStateWithDefaults(key),
+    ...(hasGalleryQueryParams(searchParams) && (!searchParams.get('galleryKey') || searchParams.get('galleryKey') === key) ? loadGalleryStateFromUrl(searchParams) : {}),
+  };
+}
+
+function writeGalleryStateToSearchParams(searchParams, state) {
+  const params = new URLSearchParams(searchParams);
+  params.set('galleryKey', state.galleryKey);
+  params.set('searchField', state.searchField || GALLERY_STATE_DEFAULTS.searchField);
+  params.set('searchValue', state.searchValue || '');
+  params.set('sortBy', state.sortBy || GALLERY_STATE_DEFAULTS.sortBy);
+  params.set('sortOrder', normalizeSortOrder(state.sortOrder, state.sortBy));
+  params.set('reviewFilter', state.reviewFilter || GALLERY_STATE_DEFAULTS.reviewFilter);
+  if (state.groupId) params.set('groupId', state.groupId);
+  else params.delete('groupId');
+  if (state.ungrouped) params.set('ungrouped', 'true');
+  else params.delete('ungrouped');
+  return params;
+}
+
+function preserveGalleryQueryParams(searchParams, extraParams = {}) {
+  const params = new URLSearchParams();
+  GALLERY_QUERY_PARAM_NAMES.forEach(name => {
+    const value = searchParams.get(name);
+    if (value !== null) params.set(name, value);
+  });
+  const extras = new URLSearchParams();
+  Object.entries(extraParams).forEach(([key, value]) => {
+    if (value !== null && typeof value !== 'undefined') extras.set(key, value);
+  });
+  for (const [key, value] of params.entries()) extras.set(key, value);
+  return extras;
+}
+
 const GALLERY_STATE_DEFAULTS = {
   viewMode: 'grid',
   thumbnailSize: 220,
   sortBy: 'date',
+  sortOrder: 'desc',
   searchField: 'filename',
   searchValue: '',
   reviewFilter: 'all',
@@ -56,6 +130,8 @@ function loadGalleryStateWithDefaults(key) {
     }
     merged.viewMode = 'grid';
   }
+
+  merged.sortOrder = normalizeSortOrder(saved.sortOrder, merged.sortBy);
 
   // Clamp thumbnailSize to the supported slider range
   const size = Number(merged.thumbnailSize);
@@ -180,16 +256,17 @@ function filterByReviewStatus(images, reviewFilter, reviewStatuses) {
 /**
  * Sort a copy of the images array by the given sort key.
  */
-function sortImages(images, sortBy) {
+function sortImages(images, sortBy, sortOrder) {
+  const direction = normalizeSortOrder(sortOrder, sortBy) === 'asc' ? 1 : -1;
   return [...images].sort((a, b) => {
     switch (sortBy) {
       case 'name':
-        return (a.filename || '').localeCompare(b.filename || '');
+        return direction * (a.filename || '').localeCompare(b.filename || '', undefined, { numeric: true, sensitivity: 'base' });
       case 'size':
-        return (b.size_bytes || 0) - (a.size_bytes || 0);
+        return direction * ((a.size_bytes || 0) - (b.size_bytes || 0));
       case 'date':
       default:
-        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+        return direction * (new Date(a.created_at || 0) - new Date(b.created_at || 0));
     }
   });
 }
@@ -198,10 +275,10 @@ function sortImages(images, sortBy) {
  * Apply the full filter-then-sort pipeline in one call.
  * `reviewStatuses` may be null/undefined when no review filter is active.
  */
-function applyGalleryFilters(images, { searchField, searchValue, reviewFilter, sortBy, reviewStatuses }) {
+function applyGalleryFilters(images, { searchField, searchValue, reviewFilter, sortBy, sortOrder, reviewStatuses }) {
   let result = filterBySearch(images, searchField, searchValue);
   result = filterByReviewStatus(result, reviewFilter, reviewStatuses);
-  result = sortImages(result, sortBy || 'date');
+  result = sortImages(result, sortBy || 'date', sortOrder);
   return result;
 }
 
@@ -218,4 +295,10 @@ export {
   filterByReviewStatus,
   sortImages,
   applyGalleryFilters,
+  GALLERY_QUERY_PARAM_NAMES,
+  hasGalleryQueryParams,
+  loadGalleryStateFromUrl,
+  getGalleryStateFromUrlOrStorage,
+  writeGalleryStateToSearchParams,
+  preserveGalleryQueryParams,
 };

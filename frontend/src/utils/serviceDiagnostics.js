@@ -1,3 +1,5 @@
+import { apiFetch, encodePathSegment } from '../api/client';
+
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 2500;
 
 function getDiagnosticTimeoutMs() {
@@ -15,7 +17,7 @@ export async function probeService(url, label, timeoutMs = getDiagnosticTimeoutM
   }, timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await apiFetch(url, {
       method: 'GET',
       cache: 'no-store',
       redirect: 'follow',
@@ -52,7 +54,7 @@ export async function diagnoseBackendServices(projectId) {
   if (projectId) {
     probes.push({
       label: 'Project configuration (Postgres)',
-      url: `/api/projects/${projectId}/configuration`,
+      url: `/api/projects/${encodePathSegment(projectId)}/configuration`,
     });
   }
 

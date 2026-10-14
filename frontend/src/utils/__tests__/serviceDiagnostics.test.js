@@ -29,11 +29,11 @@ describe('serviceDiagnostics', () => {
     expect(result.error).toContain('Timed out after 12ms');
   });
 
-  test('diagnoseBackendServices includes project probe when projectId exists', async () => {
+  test('diagnoseBackendServices includes encoded project probe when projectId exists', async () => {
     fetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK' });
-    const results = await diagnoseBackendServices('proj-7');
+    const results = await diagnoseBackendServices('proj 7');
     expect(results).toHaveLength(3);
-    expect(fetch).toHaveBeenCalledWith('/api/projects/proj-7/configuration', expect.any(Object));
+    expect(fetch).toHaveBeenCalledWith('/api/projects/proj%207/configuration', expect.any(Object));
   });
 
   test('formatServiceDiagnosticReport handles empty and populated diagnostics', () => {
