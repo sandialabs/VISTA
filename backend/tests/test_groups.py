@@ -1,17 +1,22 @@
 """Tests for the image grouping feature."""
-import pytest
-import uuid
+
 import io
+import uuid
+
+import pytest
 
 
 @pytest.fixture
 def _setup_project(client):
     """Create a project, return project_id."""
-    resp = client.post("/api/projects", json={
-        "name": "Group Test Project",
-        "description": "Project for group tests",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects",
+        json={
+            "name": "Group Test Project",
+            "description": "Project for group tests",
+            "meta_group_id": "test-group",
+        },
+    )
     assert resp.status_code in (200, 201)
     return resp.json()["id"]
 
@@ -62,7 +67,9 @@ class TestGroupCRUD:
     def test_create_duplicate_group_returns_409(self, client, _setup_project):
         project_id = _setup_project
         client.post(f"/api/projects/{project_id}/groups", json={"identifier": "DUP"})
-        resp = client.post(f"/api/projects/{project_id}/groups", json={"identifier": "DUP"})
+        resp = client.post(
+            f"/api/projects/{project_id}/groups", json={"identifier": "DUP"}
+        )
         assert resp.status_code == 409
 
     def test_create_group_strips_whitespace(self, client, _setup_project):
@@ -102,11 +109,19 @@ class TestGroupCRUD:
 
     def test_search_escapes_like_wildcards(self, client, _setup_project):
         project_id = _setup_project
-        client.post(f"/api/projects/{project_id}/groups", json={"identifier": "100%_done"})
-        client.post(f"/api/projects/{project_id}/groups", json={"identifier": "100X done"})
-        client.post(f"/api/projects/{project_id}/groups", json={"identifier": "1005 done"})
+        client.post(
+            f"/api/projects/{project_id}/groups", json={"identifier": "100%_done"}
+        )
+        client.post(
+            f"/api/projects/{project_id}/groups", json={"identifier": "100X done"}
+        )
+        client.post(
+            f"/api/projects/{project_id}/groups", json={"identifier": "1005 done"}
+        )
         # Searching for literal "100%" should only match the first group
-        resp = client.get(f"/api/projects/{project_id}/groups", params={"search": "100%"})
+        resp = client.get(
+            f"/api/projects/{project_id}/groups", params={"search": "100%"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
@@ -164,12 +179,16 @@ class TestGroupCRUD:
         assert resp.status_code == 200
         assert resp.json()["display_name"] is None
 
-    def test_update_with_null_identifier_preserves_original(self, client, _setup_project):
+    def test_update_with_null_identifier_preserves_original(
+        self, client, _setup_project
+    ):
         """Sending identifier=null should not bypass the duplicate check or clear the identifier."""
         project_id = _setup_project
         # Create two groups
         client.post(f"/api/projects/{project_id}/groups", json={"identifier": "KEEP"})
-        g2 = client.post(f"/api/projects/{project_id}/groups", json={"identifier": "OTHER"}).json()
+        g2 = client.post(
+            f"/api/projects/{project_id}/groups", json={"identifier": "OTHER"}
+        ).json()
         # PATCH with identifier=null should leave identifier unchanged
         resp = client.patch(
             f"/api/groups/{g2['id']}",
@@ -183,7 +202,9 @@ class TestGroupCRUD:
         """Changing identifier to one that already exists should return 409."""
         project_id = _setup_project
         client.post(f"/api/projects/{project_id}/groups", json={"identifier": "TAKEN"})
-        g2 = client.post(f"/api/projects/{project_id}/groups", json={"identifier": "FREE"}).json()
+        g2 = client.post(
+            f"/api/projects/{project_id}/groups", json={"identifier": "FREE"}
+        ).json()
         resp = client.patch(
             f"/api/groups/{g2['id']}",
             json={"identifier": "TAKEN"},
@@ -249,6 +270,7 @@ class TestGroupCRUD:
 class TestGroupImageAssignment:
     """Test assigning/removing images from groups."""
 
+    @pytest.mark.smoke
     def test_assign_images(self, client, _setup_project_and_images):
         project_id, img1, img2 = _setup_project_and_images
         group = client.post(
@@ -443,7 +465,9 @@ class TestGroupArchiveProtection:
         assert resp.status_code == 403
         assert "archived" in resp.json()["detail"].lower()
 
-    def test_assign_images_blocked_on_archived_project(self, client, _setup_project_and_images):
+    def test_assign_images_blocked_on_archived_project(
+        self, client, _setup_project_and_images
+    ):
         project_id, img1, img2 = _setup_project_and_images
         group = client.post(
             f"/api/projects/{project_id}/groups",
@@ -454,7 +478,9 @@ class TestGroupArchiveProtection:
         assert resp.status_code == 403
         assert "archived" in resp.json()["detail"].lower()
 
-    def test_remove_images_blocked_on_archived_project(self, client, _setup_project_and_images):
+    def test_remove_images_blocked_on_archived_project(
+        self, client, _setup_project_and_images
+    ):
         project_id, img1, img2 = _setup_project_and_images
         group = client.post(
             f"/api/projects/{project_id}/groups",
@@ -462,7 +488,9 @@ class TestGroupArchiveProtection:
         ).json()
         client.post(f"/api/groups/{group['id']}/images", json=[img1])
         client.patch(f"/api/projects/{project_id}/archive")
-        resp = client.request("DELETE", f"/api/groups/{group['id']}/images", json=[img1])
+        resp = client.request(
+            "DELETE", f"/api/groups/{group['id']}/images", json=[img1]
+        )
         assert resp.status_code == 403
         assert "archived" in resp.json()["detail"].lower()
 

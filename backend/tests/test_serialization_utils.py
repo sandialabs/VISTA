@@ -1,9 +1,13 @@
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from utils.serialization import normalize_metadata_dict, to_data_instance_schema
+from utils.serialization import (
+    data_instance_schema_from_values,
+    normalize_metadata_dict,
+    to_data_instance_schema,
+)
 
 
 class FakeImage:
@@ -18,7 +22,7 @@ class FakeImage:
         self.metadata_json = metadata_json
         self.uploaded_by_user_id = "u1"
         self.uploader_id = None
-        self.created_at = datetime.now(timezone.utc)
+        self.created_at = datetime.now(UTC)
         self.updated_at = None
 
 
@@ -44,3 +48,28 @@ def test_to_data_instance_schema_ignores_invalid_metadata_string():
     db_image = FakeImage("{oops")
     schema = to_data_instance_schema(db_image)
     assert schema.metadata_ == {}
+
+
+def test_data_instance_schema_from_values_materializes_complete_write_response():
+    image_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    created_at = datetime(2026, 7, 23, 12, 34, 56, 789)
+
+    schema = data_instance_schema_from_values(
+        id=image_id,
+        project_id=project_id,
+        filename="known.png",
+        object_storage_key=f"{project_id}/{image_id}/known.png",
+        content_type="image/png",
+        size_bytes=42,
+        metadata='{"source": "write-values"}',
+        uploaded_by_user_id="writer@example.com",
+        created_at=created_at,
+    )
+
+    assert schema.id == image_id
+    assert schema.project_id == project_id
+    assert schema.created_at == created_at.replace(tzinfo=UTC)
+    assert schema.metadata_ == {"source": "write-values"}
+    assert schema.updated_at is None
+    assert schema.storage_deleted is False

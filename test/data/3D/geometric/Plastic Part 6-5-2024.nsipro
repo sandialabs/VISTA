@@ -1,0 +1,584 @@
+<NSI Reconstruction Project>
+  <version>2.0
+  <Project Name>Plastic Part 6-5-2024
+  <Project Folder>D:\Shares\Marketing\Plastic Part 6-5-2024
+  <Creation Date>6/5/2024 11:25:18 AM
+  <Comments>Step scan completed at 6/5/2024 11:41:49 AM
+  <Object Radiograph>
+    <file>Radiographs-Plastic Part 6-5-2024\Plastic Part 6-5-2024-radio*.tif
+    <pitch>0.3 0.3
+    <sort numerically>False
+    <number>1200
+    <angleStep>0.3
+  </Object Radiograph>
+  <Correction>
+    <already masked>False
+    <flipH>False
+    <flipV>False
+    <rotate>270
+  </Correction>
+  <Volume>
+    <min>-46.627 -91.846 -36.929
+    <max>42.7386428033509 83.7833376746847 47.5621531958954
+    <resolution>605 1189 572
+    <translation>-0.189576837883323 -0.372060745073547 -0.0234609113994927
+    <orientation>-0.0754572667102327 -0.198293866634351 0.137148723158964 0.96756186938701
+    <brickStore>float
+    <file>Reconstruction\Plastic Part 6-5-2024.nsihdr
+  </Volume>
+  <Computation>
+    <beam hardening coefficient>0
+    <radio binning>1
+  </Computation>
+  <Geometry>
+    <Tool>
+      <Name>15 mm - large tool
+      <Average>15
+    </Tool>
+    <Radiograph>
+      <file>Geometry\geom*.tif
+      <number>60
+      <angleStep>6
+    </Radiograph>
+    <Refinement>
+      <Refined>False
+    </Refinement>
+    <Processed>
+      <Geometry Date>6/5/2024 11:53:59 AM
+      <Geometry Comment>10 points used, over 60 views
+      <clockwise>False
+      <Software>efX-ct 2.4.1.3
+    </Processed>
+    <Result>
+      <source>0 0 -381.851307738696
+      <axis>-0.000192356163060668 -0.999999981499553 0
+      <center>0 0 0
+      <reference>213.565 212.710883031907 393.681773885091
+      <normal>0 0 1
+      <horizontal>-1 0 0
+    </Result>
+  </Geometry>
+  <CT Project Configuration>
+    <Project folder>D:\Shares\Plastic Part 6-5-2024
+    <Part name>Plastic Part 6-5-2024
+    <Continuous>False
+    <Ring Reduction>True
+    <Ring Reduction Settings>
+      <Radius>4.5
+      <Grid size>15 15
+    </Ring Reduction Settings>
+    <Rotation range>360
+    <Monitor Xray down>True
+    <Monitor variation>8
+    <Auto Xoff>True
+    <Save bitdepth>32
+    <Storage requirement>9678720000
+    <Scan time estimate>5135155200
+    <Buffered save>False
+    <Acquire zero position>True
+    <Numbering start>0
+    <Frame averaging>3
+    <Delay>0
+    <Advanced>True
+    <Super advanced>True
+    <Number of projections>1200
+    <Scan Type>step
+    <Technique Configuration>
+      <Acquisition Software>efX-dr v2.4.2.0
+      <System Info>
+        <Company Name>North Star Imaging, Inc.
+        <Model Name>1211-ISG-DR
+        <Serial>X5000-1
+      </System Info>
+      <Source>
+        <name>Feinfocus FXE
+        <focal spot size microns>10.5
+        <kV>150
+        <uA>300
+        <serial>000
+      </Source>
+      <Detector>
+        <description>Perkin Elmer [XRD 4343]
+        <type>Area
+        <serial>4183-05335
+        <pixel width microns>300
+        <pixel height microns>300
+        <width pixels>1420
+        <height pixels>1420
+        <bit depth>16
+        <gain>4
+        <gain description>4 e/ADU
+        <binning>2
+        <binning description>2x2 accum
+        <roi>1420x1420+10+10
+        <integration time ms>35.6608
+        <fps>28.0419956927495
+        <offset floor>180
+      </Detector>
+      <motion>
+        <tubeIdx>0
+        <detectorIdx>4
+        <positions>0 -0.000867095947256757 314.4544 314.45 382.136122314453 774.891050231934 -0.000272845589753601 0
+        <speeds>3 10.1899909973145 20 5 20 20 2.09999910242256 5
+        <names>Table rotate;Table left/right;Source up/down;Detector up/down;Table mag;Detector mag;Table tilt;Detector left/right
+      </motion>
+      <Setup>
+        <units>[mm]
+        <source to detector distance>774.891
+        <source to table distance>382.136
+        <fixturing>
+        <phys filter>0.040" Cu
+      </Setup>
+      <Ug>
+        <ug text>0.01079 [mm](0.036 pixels)
+        <center to object offset>0
+        <det pitch>0.3
+        <zoom factor text>x2.03
+        <src obj text>382.136 [mm] (FOD)
+        <focal spot text>0.0105 [mm]
+        <src center text>382.136 [mm]
+        <src det text>774.891 [mm] (FDD)
+        <det pitch text>0.3 [mm]
+        <effective pixel pitch text>0.1479 [mm]
+        <Formula>
+          <idx>0
+          <Expression>0.51
+          <Description>IQI Hole (mm)
+          <Value>0.51
+        </Formula>
+        <Formula>
+          <idx>1
+          <Expression>3
+          <Description>X Srb-Pixels (Hole)
+          <Value>3
+        </Formula>
+        <Formula>
+          <idx>2
+          <Expression>3
+          <Description>Y Srb-Pixels (Hole)
+          <Value>3
+        </Formula>
+        <Formula>
+          <idx>3
+          <Expression>Math.Sqrt(Math.Pow($HPixelsIQI ,2) + Math.Pow($VPixelsIQI,2)) * $Srb /$IQI_Hole_Diameter
+          <Description>Min Mag (mm)
+          <Value>1.331
+        </Formula>
+        <Formula>
+          <idx>4
+          <Expression>Math.Pow(Math.Pow($Ug,3) + Math.Pow(2.0*$Srb,3 ),(double)1/3) / $v
+          <Description>Im Unsharpness
+          <Value>0.1578
+        </Formula>
+      </Ug>
+    </Technique Configuration>
+    <acquisition begin>6/5/2024 11:25:18 AM
+    <acquisition end>6/5/2024 11:41:49 AM
+    <Flat Field Status>
+      <Defect>
+        <status>5 defective pixels (0.0%) (saved)
+      </Defect>
+      <Offset>
+        <status>0.0431, dev 0.0029, 1000 fravg, 28 fps (acquired 6/5/2024 11:15:39 AM)
+        <filename>D:\Shares\Marketing\Plastic Part 6-5-2024\Corrections\offset.tif
+        <Flat Field>
+          <Technique Configuration>
+            <Acquisition Software>efX-dr v2.4.2.0
+            <System Info>
+              <Company Name>North Star Imaging, Inc.
+              <Model Name>1211-ISG-DR
+              <Serial>X5000-1
+            </System Info>
+            <Source>
+              <name>Feinfocus FXE
+              <focal spot size microns>10.5
+              <kV>150
+              <uA>0
+              <serial>000
+            </Source>
+            <Detector>
+              <description>Perkin Elmer [XRD 4343]
+              <type>Area
+              <serial>4183-05335
+              <pixel width microns>300
+              <pixel height microns>300
+              <width pixels>1420
+              <height pixels>1420
+              <bit depth>16
+              <gain>4
+              <gain description>4 e/ADU
+              <binning>2
+              <binning description>2x2 accum
+              <roi>1420x1420+10+10
+              <integration time ms>35.6608
+              <fps>28.0419956927495
+              <offset floor>180
+            </Detector>
+            <motion>
+              <tubeIdx>0
+              <detectorIdx>4
+              <positions>-346.289 -198.84554788208 314.4545 314.4498 382.135855285645 774.891183746338 -0.000272845589753601 0.0025500000000136
+              <speeds>29.71 10.1899909973145 20 3 20 20 2.09999910242256 3
+              <names>Table rotate;Table left/right;Source up/down;Detector up/down;Table mag;Detector mag;Table tilt;Detector left/right
+            </motion>
+            <Setup>
+              <units>[mm]
+              <source to detector distance>774.891
+              <source to table distance>382.136
+              <fixturing>
+              <phys filter>0.040" Cu
+            </Setup>
+            <Ug>
+              <ug text>0.01079 [mm](0.036 pixels)
+              <center to object offset>0
+              <det pitch>0.3
+              <zoom factor text>x2.03
+              <src obj text>382.136 [mm] (FOD)
+              <focal spot text>0.0105 [mm]
+              <src center text>382.136 [mm]
+              <src det text>774.891 [mm] (FDD)
+              <det pitch text>0.3 [mm]
+              <effective pixel pitch text>0.1479 [mm]
+              <Formula>
+                <idx>0
+                <Expression>0.51
+                <Description>IQI Hole (mm)
+                <Value>0.51
+              </Formula>
+              <Formula>
+                <idx>1
+                <Expression>3
+                <Description>X Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>2
+                <Expression>3
+                <Description>Y Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>3
+                <Expression>Math.Sqrt(Math.Pow($HPixelsIQI ,2) + Math.Pow($VPixelsIQI,2)) * $Srb /$IQI_Hole_Diameter
+                <Description>Min Mag (mm)
+                <Value>1.331
+              </Formula>
+              <Formula>
+                <idx>4
+                <Expression>Math.Pow(Math.Pow($Ug,3) + Math.Pow(2.0*$Srb,3 ),(double)1/3) / $v
+                <Description>Im Unsharpness
+                <Value>0.1578
+              </Formula>
+            </Ug>
+          </Technique Configuration>
+          <fravg>1000
+          <acquisition begin>6/5/2024 11:15:03 AM
+          <acquisition end>6/5/2024 11:15:39 AM
+        </Flat Field>
+      </Offset>
+      <Gain>
+        <id>0
+        <status>0.626, dev 0.0505, 1000 fravg, 28 fps (acquired 6/5/2024 11:13:37 AM)
+        <filename>D:\Shares\Marketing\Plastic Part 6-5-2024\Corrections\gain0.tif
+        <Flat Field>
+          <Technique Configuration>
+            <Acquisition Software>efX-dr v2.4.2.0
+            <System Info>
+              <Company Name>North Star Imaging, Inc.
+              <Model Name>1211-ISG-DR
+              <Serial>X5000-1
+            </System Info>
+            <Source>
+              <name>Feinfocus FXE
+              <focal spot size microns>10.5
+              <kV>150
+              <uA>300
+              <serial>000
+            </Source>
+            <Detector>
+              <description>Perkin Elmer [XRD 4343]
+              <type>Area
+              <serial>4183-05335
+              <pixel width microns>300
+              <pixel height microns>300
+              <width pixels>1420
+              <height pixels>1420
+              <bit depth>16
+              <gain>4
+              <gain description>4 e/ADU
+              <binning>2
+              <binning description>2x2 accum
+              <roi>1420x1420+10+10
+              <integration time ms>35.6608
+              <fps>28.0419956927495
+              <offset floor>180
+            </Detector>
+            <motion>
+              <tubeIdx>0
+              <detectorIdx>4
+              <positions>-346.289 -198.84554788208 314.4545 314.4498 382.135855285645 774.891183746338 -0.000272845589753601 0.0025500000000136
+              <speeds>29.71 10.1899909973145 20 3 20 20 2.09999910242256 3
+              <names>Table rotate;Table left/right;Source up/down;Detector up/down;Table mag;Detector mag;Table tilt;Detector left/right
+            </motion>
+            <Setup>
+              <units>[mm]
+              <source to detector distance>774.891
+              <source to table distance>382.136
+              <fixturing>
+              <phys filter>0.040" Cu
+            </Setup>
+            <Ug>
+              <ug text>0.01079 [mm](0.036 pixels)
+              <center to object offset>0
+              <det pitch>0.3
+              <zoom factor text>x2.03
+              <src obj text>382.136 [mm] (FOD)
+              <focal spot text>0.0105 [mm]
+              <src center text>382.136 [mm]
+              <src det text>774.891 [mm] (FDD)
+              <det pitch text>0.3 [mm]
+              <effective pixel pitch text>0.1479 [mm]
+              <Formula>
+                <idx>0
+                <Expression>0.51
+                <Description>IQI Hole (mm)
+                <Value>0.51
+              </Formula>
+              <Formula>
+                <idx>1
+                <Expression>3
+                <Description>X Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>2
+                <Expression>3
+                <Description>Y Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>3
+                <Expression>Math.Sqrt(Math.Pow($HPixelsIQI ,2) + Math.Pow($VPixelsIQI,2)) * $Srb /$IQI_Hole_Diameter
+                <Description>Min Mag (mm)
+                <Value>1.331
+              </Formula>
+              <Formula>
+                <idx>4
+                <Expression>Math.Pow(Math.Pow($Ug,3) + Math.Pow(2.0*$Srb,3 ),(double)1/3) / $v
+                <Description>Im Unsharpness
+                <Value>0.1578
+              </Formula>
+            </Ug>
+          </Technique Configuration>
+          <fravg>1000
+          <acquisition begin>6/5/2024 11:13:01 AM
+          <acquisition end>6/5/2024 11:13:37 AM
+        </Flat Field>
+      </Gain>
+      <Gain>
+        <id>1
+        <status>0.31, dev 0.0314, 1000 fravg, 28 fps (acquired 6/5/2024 11:14:22 AM)
+        <filename>D:\Shares\Marketing\Plastic Part 6-5-2024\Corrections\gain1.tif
+        <Flat Field>
+          <Technique Configuration>
+            <Acquisition Software>efX-dr v2.4.2.0
+            <System Info>
+              <Company Name>North Star Imaging, Inc.
+              <Model Name>1211-ISG-DR
+              <Serial>X5000-1
+            </System Info>
+            <Source>
+              <name>Feinfocus FXE
+              <focal spot size microns>10.5
+              <kV>150
+              <uA>150
+              <serial>000
+            </Source>
+            <Detector>
+              <description>Perkin Elmer [XRD 4343]
+              <type>Area
+              <serial>4183-05335
+              <pixel width microns>300
+              <pixel height microns>300
+              <width pixels>1420
+              <height pixels>1420
+              <bit depth>16
+              <gain>4
+              <gain description>4 e/ADU
+              <binning>2
+              <binning description>2x2 accum
+              <roi>1420x1420+10+10
+              <integration time ms>35.6608
+              <fps>28.0419956927495
+              <offset floor>180
+            </Detector>
+            <motion>
+              <tubeIdx>0
+              <detectorIdx>4
+              <positions>-346.289 -198.84554788208 314.4545 314.4498 382.135855285645 774.891183746338 -0.000272845589753601 0.0025500000000136
+              <speeds>29.71 10.1899909973145 20 3 20 20 2.09999910242256 3
+              <names>Table rotate;Table left/right;Source up/down;Detector up/down;Table mag;Detector mag;Table tilt;Detector left/right
+            </motion>
+            <Setup>
+              <units>[mm]
+              <source to detector distance>774.891
+              <source to table distance>382.136
+              <fixturing>
+              <phys filter>0.040" Cu
+            </Setup>
+            <Ug>
+              <ug text>0.01079 [mm](0.036 pixels)
+              <center to object offset>0
+              <det pitch>0.3
+              <zoom factor text>x2.03
+              <src obj text>382.136 [mm] (FOD)
+              <focal spot text>0.0105 [mm]
+              <src center text>382.136 [mm]
+              <src det text>774.891 [mm] (FDD)
+              <det pitch text>0.3 [mm]
+              <effective pixel pitch text>0.1479 [mm]
+              <Formula>
+                <idx>0
+                <Expression>0.51
+                <Description>IQI Hole (mm)
+                <Value>0.51
+              </Formula>
+              <Formula>
+                <idx>1
+                <Expression>3
+                <Description>X Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>2
+                <Expression>3
+                <Description>Y Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>3
+                <Expression>Math.Sqrt(Math.Pow($HPixelsIQI ,2) + Math.Pow($VPixelsIQI,2)) * $Srb /$IQI_Hole_Diameter
+                <Description>Min Mag (mm)
+                <Value>1.331
+              </Formula>
+              <Formula>
+                <idx>4
+                <Expression>Math.Pow(Math.Pow($Ug,3) + Math.Pow(2.0*$Srb,3 ),(double)1/3) / $v
+                <Description>Im Unsharpness
+                <Value>0.1578
+              </Formula>
+            </Ug>
+          </Technique Configuration>
+          <fravg>1000
+          <acquisition begin>6/5/2024 11:13:47 AM
+          <acquisition end>6/5/2024 11:14:22 AM
+        </Flat Field>
+      </Gain>
+      <Gain>
+        <id>2
+        <status>0.0611, dev 0.00479, 1000 fravg, 28 fps (acquired 6/5/2024 11:14:58 AM)
+        <filename>D:\Shares\Marketing\Plastic Part 6-5-2024\Corrections\gain2.tif
+        <Flat Field>
+          <Technique Configuration>
+            <Acquisition Software>efX-dr v2.4.2.0
+            <System Info>
+              <Company Name>North Star Imaging, Inc.
+              <Model Name>1211-ISG-DR
+              <Serial>X5000-1
+            </System Info>
+            <Source>
+              <name>Feinfocus FXE
+              <focal spot size microns>10.5
+              <kV>150
+              <uA>30
+              <serial>000
+            </Source>
+            <Detector>
+              <description>Perkin Elmer [XRD 4343]
+              <type>Area
+              <serial>4183-05335
+              <pixel width microns>300
+              <pixel height microns>300
+              <width pixels>1420
+              <height pixels>1420
+              <bit depth>16
+              <gain>4
+              <gain description>4 e/ADU
+              <binning>2
+              <binning description>2x2 accum
+              <roi>1420x1420+10+10
+              <integration time ms>35.6608
+              <fps>28.0419956927495
+              <offset floor>180
+            </Detector>
+            <motion>
+              <tubeIdx>0
+              <detectorIdx>4
+              <positions>-346.289 -198.84554788208 314.4545 314.4498 382.135855285645 774.891183746338 -0.000272845589753601 0.0025500000000136
+              <speeds>29.71 10.1899909973145 20 3 20 20 2.09999910242256 3
+              <names>Table rotate;Table left/right;Source up/down;Detector up/down;Table mag;Detector mag;Table tilt;Detector left/right
+            </motion>
+            <Setup>
+              <units>[mm]
+              <source to detector distance>774.891
+              <source to table distance>382.136
+              <fixturing>
+              <phys filter>0.040" Cu
+            </Setup>
+            <Ug>
+              <ug text>0.01079 [mm](0.036 pixels)
+              <center to object offset>0
+              <det pitch>0.3
+              <zoom factor text>x2.03
+              <src obj text>382.136 [mm] (FOD)
+              <focal spot text>0.0105 [mm]
+              <src center text>382.136 [mm]
+              <src det text>774.891 [mm] (FDD)
+              <det pitch text>0.3 [mm]
+              <effective pixel pitch text>0.1479 [mm]
+              <Formula>
+                <idx>0
+                <Expression>0.51
+                <Description>IQI Hole (mm)
+                <Value>0.51
+              </Formula>
+              <Formula>
+                <idx>1
+                <Expression>3
+                <Description>X Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>2
+                <Expression>3
+                <Description>Y Srb-Pixels (Hole)
+                <Value>3
+              </Formula>
+              <Formula>
+                <idx>3
+                <Expression>Math.Sqrt(Math.Pow($HPixelsIQI ,2) + Math.Pow($VPixelsIQI,2)) * $Srb /$IQI_Hole_Diameter
+                <Description>Min Mag (mm)
+                <Value>1.331
+              </Formula>
+              <Formula>
+                <idx>4
+                <Expression>Math.Pow(Math.Pow($Ug,3) + Math.Pow(2.0*$Srb,3 ),(double)1/3) / $v
+                <Description>Im Unsharpness
+                <Value>0.1578
+              </Formula>
+            </Ug>
+          </Technique Configuration>
+          <fravg>1000
+          <acquisition begin>6/5/2024 11:14:32 AM
+          <acquisition end>6/5/2024 11:14:58 AM
+        </Flat Field>
+      </Gain>
+      <xform>
+        <flipH>False
+        <flipV>False
+        <rotate>3
+        <crop>0 0 0 0
+      </xform>
+    </Flat Field Status>
+  </CT Project Configuration>
+</NSI Reconstruction Project>

@@ -1,25 +1,33 @@
 import uuid
+
 import pytest
 from pydantic import ValidationError
-from core import schemas
+
+from schemas.comments import ImageCommentCreate
+from schemas.image_classes import ImageClassificationCreate
+from schemas.images import DataInstance
+from schemas.projects import ProjectCreate
+from schemas.users import User
 
 
 def test_user_schema_optional_groups():
-    u = schemas.User(email="a@b.com")
+    u = User(email="a@b.com")
     assert u.groups is None
 
 
 def test_project_schema_validation():
-    p = schemas.ProjectCreate(name="N", description=None, meta_group_id="g")
+    p = ProjectCreate(name="N", description=None, meta_group_id="g")
     assert p.meta_group_id == "g"
     assert p.project_type == "PT1"
 
-    p2 = schemas.ProjectCreate(name="N2", description=None, meta_group_id="g", project_type="pt2")
+    p2 = ProjectCreate(
+        name="N2", description=None, meta_group_id="g", project_type="pt2"
+    )
     assert p2.project_type == "PT2"
 
 
 def test_data_instance_metadata_validator_handles_str_json():
-    di = schemas.DataInstance(
+    di = DataInstance(
         id=uuid.uuid4(),
         project_id=uuid.uuid4(),
         object_storage_key="k",
@@ -36,9 +44,9 @@ def test_data_instance_metadata_validator_handles_str_json():
 
 def test_image_classification_uuid_validation():
     with pytest.raises(ValidationError):
-        schemas.ImageClassificationCreate(image_id="not-a-uuid", class_id="also-bad")
+        ImageClassificationCreate(image_id="not-a-uuid", class_id="also-bad")
 
 
 def test_image_comment_min_length():
     with pytest.raises(ValidationError):
-        schemas.ImageCommentCreate(text="", image_id=uuid.uuid4())
+        ImageCommentCreate(text="", image_id=uuid.uuid4())

@@ -43,7 +43,9 @@ def test_ensure_bucket_exists_fails_on_non_404_or_create_error():
     forbidden = StubClient(head_error=_client_error("403"))
     assert ensure_bucket_exists(forbidden, "b") is False
 
-    cannot_create = StubClient(head_error=_client_error("404"), create_error=_client_error("500"))
+    cannot_create = StubClient(
+        head_error=_client_error("404"), create_error=_client_error("500")
+    )
     assert ensure_bucket_exists(cannot_create, "b") is False
 
 

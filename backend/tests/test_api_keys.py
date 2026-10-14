@@ -1,5 +1,5 @@
-import os
 import uuid
+
 import pytest
 
 
@@ -8,6 +8,7 @@ def _auth_headers():
     return {}
 
 
+@pytest.mark.smoke
 def test_create_list_deactivate_api_key(client):
     # Create an API key
     payload = {"name": "CI token"}

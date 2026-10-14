@@ -3,9 +3,11 @@
 Verifies that users cannot access groups belonging to projects they
 are not members of.
 """
-import pytest
+
 import uuid
 from unittest.mock import patch
+
+import pytest
 
 
 def _restricted_group_check(user_email: str, group_id: str) -> bool:
@@ -31,6 +33,7 @@ def _patched_auth():
         ):
             # Clear the cached results so patched auth takes effect
             from core.group_auth_helper import clear_cache
+
             clear_cache()
             yield
             clear_cache()

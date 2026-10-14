@@ -32,7 +32,11 @@ def test_parse_nsipro_text_decodes_xml_fields_attributes_text_and_repeated_eleme
                     "Mode": "brightfield",
                 },
                 "Channel": [
-                    {"@attributes": {"index": 1}, "Name": "Brightfield", "Wavelength": 550},
+                    {
+                        "@attributes": {"index": 1},
+                        "Name": "Brightfield",
+                        "Wavelength": 550,
+                    },
                     {"@attributes": {"index": 2}, "Name": "DAPI", "Wavelength": 405},
                 ],
                 "Notes": "ready for review",
@@ -42,14 +46,22 @@ def test_parse_nsipro_text_decodes_xml_fields_attributes_text_and_repeated_eleme
 
 
 def test_parse_nsipro_text_extracts_fields_from_pt3_sample_fixture():
-    fixture_path = Path(__file__).resolve().parents[2] / "test/data/3D/geometric/PT3_GEOMETRIC_DUAL_LABEL.nsipro"
-    result = parse_nsipro_text(fixture_path.read_text(encoding="utf-8"), fixture_path.name)
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "test/data/3D/geometric/PT3_GEOMETRIC_DUAL_LABEL.nsipro"
+    )
+    result = parse_nsipro_text(
+        fixture_path.read_text(encoding="utf-8"), fixture_path.name
+    )
 
     assert result["parser"] == "nsipro-key-value"
     assert result["parser_id"] == "default"
     assert result["source_filename"] == "PT3_GEOMETRIC_DUAL_LABEL.nsipro"
     metadata = result["metadata"]
-    assert metadata["Application"]["application_info"] == "NIS-Elements AR 5.30.00 (Build 1688)"
+    assert (
+        metadata["Application"]["application_info"]
+        == "NIS-Elements AR 5.30.00 (Build 1688)"
+    )
     assert metadata["Acquisition"]["acquisition_datetime"] == "2026-02-17T14:22:31Z"
     assert metadata["Microscope"]["objective_magnification"] == 20
     assert metadata["Camera"]["exposure_ms"] == 12.5
@@ -114,8 +126,13 @@ def test_parse_nsipro_text_accepts_nsi_xml_like_fields_without_scalar_end_tags()
 
 
 def test_parse_nsipro_text_reads_readthedocs_plastic_part_example_fixture():
-    fixture_path = Path(__file__).resolve().parents[2] / "test/data/nsipro/Plastic Part 6-5-2024.nsipro"
-    result = parse_nsipro_text(fixture_path.read_text(encoding="utf-8"), fixture_path.name)
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "test/data/nsipro/Plastic Part 6-5-2024.nsipro"
+    )
+    result = parse_nsipro_text(
+        fixture_path.read_text(encoding="utf-8"), fixture_path.name
+    )
 
     assert result["parser"] == "nsipro-xml"
     metadata = result["metadata"]["NSI Reconstruction Project"]
@@ -129,7 +146,9 @@ def test_parse_nsipro_text_reads_readthedocs_plastic_part_example_fixture():
 
 
 def test_parse_nsipro_text_rejects_unsafe_xml_entity_declarations():
-    xml = '<!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>'
+    xml = (
+        '<!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>'
+    )
 
     try:
         parse_nsipro_text(xml, "unsafe.nsipro")

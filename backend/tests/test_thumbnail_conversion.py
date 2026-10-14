@@ -1,9 +1,11 @@
 """Tests for thumbnail conversion of non-web image formats (TIFF, CMYK, etc.)."""
 
 import io
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from PIL import Image
-from unittest.mock import patch, AsyncMock, MagicMock
+
 from utils.cache_manager import get_cache
 
 
@@ -41,7 +43,7 @@ def _make_palette_png_bytes(with_transparency=False, size=(100, 100)):
     img = img.convert("P")
     if with_transparency:
         # Set transparency for palette index 0
-        img.info['transparency'] = 0
+        img.info["transparency"] = 0
     buf = io.BytesIO()
     img.save(buf, format="PNG", transparency=0 if with_transparency else None)
     buf.seek(0)
@@ -54,11 +56,14 @@ class TestThumbnailConversion:
     def test_tiff_rgb_converts_to_jpeg(self, client):
         """Test that RGB TIFF images are converted to JPEG thumbnails."""
         # Create project
-        pr = client.post("/api/projects/", json={
-            "name": "TiffTest",
-            "description": None,
-            "meta_group_id": "test-group"
-        })
+        pr = client.post(
+            "/api/projects/",
+            json={
+                "name": "TiffTest",
+                "description": None,
+                "meta_group_id": "test-group",
+            },
+        )
         assert pr.status_code == 201
         pid = pr.json()["id"]
 
@@ -74,7 +79,7 @@ class TestThumbnailConversion:
         mock_response.raise_for_status = MagicMock()
         mock_response.aread = AsyncMock(return_value=tiff_bytes)
 
-        with patch("routers.images.httpx.AsyncClient") as mock_client:
+        with patch("services.images.thumbnails.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )
@@ -93,11 +98,14 @@ class TestThumbnailConversion:
     def test_tiff_rgba_converts_to_png(self, client):
         """Test that RGBA TIFF images are converted to PNG to preserve transparency."""
         # Create project
-        pr = client.post("/api/projects/", json={
-            "name": "TiffRgbaTest",
-            "description": None,
-            "meta_group_id": "test-group"
-        })
+        pr = client.post(
+            "/api/projects/",
+            json={
+                "name": "TiffRgbaTest",
+                "description": None,
+                "meta_group_id": "test-group",
+            },
+        )
         assert pr.status_code == 201
         pid = pr.json()["id"]
 
@@ -113,7 +121,7 @@ class TestThumbnailConversion:
         mock_response.raise_for_status = MagicMock()
         mock_response.aread = AsyncMock(return_value=tiff_bytes)
 
-        with patch("routers.images.httpx.AsyncClient") as mock_client:
+        with patch("services.images.thumbnails.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )
@@ -132,11 +140,14 @@ class TestThumbnailConversion:
     def test_tiff_cmyk_converts_to_jpeg(self, client):
         """Test that CMYK TIFF images are converted to RGB JPEG."""
         # Create project
-        pr = client.post("/api/projects/", json={
-            "name": "TiffCmykTest",
-            "description": None,
-            "meta_group_id": "test-group"
-        })
+        pr = client.post(
+            "/api/projects/",
+            json={
+                "name": "TiffCmykTest",
+                "description": None,
+                "meta_group_id": "test-group",
+            },
+        )
         assert pr.status_code == 201
         pid = pr.json()["id"]
 
@@ -152,7 +163,7 @@ class TestThumbnailConversion:
         mock_response.raise_for_status = MagicMock()
         mock_response.aread = AsyncMock(return_value=tiff_bytes)
 
-        with patch("routers.images.httpx.AsyncClient") as mock_client:
+        with patch("services.images.thumbnails.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )
@@ -172,11 +183,14 @@ class TestThumbnailConversion:
     def test_tiff_16bit_grayscale_converts_to_jpeg(self, client):
         """Test that 16-bit grayscale TIFF images are converted to JPEG."""
         # Create project
-        pr = client.post("/api/projects/", json={
-            "name": "Tiff16bitTest",
-            "description": None,
-            "meta_group_id": "test-group"
-        })
+        pr = client.post(
+            "/api/projects/",
+            json={
+                "name": "Tiff16bitTest",
+                "description": None,
+                "meta_group_id": "test-group",
+            },
+        )
         assert pr.status_code == 201
         pid = pr.json()["id"]
 
@@ -192,7 +206,7 @@ class TestThumbnailConversion:
         mock_response.raise_for_status = MagicMock()
         mock_response.aread = AsyncMock(return_value=tiff_bytes)
 
-        with patch("routers.images.httpx.AsyncClient") as mock_client:
+        with patch("services.images.thumbnails.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )
@@ -211,11 +225,14 @@ class TestThumbnailConversion:
     def test_palette_mode_without_transparency_converts_to_jpeg(self, client):
         """Test that palette mode images without transparency convert to JPEG."""
         # Create project
-        pr = client.post("/api/projects/", json={
-            "name": "PaletteTest",
-            "description": None,
-            "meta_group_id": "test-group"
-        })
+        pr = client.post(
+            "/api/projects/",
+            json={
+                "name": "PaletteTest",
+                "description": None,
+                "meta_group_id": "test-group",
+            },
+        )
         assert pr.status_code == 201
         pid = pr.json()["id"]
 
@@ -231,7 +248,7 @@ class TestThumbnailConversion:
         mock_response.raise_for_status = MagicMock()
         mock_response.aread = AsyncMock(return_value=png_bytes)
 
-        with patch("routers.images.httpx.AsyncClient") as mock_client:
+        with patch("services.images.thumbnails.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )
@@ -249,11 +266,14 @@ class TestThumbnailConversion:
     def test_palette_mode_with_transparency_converts_to_png(self, client):
         """Test that palette mode images with transparency convert to PNG."""
         # Create project
-        pr = client.post("/api/projects/", json={
-            "name": "PaletteTransTest",
-            "description": None,
-            "meta_group_id": "test-group"
-        })
+        pr = client.post(
+            "/api/projects/",
+            json={
+                "name": "PaletteTransTest",
+                "description": None,
+                "meta_group_id": "test-group",
+            },
+        )
         assert pr.status_code == 201
         pid = pr.json()["id"]
 
@@ -269,7 +289,7 @@ class TestThumbnailConversion:
         mock_response.raise_for_status = MagicMock()
         mock_response.aread = AsyncMock(return_value=png_bytes)
 
-        with patch("routers.images.httpx.AsyncClient") as mock_client:
+        with patch("services.images.thumbnails.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )

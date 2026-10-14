@@ -1,0 +1,6 @@
+Synthetic text segmentation overlay fixture
+part=SN0004
+side=back
+modality=segmentation
+overlay=true
+mask_summary=rear delamination candidate

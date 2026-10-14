@@ -1,7 +1,3 @@
-import uuid
-import pytest
-
-
 def test_users_me_endpoint(client):
     r = client.get("/api/users/me")
     assert r.status_code == 200

@@ -12,7 +12,10 @@ def _png_bytes(color):
 
 
 def test_project_list_includes_loaded_image_and_part_counts_for_dashboard_cards(client):
-    headers = {"X-User-Id": "dashboard-counts@example.com", "X-User-Groups": '["dashboard-counts-group"]'}
+    headers = {
+        "X-User-Id": "dashboard-counts@example.com",
+        "X-User-Groups": '["dashboard-counts-group"]',
+    }
     project_resp = client.post(
         "/api/projects/",
         json={
@@ -27,7 +30,11 @@ def test_project_list_includes_loaded_image_and_part_counts_for_dashboard_cards(
     project_id = project_resp.json()["id"]
 
     image_ids = []
-    for filename, color in [("front.png", "red"), ("back.png", "blue"), ("removed.png", "green")]:
+    for filename, color in [
+        ("front.png", "red"),
+        ("back.png", "blue"),
+        ("removed.png", "green"),
+    ]:
         image_resp = client.post(
             f"/api/projects/{project_id}/images",
             files={"file": (filename, _png_bytes(color), "image/png")},
