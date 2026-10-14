@@ -1,1867 +1,521 @@
-import uuid
 import json
-import mimetypes
-import base64
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import List, Optional
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
-from core import models, schemas
 from core.database import get_db
-from core.group_auth_helper import is_user_in_group
-from utils.dependencies import get_current_user
-import utils.crud as crud
-from core.config import settings
-from utils.boto3_client import upload_file_to_s3
-from utils.volume_loader import load_slice_stack
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.append(str(REPO_ROOT))
-
-from backend.analyze_toolbox import WorkflowGraph, WorkflowImageInput, execute_image_workflow
-from backend.metadata.nsipro_parsers import get_nsipro_parser, parse_nsipro_text
-
+from repositories import inspection as inspection_repository
+from schemas import inspection_annotations as inspection_annotation_schemas
+from schemas import inspection_parts as inspection_part_schemas
+from schemas import inspection_pt3 as inspection_pt3_schemas
+from schemas import inspection_volumes as inspection_volume_schemas
+from schemas import inspection_workspace as inspection_workspace_schemas
+from schemas import users as user_schemas
+from services.inspection import annotations as inspection_annotation_service
+from services.inspection import batches as inspection_batch_service
+from services.inspection import measurements as inspection_measurement_service
+from services.inspection import (
+    overlay_assignment,
+    part_ingest,
+    part_metadata_sources,
+    part_source_images,
+    pt3_splat_job_start,
+    pt3_splat_status,
+    test_fixtures,
+)
+from services.inspection import (
+    part_image_identities as inspection_part_image_identity_service,
+)
+from services.inspection import part_images as inspection_part_image_service
+from services.inspection import parts as inspection_part_service
+from services.inspection import workspace as inspection_workspace_service
+from utils.dependencies import (
+    ReadableProject,
+    WritableProject,
+    get_current_user,
+    get_project_or_403,
+    get_project_or_403_writable,
+    require_authenticated_user,
+)
 
 router = APIRouter(tags=["Inspection Workbench"])
 
 WORKSPACE_STATE_KEY_PREFIX = "inspection_workbench.workspace_state"
 PROJECT_CONFIGURATION_KEY = "inspection_workbench.project_configuration"
-PROJECT_TYPE_INTERFACE_LAYOUT_KEY_PREFIX = "inspection_workbench.project_type_interface_layout_default"
-ANNOTATIONS_METADATA_KEY = "annotations"
-WORKSPACE_PANEL_LAYOUT_DEFAULTS = {
-    "part_list": {
-        "is_open": True,
-        "width_px": 320,
-        "height_px": 420,
-        "orientation": "vertical",
-    },
-    "inspector": {
-        "is_open": True,
-        "width_px": 360,
-        "height_px": 420,
-        "orientation": "vertical",
-    },
-    "mpr_controls": {
-        "is_open": True,
-        "width_px": 360,
-        "height_px": 360,
-        "orientation": "vertical",
-    },
-}
-WORKSPACE_INSPECTOR_DEFAULTS = {
-    "shortcut_help_visible": False,
-    "normalization_triage_field": "",
-    "image_enabled": True,
-    "modalities": [],
-    "view_name": "",
-    "viewport_transform": {"zoom": 1.0, "panX": 0, "panY": 0},
-    "measurements": [],
-}
-TEST_DATA_ROOT = Path(__file__).resolve().parents[2] / "test" / "data"
-PT3_TEST_STACK_ROOT = TEST_DATA_ROOT / "3D" / "geometric"
-SLICE_SEGMENTATION_METHOD_IDS = {
-    "segmentation.yolo.placeholder",
-    "segmentation.anomalib.placeholder",
-    "segmentation.sam.placeholder",
-    "segmentation.opencv.placeholder",
-}
-
-
-async def _get_project_with_access_check(
-    project_id: uuid.UUID,
-    db: AsyncSession,
-    current_user: schemas.User,
-):
-    project = await crud.get_project(db=db, project_id=project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-    if not is_user_in_group(current_user.email, project.meta_group_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{current_user.email}' does not have access to project '{project_id}'.",
-        )
-    return project
-
-
-def _serialize_inspection_part(part) -> dict:
-    return {
-        "id": part.id,
-        "project_id": part.project_id,
-        "batch_id": part.batch_id,
-        "serial_number": part.serial_number,
-        "display_name": part.display_name,
-        "metadata": part.metadata_json,
-        "review_state": part.review_state,
-        "created_at": part.created_at,
-        "updated_at": part.updated_at,
-    }
+PROJECT_TYPE_INTERFACE_LAYOUT_KEY_PREFIX = (
+    "inspection_workbench.project_type_interface_layout_default"
+)
+ANNOTATIONS_METADATA_KEY = inspection_annotation_service.ANNOTATIONS_METADATA_KEY
+REJECT_PART_DISPOSITION = inspection_annotation_service.REJECT_PART_DISPOSITION
+PROJECT_CONFIGURATION_KEY = inspection_workspace_service.PROJECT_CONFIGURATION_KEY
+PROJECT_TYPE_INTERFACE_LAYOUT_KEY_PREFIX = (
+    inspection_workspace_service.PROJECT_TYPE_INTERFACE_LAYOUT_KEY_PREFIX
+)
+WORKSPACE_PANEL_LAYOUT_DEFAULTS = (
+    inspection_workspace_service.WORKSPACE_PANEL_LAYOUT_DEFAULTS
+)
+WORKSPACE_INSPECTOR_DEFAULTS = inspection_workspace_service.WORKSPACE_INSPECTOR_DEFAULTS
+DEFAULT_DEFECT_TYPE_COLORS = inspection_workspace_service.DEFAULT_DEFECT_TYPE_COLORS
 
 
 def _workspace_state_metadata_key(user_email: str) -> str:
     return f"{WORKSPACE_STATE_KEY_PREFIX}:{user_email.strip().lower()}"
 
 
-def _part_annotations(part) -> List[dict]:
-    metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
-    annotations = metadata.get(ANNOTATIONS_METADATA_KEY)
-    return list(annotations) if isinstance(annotations, list) else []
-
-
-def _normalize_panel_dimension(value: object, *, fallback: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return fallback
-    return max(minimum, min(maximum, parsed))
-
-
-def _normalize_workspace_state(raw_state: object) -> dict:
-    safe_state = raw_state.copy() if isinstance(raw_state, dict) else {}
-    raw_layout = safe_state.get("panel_layout")
-    normalized_layout = {}
-    for panel_key, defaults in WORKSPACE_PANEL_LAYOUT_DEFAULTS.items():
-        candidate = raw_layout.get(panel_key) if isinstance(raw_layout, dict) else {}
-        if not isinstance(candidate, dict):
-            candidate = {}
-        orientation = str(candidate.get("orientation", defaults["orientation"])).lower()
-        if orientation not in {"vertical", "horizontal"}:
-            orientation = defaults["orientation"]
-        normalized_layout[panel_key] = {
-            "is_open": bool(candidate.get("is_open", defaults["is_open"])),
-            "width_px": _normalize_panel_dimension(
-                candidate.get("width_px"),
-                fallback=defaults["width_px"],
-                minimum=220,
-                maximum=1200,
-            ),
-            "height_px": _normalize_panel_dimension(
-                candidate.get("height_px"),
-                fallback=defaults["height_px"],
-                minimum=220,
-                maximum=1400,
-            ),
-            "orientation": orientation,
-        }
-    safe_state["panel_layout"] = normalized_layout
-
-    raw_inspector = safe_state.get("inspector")
-    inspector_candidate = raw_inspector if isinstance(raw_inspector, dict) else {}
-    shortcut_help_visible = inspector_candidate.get("shortcut_help_visible")
-    normalized_shortcut_help_visible = (
-        shortcut_help_visible
-        if isinstance(shortcut_help_visible, bool)
-        else WORKSPACE_INSPECTOR_DEFAULTS["shortcut_help_visible"]
-    )
-    normalization_triage_field = inspector_candidate.get("normalization_triage_field")
-    normalized_triage_field = (
-        str(normalization_triage_field).strip()
-        if isinstance(normalization_triage_field, str)
-        else WORKSPACE_INSPECTOR_DEFAULTS["normalization_triage_field"]
-    )
-    image_enabled = inspector_candidate.get("image_enabled")
-    normalized_image_enabled = (
-        image_enabled
-        if isinstance(image_enabled, bool)
-        else WORKSPACE_INSPECTOR_DEFAULTS["image_enabled"]
-    )
-    modalities = inspector_candidate.get("modalities")
-    normalized_modalities = (
-        [str(value) for value in modalities]
-        if isinstance(modalities, list)
-        else list(WORKSPACE_INSPECTOR_DEFAULTS["modalities"])
-    )
-    view_name = inspector_candidate.get("view_name")
-    normalized_view_name = (
-        str(view_name).strip()
-        if isinstance(view_name, str)
-        else WORKSPACE_INSPECTOR_DEFAULTS["view_name"]
-    )
-    viewport_transform = inspector_candidate.get("viewport_transform")
-    viewport_candidate = viewport_transform if isinstance(viewport_transform, dict) else {}
-    default_viewport = WORKSPACE_INSPECTOR_DEFAULTS["viewport_transform"]
-    normalized_viewport_transform = {
-        "zoom": max(
-            0.5,
-            min(
-                4.0,
-                float(viewport_candidate.get("zoom", default_viewport["zoom"]))
-                if isinstance(viewport_candidate.get("zoom", default_viewport["zoom"]), (int, float))
-                else float(default_viewport["zoom"]),
-            ),
-        ),
-        "panX": _normalize_panel_dimension(
-            viewport_candidate.get("panX"),
-            fallback=default_viewport["panX"],
-            minimum=-200,
-            maximum=200,
-        ),
-        "panY": _normalize_panel_dimension(
-            viewport_candidate.get("panY"),
-            fallback=default_viewport["panY"],
-            minimum=-200,
-            maximum=200,
-        ),
-    }
-    measurements = inspector_candidate.get("measurements")
-    normalized_measurements = []
-    if isinstance(measurements, list):
-        for entry in measurements:
-            if not isinstance(entry, dict):
-                continue
-            label_raw = entry.get("label")
-            value_raw = entry.get("value")
-            label = str(label_raw).strip() if isinstance(label_raw, str) else ""
-            if isinstance(value_raw, (int, float)):
-                value = str(value_raw)
-            elif isinstance(value_raw, str):
-                value = value_raw.strip()
-            else:
-                value = ""
-            if not label or not value:
-                continue
-            measurement_id = str(entry.get("id") or "").strip()
-            normalized_measurements.append({
-                "id": measurement_id,
-                "label": label,
-                "value": value,
-            })
-    safe_state["inspector"] = {
-        **inspector_candidate,
-        "shortcut_help_visible": normalized_shortcut_help_visible,
-        "normalization_triage_field": normalized_triage_field,
-        "image_enabled": normalized_image_enabled,
-        "modalities": normalized_modalities,
-        "view_name": normalized_view_name,
-        "viewport_transform": normalized_viewport_transform,
-        "measurements": normalized_measurements,
-    }
-    return safe_state
-
-
-DEFAULT_DEFECT_TYPE_COLORS = ("#ef4444", "#f59e0b", "#3b82f6")
-
-
-def _normalize_project_type(project_type: Optional[str]) -> str:
-    normalized = str(project_type or "PT1").strip().upper()
-    return normalized if normalized in {"PT1", "PT2", "PT3"} else "PT1"
-
-
-def _default_defect_types(project_type: Optional[str]) -> List[dict]:
-    project_type_suffix = _normalize_project_type(project_type)
-    return [
-        {
-            "name": f"DefectType{index + 1}_{project_type_suffix}",
-            "color": color,
-            "definition": "",
-        }
-        for index, color in enumerate(DEFAULT_DEFECT_TYPE_COLORS)
-    ]
-
-
-def _default_project_configuration(project_type: Optional[str] = "PT1") -> dict:
-    return {
-        "image_modalities": [
-            {
-                "id": "visual",
-                "label": "Visual",
-                "calibration_required": False,
-                "example_image_uploaded": False,
-            }
-        ],
-        "part_views": [
-            {"id": "front", "label": "Front", "required_modalities": ["visual"], "source": "manual"},
-            {"id": "back", "label": "Back", "required_modalities": ["visual"], "source": "manual"},
-        ],
-        "defect_types": _default_defect_types(project_type),
-        "process_settings": {
-            "require_disposition_on_submit": True,
-            "require_measurement_for_critical": False,
-            "require_second_reviewer_for_reject": False,
-            "configurable_hotkeys": {
-                "accept_classification": "a",
-                "reject_classification": "r",
-                "toggle_shortcut_help": "h",
-            },
-        },
-        "display_settings": {
-            "default_colormap": "grayscale",
-            "anomaly_colormap": "viridis",
-            "grayscale_base_image": True,
-        },
-        "phase_settings": {
-            "manual_phase_selection_enabled": False,
-            "manual_phase": "data_ingestion",
-        },
-        "metadata_parsers": {
-            "nsipro": {
-                "parser_id": "default",
-            },
-        },
-        "project_owner": {
-            "name": "",
-            "email": "",
-        },
-        "current_user": {
-            "username": "",
-            "sso_authenticated": False,
-        },
-        "interface_layout": {
-            "default_model": None,
-        },
-        "file_naming_scheme": {
-            "hierarchy_levels": [
-                {"id": "drawing_number", "label": "Drawing Number", "abbreviation": "D"},
-                {"id": "part_number", "label": "Part Number", "abbreviation": "P"},
-                {"id": "lot_number", "label": "Lot Number", "abbreviation": "L"},
-                {"id": "serial_number", "label": "Serial Number", "abbreviation": "S"},
-                {"id": "revision", "label": "Revision", "abbreviation": "R"},
-            ],
-            "image_descriptors": [
-                {"id": "view", "label": "View", "abbreviation": "V"},
-                {"id": "modality", "label": "Modality", "abbreviation": "M"},
-            ],
-        },
-    }
-
-
-def _decode_slice_image_payload(value: str) -> bytes:
-    encoded = str(value or "").strip()
-    if "," in encoded and encoded.lower().startswith("data:"):
-        encoded = encoded.split(",", 1)[1]
-    try:
-        return base64.b64decode(encoded, validate=True)
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid slice image payload") from exc
-
-
-def _slice_segmentation_workflow(method_id: str, parameters: dict):
-    return WorkflowGraph(
-        name=f"Inspection slice segmentation {method_id}",
-        source={"kind": "manual_selection", "image_count": 1, "part_count": 1},
-        output={"mode": "metadata_only", "artifact_policy": "metadata_only"},
-        nodes=[
-            {"id": "input", "method_id": "source.project_part_images"},
-            {"id": "segment", "method_id": method_id, "parameters": parameters or {}},
-        ],
-        edges=[
-            {"source_node": "input", "target_node": "segment"},
-        ],
-    )
-
-
-def _normalize_segment_region(entry: object, index: int) -> Optional[dict]:
-    if not isinstance(entry, dict):
-        return None
-    bbox = entry.get("bbox")
-    if not isinstance(bbox, list) or len(bbox) < 4:
-        detection_bbox = entry.get("bbox") if isinstance(entry.get("bbox"), dict) else None
-        if detection_bbox:
-            x = float(detection_bbox.get("x", 0) or 0)
-            y = float(detection_bbox.get("y", 0) or 0)
-            width = float(detection_bbox.get("width", 0) or 0)
-            height = float(detection_bbox.get("height", 0) or 0)
-            bbox = [x, y, x + width, y + height]
-    if not isinstance(bbox, list) or len(bbox) < 4:
-        return None
-    try:
-        x1, y1, x2, y2 = [float(value) for value in bbox[:4]]
-    except (TypeError, ValueError):
-        return None
-    if x2 <= x1 or y2 <= y1:
-        return None
-    raw_centroid = entry.get("centroid")
-    centroid = None
-    if isinstance(raw_centroid, list) and len(raw_centroid) >= 2:
-        try:
-            centroid = [float(raw_centroid[0]), float(raw_centroid[1])]
-        except (TypeError, ValueError):
-            centroid = None
-    raw_label = entry.get("label", index + 1)
-    try:
-        label = int(raw_label)
-    except (TypeError, ValueError):
-        label = index + 1
-    area = entry.get("area_px", (x2 - x1) * (y2 - y1))
-    try:
-        area_px = float(area)
-    except (TypeError, ValueError):
-        area_px = float((x2 - x1) * (y2 - y1))
-    confidence = entry.get("confidence")
-    try:
-        confidence_value = float(confidence) if confidence is not None else None
-    except (TypeError, ValueError):
-        confidence_value = None
-    return {
-        "label": label,
-        "area_px": area_px,
-        "bbox": [x1, y1, x2, y2],
-        "centroid": centroid,
-        "confidence": confidence_value,
-        "class_name": str(entry.get("class_name")) if entry.get("class_name") is not None else None,
-    }
-
-
-def _regions_from_toolbox_result(result) -> List[dict]:
-    regions: List[dict] = []
-    for node_result in result.node_results:
-        summary = node_result.summary if isinstance(node_result.summary, dict) else {}
-        for key in ("measurements", "detections"):
-            values = summary.get(key)
-            if not isinstance(values, list):
-                continue
-            for entry in values:
-                region = _normalize_segment_region(entry, len(regions))
-                if region:
-                    regions.append(region)
-    deduped = {}
-    for region in regions:
-        key = tuple(round(value, 3) for value in region["bbox"])
-        deduped[key] = region
-    return list(deduped.values())
-
-
-def _select_clicked_region(regions: List[dict], click_x: float, click_y: float) -> Optional[dict]:
-    containing = []
-    for region in regions:
-        x1, y1, x2, y2 = region["bbox"]
-        if x1 <= click_x <= x2 and y1 <= click_y <= y2:
-            containing.append(region)
-    if not containing:
-        return None
-    return min(containing, key=lambda region: region.get("area_px") or float("inf"))
-
-
-def _prune_config_to_source_shape(*, persisted_config: dict, source_config: dict) -> dict:
-    """Trim optional top-level config keys that were absent in source payloads."""
-    if not isinstance(persisted_config, dict):
-        return {}
-    if not isinstance(source_config, dict):
-        return persisted_config
-    pruned = dict(persisted_config)
-    for optional_key in ("phase_settings", "metadata_parsers", "project_owner", "current_user", "interface_layout"):
-        if optional_key not in source_config:
-            pruned.pop(optional_key, None)
-    return pruned
-
-
-
-def _dump_project_configuration_payload(config: schemas.InspectionProjectConfiguration) -> dict:
-    dumped = config.model_dump(exclude_unset=True)
-    metadata_parsers = dumped.get("metadata_parsers")
-    nsipro_dump = metadata_parsers.get("nsipro") if isinstance(metadata_parsers, dict) else None
-    nsipro_config = getattr(getattr(config, "metadata_parsers", None), "nsipro", None)
-    fields_set = getattr(nsipro_config, "model_fields_set", set())
-    if isinstance(nsipro_dump, dict):
-        for optional_key, default_value in (
-            ("parser_version", None),
-            ("parser_hash", None),
-            ("strict_version_match", False),
-        ):
-            if optional_key not in fields_set and nsipro_dump.get(optional_key) == default_value:
-                nsipro_dump.pop(optional_key, None)
-    return dumped
-
-def _strip_optional_default_sections(config: dict) -> dict:
-    if not isinstance(config, dict):
-        return {}
-    pruned = dict(config)
-    if pruned.get("phase_settings") == {
-        "manual_phase_selection_enabled": False,
-        "manual_phase": "data_ingestion",
-    }:
-        pruned.pop("phase_settings", None)
-    if pruned.get("metadata_parsers") == {"nsipro": {"parser_id": "default"}}:
-        pruned.pop("metadata_parsers", None)
-    if pruned.get("project_owner") == {"name": "", "email": ""}:
-        pruned.pop("project_owner", None)
-    if pruned.get("current_user") == {"username": "", "sso_authenticated": False}:
-        pruned.pop("current_user", None)
-    if pruned.get("interface_layout") == {"default_model": None}:
-        pruned.pop("interface_layout", None)
-    return pruned
-
-
-def _project_type_interface_layout_metadata_key(project_type: str) -> str:
-    return f"{PROJECT_TYPE_INTERFACE_LAYOUT_KEY_PREFIX}:{project_type}"
-
-
-
-def _load_nsipro_metadata_fixture(root: Path) -> Optional[dict]:
-    nsipro_files = sorted(root.glob("*.nsipro"))
-    if not nsipro_files:
-        return None
-    nsipro_path = nsipro_files[0]
-    return parse_nsipro_text(nsipro_path.read_text(encoding="utf-8"), nsipro_path.name)
-
-def _metadata_from_hierarchy_filename(path: Path) -> Optional[dict]:
-    tokens = path.stem.split("_")
-    if len(tokens) != 7:
-        return None
-    design_number, lot_number, part_set_or_batch, serial_number, side, modality, overlay = tokens
-    metadata = {
-        "design_number": design_number,
-        "lot_number": lot_number,
-        "serial_number": serial_number,
-        "side": side.lower(),
-        "modality": modality.lower(),
-        "overlay": overlay.lower() in {"true", "1", "yes"},
-        "source": "vista-test-data",
-    }
-    if part_set_or_batch.upper().startswith("BATCH"):
-        metadata["batch_number"] = part_set_or_batch
-    else:
-        metadata["set_number"] = part_set_or_batch
-    return metadata
-
-
-def _build_hierarchy_ingest_records(uploaded_records: List[dict]) -> schemas.InspectionBulkIngestPayload:
-    parts_by_key: dict[str, dict] = {}
-    for record in uploaded_records:
-        metadata = record.get("metadata") or {}
-        part_set_number = metadata.get("set_number")
-        batch_number = metadata.get("batch_number")
-        required = ["design_number", "lot_number", "serial_number", "side", "modality"]
-        if any(not metadata.get(key) for key in required):
-            continue
-        if not (part_set_number or batch_number):
-            continue
-        part_group_number = part_set_number or batch_number
-        part_key = "_".join([
-            metadata["design_number"],
-            metadata["lot_number"],
-            part_group_number,
-            metadata["serial_number"],
-        ])
-        batch_name = "_".join([metadata["design_number"], metadata["lot_number"], batch_number]) if batch_number else None
-        part = parts_by_key.setdefault(
-            part_key,
-            {
-                "batch_name": batch_name,
-                "batch_description": (
-                    f"Design {metadata['design_number']}, lot {metadata['lot_number']}, "
-                    f"batch {batch_number}"
-                ) if batch_number else None,
-                "serial_number": metadata["serial_number"],
-                "display_name": " ".join([
-                    metadata["design_number"],
-                    metadata["lot_number"],
-                    part_group_number,
-                    metadata["serial_number"],
-                ]),
-                "metadata": {
-                    "design_number": metadata["design_number"],
-                    "lot_number": metadata["lot_number"],
-                    "serial_number": metadata["serial_number"],
-                    "configured_views": [],
-                    "modalities": [],
-                    "view_images": {},
-                    "overlay_images": {},
-                    "source_images": [],
-                    "source": "vista-test-data",
-                },
-            },
-        )
-        if part_set_number:
-            part["metadata"]["set_number"] = part_set_number
-        if batch_number:
-            part["metadata"]["batch_number"] = batch_number
-        side = metadata["side"]
-        modality = metadata["modality"]
-        if side not in part["metadata"]["configured_views"]:
-            part["metadata"]["configured_views"].append(side)
-        if modality not in part["metadata"]["modalities"]:
-            part["metadata"]["modalities"].append(modality)
-        part["metadata"]["source_images"].append({
-            "filename": record["filename"],
-            "side": side,
-            "modality": modality,
-            "overlay": metadata["overlay"],
-            "image_id": str(record["image_id"]),
-        })
-        if metadata["overlay"]:
-            part["metadata"]["overlay_images"].setdefault(side, {})[modality] = record["filename"]
-        elif side not in part["metadata"]["view_images"]:
-            part["metadata"]["view_images"][side] = record["filename"]
-
-    batches_by_name: dict[str, schemas.InspectionIngestBatchRecord] = {}
-    unassigned_parts: list[schemas.InspectionIngestPartRecord] = []
-    for part in parts_by_key.values():
-        part["metadata"]["configured_views"].sort()
-        part["metadata"]["modalities"].sort()
-        ingest_part = schemas.InspectionIngestPartRecord(
-            serial_number=part["serial_number"],
-            display_name=part["display_name"],
-            metadata=part["metadata"],
-        )
-        if part["batch_name"]:
-            batch = batches_by_name.setdefault(
-                part["batch_name"],
-                schemas.InspectionIngestBatchRecord(
-                    name=part["batch_name"],
-                    description=part["batch_description"],
-                    parts=[],
-                ),
-            )
-            batch.parts.append(ingest_part)
-        else:
-            unassigned_parts.append(ingest_part)
-    for batch in batches_by_name.values():
-        batch.parts.sort(key=lambda item: item.serial_number)
-    unassigned_parts.sort(key=lambda item: item.serial_number)
-    return schemas.InspectionBulkIngestPayload(
-        batches=list(batches_by_name.values()),
-        unassigned_parts=unassigned_parts,
-    )
-
-
-def _rebuild_part_image_maps(metadata: dict) -> dict:
-    source_images = metadata.get("source_images")
-    if not isinstance(source_images, list):
-        source_images = []
-    configured_views: set[str] = set()
-    modalities: set[str] = set()
-    view_images: dict[str, str] = {}
-    overlay_images: dict[str, dict[str, str]] = {}
-    normalized_source_images: list[dict] = []
-
-    for record in source_images:
-        if not isinstance(record, dict):
-            continue
-        filename = str(record.get("filename") or "").strip()
-        if not filename:
-            continue
-        side = str(record.get("side") or "").strip().lower()
-        modality = str(record.get("modality") or "").strip().lower()
-        overlay = bool(record.get("overlay"))
-        normalized_record = {
-            **record,
-            "filename": filename,
-            "side": side,
-            "modality": modality,
-            "overlay": overlay,
-        }
-        normalized_source_images.append(normalized_record)
-        if side:
-            configured_views.add(side)
-        if modality:
-            modalities.add(modality)
-        if side and overlay and modality:
-            overlay_images.setdefault(side, {})[modality] = filename
-        elif side and not overlay and side not in view_images:
-            view_images[side] = filename
-
-    return {
-        **metadata,
-        "source_images": normalized_source_images,
-        "configured_views": sorted(configured_views),
-        "modalities": sorted(modalities),
-        "view_images": view_images,
-        "overlay_images": overlay_images,
-    }
-
-
-def _metadata_for_overlay_assignment(image: models.DataInstance) -> dict:
-    image_metadata = image.metadata_json if isinstance(image.metadata_json, dict) else {}
-    return {
-        "filename": image.filename,
-        "image_id": str(image.id),
-        "side": str(image_metadata.get("side") or "").strip().lower(),
-        "modality": str(image_metadata.get("modality") or "overlay").strip().lower() or "overlay",
-        "overlay": True,
-        "content_type": image.content_type,
-    }
-
-
-def _record_matches_filename(record: object, filename: str) -> bool:
-    return isinstance(record, dict) and str(record.get("filename") or "").strip() == filename
-
-
-def _record_matches_image_identity(record: object, *, filename: str = "", image_id: uuid.UUID | str | None = None) -> bool:
-    if not isinstance(record, dict):
-        return False
-    if image_id and str(record.get("image_id") or "").strip() == str(image_id):
-        return True
-    if image_id:
-        return False
-    return str(record.get("filename") or "").strip() == filename
-
-
-async def _get_active_project_image_by_id(
-    *,
-    db: AsyncSession,
-    project_id: uuid.UUID,
-    image_id: uuid.UUID,
-) -> models.DataInstance | None:
-    result = await db.execute(
-        select(models.DataInstance).where(
-            models.DataInstance.project_id == project_id,
-            models.DataInstance.id == image_id,
-            models.DataInstance.deleted_at.is_(None),
-        )
-    )
-    return result.scalars().first()
-
-
-async def _get_active_project_image_by_filename(
-    *,
-    db: AsyncSession,
-    project_id: uuid.UUID,
-    filename: str,
-) -> models.DataInstance | None:
-    result = await db.execute(
-        select(models.DataInstance).where(
-            models.DataInstance.project_id == project_id,
-            models.DataInstance.filename == filename,
-            models.DataInstance.deleted_at.is_(None),
-        )
-    )
-    return result.scalars().first()
-
-
-async def _create_test_image_if_missing(
-    *,
-    project_id: uuid.UUID,
-    file_path: Path,
-    metadata: dict,
-    db: AsyncSession,
-    current_user: schemas.User,
-    allow_metadata_only: bool = False,
-) -> tuple[models.DataInstance, bool]:
-    existing = await db.execute(
-        select(models.DataInstance).where(
-            models.DataInstance.project_id == project_id,
-            models.DataInstance.filename == file_path.name,
-            models.DataInstance.deleted_at.is_(None),
-        )
-    )
-    image = existing.scalars().first()
-    if image:
-        return image, False
-
-    object_storage_key = f"{project_id}/test-data/{file_path.name}"
-    content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
-    try:
-        with file_path.open("rb") as file_obj:
-            uploaded = await upload_file_to_s3(
-                bucket_name=settings.S3_BUCKET,
-                object_name=object_storage_key,
-                file_data=file_obj,
-                length=file_path.stat().st_size,
-                content_type=content_type,
-            )
-    except Exception as exc:
-        if not allow_metadata_only:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upload test data image",
-            ) from exc
-        uploaded = False
-    if not uploaded:
-        if allow_metadata_only:
-            metadata = {
-                **metadata,
-                "storage_status": "metadata_only",
-                "storage_warning": "Test data image object could not be uploaded.",
-            }
-        else:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upload test data image")
-
-    image = await crud.create_data_instance(
-        db=db,
-        data_instance=schemas.DataInstanceCreate(
-            project_id=project_id,
-            filename=file_path.name,
-            object_storage_key=object_storage_key,
-            content_type=content_type,
-            size_bytes=file_path.stat().st_size,
-            metadata=metadata,
-            uploaded_by_user_id=current_user.email,
-        ),
-        created_by=current_user.email,
-    )
-    return image, True
-
-
-
-def _dict_or_empty(candidate: object) -> dict:
-    return candidate if isinstance(candidate, dict) else {}
-
-
-def _resolve_configured_nsipro_parser(project_config: dict):
-    nsipro_config = _dict_or_empty(_dict_or_empty(project_config.get("metadata_parsers")).get("nsipro"))
-    parser = get_nsipro_parser(nsipro_config.get("parser_id"))
-    expected_version = str(nsipro_config.get("parser_version") or parser.version).strip()
-    expected_hash = str(nsipro_config.get("parser_hash") or parser.parser_hash).strip()
-    strict = bool(
-        nsipro_config.get("strict")
-        or nsipro_config.get("strict_mode")
-        or nsipro_config.get("strict_version_match")
-        or nsipro_config.get("strict_parser_match")
-    )
-    return parser, expected_version, expected_hash, strict
-
-
-async def _load_project_configuration_for_ingest(*, db: AsyncSession, project_id: uuid.UUID, project_type: str | None) -> dict:
-    metadata = await crud.get_project_metadata_by_key(
-        db=db,
-        project_id=project_id,
-        key=PROJECT_CONFIGURATION_KEY,
-    )
-    default_config = _default_project_configuration(project_type)
-    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else {}
-    return {**default_config, **raw_config}
-
-
-def _candidate_metadata_reference_keys(metadata: dict) -> list[str]:
-    keys: list[str] = []
-    raw_ref = metadata.get("associated_metadata_ref")
-    if isinstance(raw_ref, str) and raw_ref.strip():
-        keys.append(raw_ref.strip())
-    associated = metadata.get("associated_metadata")
-    if isinstance(associated, dict):
-        for candidate_key in ("project_metadata_key", "key"):
-            value = associated.get(candidate_key)
-            if isinstance(value, str) and value.strip():
-                keys.append(value.strip())
-    return list(dict.fromkeys(keys))
-
-
-def _extract_stored_nsipro_text(bundle: dict) -> str:
-    for key in ("text", "raw_text", "raw", "raw_payload", "raw_content", "file_content", "content"):
-        value = bundle.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-    return ""
-
-
-def _validate_nsipro_parser_contract(
-    *,
-    bundle: dict,
-    reference: dict,
-    configured_parser,
-    expected_version: str,
-    expected_hash: str,
-    strict: bool,
-) -> None:
-    if not strict:
-        return
-    observed_parser_id = str(
-        reference.get("parser_id")
-        or bundle.get("parser_id")
-        or configured_parser.id
-    ).strip()
-    observed_version = str(
-        reference.get("parser_version")
-        or bundle.get("parser_version")
-        or expected_version
-    ).strip()
-    observed_hash = str(
-        reference.get("parser_hash")
-        or bundle.get("parser_hash")
-        or expected_hash
-    ).strip()
-    mismatches = []
-    if observed_parser_id != configured_parser.id:
-        mismatches.append(f"parser_id expected {configured_parser.id!r} got {observed_parser_id!r}")
-    if observed_version != expected_version:
-        mismatches.append(f"parser_version expected {expected_version!r} got {observed_version!r}")
-    if observed_hash != expected_hash:
-        mismatches.append("parser_hash mismatch")
-    if mismatches:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=".nsipro parser contract mismatch: " + "; ".join(mismatches),
-        )
-
-
-def _normalize_nsipro_bundle_payload(
-    *,
-    bundle: dict,
-    reference: dict,
-    configured_parser,
-    expected_version: str,
-    expected_hash: str,
-    strict: bool,
-) -> dict | None:
-    if str(bundle.get("file_type") or "").strip().lower() not in {"nsipro", ".nsipro"}:
-        return None
-    _validate_nsipro_parser_contract(
-        bundle=bundle,
-        reference=reference,
-        configured_parser=configured_parser,
-        expected_version=expected_version,
-        expected_hash=expected_hash,
-        strict=strict,
-    )
-
-    raw_text = _extract_stored_nsipro_text(bundle)
-    if raw_text:
-        parsed = parse_nsipro_text(raw_text, str(bundle.get("source_filename") or bundle.get("filename") or ""), configured_parser.id)
-    else:
-        metadata = bundle.get("metadata")
-        if not isinstance(metadata, dict):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Associated .nsipro metadata does not contain parsed metadata or raw text.",
-            )
-        parsed = {
-            "parser": bundle.get("parser") or reference.get("parser") or "nsipro-stored-metadata",
-            "parser_id": configured_parser.id,
-            "parser_version": expected_version,
-            "parser_hash": expected_hash,
-            "source_filename": bundle.get("source_filename") or bundle.get("filename") or reference.get("source_filename"),
-            "metadata": metadata,
-            "warnings": list(bundle.get("warnings") or []),
-        }
-    return {
-        "parser": parsed.get("parser"),
-        "parser_id": parsed.get("parser_id") or configured_parser.id,
-        "parser_version": parsed.get("parser_version") or expected_version,
-        "parser_hash": parsed.get("parser_hash") or expected_hash,
-        "source_filename": parsed.get("source_filename") or bundle.get("source_filename") or bundle.get("filename"),
-        "content_hash": bundle.get("content_hash") or reference.get("content_hash"),
-        "metadata": parsed.get("metadata") if isinstance(parsed.get("metadata"), dict) else {},
-        "warnings": list(parsed.get("warnings") or []),
-    }
-
-
-async def _resolve_associated_nsipro_payload(
-    *,
-    db: AsyncSession,
-    project_id: uuid.UUID,
-    metadata: dict,
-    configured_parser,
-    expected_version: str,
-    expected_hash: str,
-    strict: bool,
-) -> dict | None:
-    for metadata_key in _candidate_metadata_reference_keys(metadata):
-        project_metadata = await crud.get_project_metadata_by_key(db=db, project_id=project_id, key=metadata_key)
-        bundle = project_metadata.value if project_metadata and isinstance(project_metadata.value, dict) else None
-        if not bundle:
-            continue
-        payload = _normalize_nsipro_bundle_payload(
-            bundle=bundle,
-            reference=_dict_or_empty(metadata.get("associated_metadata")),
-            configured_parser=configured_parser,
-            expected_version=expected_version,
-            expected_hash=expected_hash,
-            strict=strict,
-        )
-        if payload:
-            return payload
-    return None
-
-
-def _combine_metadata_source_values(source_payloads: list[dict]) -> dict:
-    combined: dict = {}
-    collisions: dict = {}
-    for source in source_payloads:
-        source_key = str(source.get("key") or "").strip()
-        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
-        for key, value in metadata.items():
-            if key in combined and combined[key] != value:
-                collisions.setdefault(key, []).append({"source_key": source_key, "value": value})
-                continue
-            combined[key] = value
-    if collisions:
-        combined["metadata_source_collisions"] = collisions
-    return combined
-
-
-async def _normalize_ingest_part_metadata(
-    *,
-    db: AsyncSession,
-    project_id: uuid.UUID,
-    metadata: dict | None,
-    configured_parser,
-    expected_version: str,
-    expected_hash: str,
-    strict: bool,
-) -> dict | None:
-    if metadata is None:
-        return None
-    if not isinstance(metadata, dict):
-        return metadata
-
-    normalized = {**metadata}
-    top_level_payload = await _resolve_associated_nsipro_payload(
-        db=db,
-        project_id=project_id,
-        metadata=normalized,
-        configured_parser=configured_parser,
-        expected_version=expected_version,
-        expected_hash=expected_hash,
-        strict=strict,
-    )
-    if top_level_payload:
-        normalized["nsipro_metadata"] = top_level_payload["metadata"]
-        normalized["nsipro_payload"] = top_level_payload
-
-    source_images = normalized.get("source_images")
-    if isinstance(source_images, list):
-        normalized_source_images = []
-        for record in source_images:
-            if not isinstance(record, dict):
-                normalized_source_images.append(record)
-                continue
-            normalized_record = {**record}
-            record_payload = await _resolve_associated_nsipro_payload(
-                db=db,
-                project_id=project_id,
-                metadata=normalized_record,
-                configured_parser=configured_parser,
-                expected_version=expected_version,
-                expected_hash=expected_hash,
-                strict=strict,
-            )
-            if record_payload:
-                normalized_record["nsipro_payload"] = record_payload
-                normalized.setdefault("nsipro_metadata", record_payload["metadata"])
-            normalized_source_images.append(normalized_record)
-        normalized["source_images"] = normalized_source_images
-    return normalized
-
-
-def _source_image_match_key(record: dict) -> str:
-    image_id = str(record.get("image_id") or "").strip()
-    if image_id:
-        return f"image_id:{image_id}"
-    filename = str(record.get("filename") or "").strip()
-    return f"filename:{filename}" if filename else ""
-
-
-def _metadata_contains_nsipro_payload(metadata: object) -> bool:
-    if not isinstance(metadata, dict):
-        return False
-    if isinstance(metadata.get("nsipro_metadata"), dict) or isinstance(metadata.get("nsipro_payload"), dict):
-        return True
-    source_images = metadata.get("source_images")
-    if isinstance(source_images, list):
-        return any(
-            isinstance(record, dict)
-            and (isinstance(record.get("nsipro_metadata"), dict) or isinstance(record.get("nsipro_payload"), dict))
-            for record in source_images
-        )
-    return False
-
-
-def _merge_existing_part_nsipro_metadata(existing_metadata: object, incoming_metadata: object) -> dict:
-    current = existing_metadata if isinstance(existing_metadata, dict) else {}
-    incoming = incoming_metadata if isinstance(incoming_metadata, dict) else {}
-    patch: dict = {}
-    for key in ("nsipro_metadata", "nsipro_payload", "associated_metadata_ref", "associated_metadata"):
-        if key in incoming:
-            patch[key] = incoming[key]
-
-    incoming_source_images = incoming.get("source_images")
-    if isinstance(incoming_source_images, list):
-        current_source_images = current.get("source_images") if isinstance(current.get("source_images"), list) else []
-        merged_source_images = [dict(record) if isinstance(record, dict) else record for record in current_source_images]
-        index_by_key = {
-            _source_image_match_key(record): index
-            for index, record in enumerate(merged_source_images)
-            if isinstance(record, dict) and _source_image_match_key(record)
-        }
-        changed = False
-        for incoming_record in incoming_source_images:
-            if not isinstance(incoming_record, dict):
-                continue
-            record_key = _source_image_match_key(incoming_record)
-            if record_key and record_key in index_by_key and isinstance(merged_source_images[index_by_key[record_key]], dict):
-                existing_record = merged_source_images[index_by_key[record_key]]
-                next_record = {**existing_record, **incoming_record}
-                if next_record != existing_record:
-                    merged_source_images[index_by_key[record_key]] = next_record
-                    changed = True
-            elif _metadata_contains_nsipro_payload(incoming_record):
-                merged_source_images.append(incoming_record)
-                changed = True
-        if changed:
-            patch["source_images"] = merged_source_images
-    return patch
-
-async def _bulk_ingest_project_parts(
-    *,
-    project_id: uuid.UUID,
-    payload: schemas.InspectionBulkIngestPayload,
-    db: AsyncSession,
-    current_user: schemas.User,
-    project_type: str | None = None,
-):
-    project_config = await _load_project_configuration_for_ingest(
-        db=db,
-        project_id=project_id,
-        project_type=project_type,
-    )
-    configured_parser, expected_version, expected_hash, strict_parser_match = _resolve_configured_nsipro_parser(project_config)
-
-    existing_batches = await crud.list_inspection_batches(db=db, project_id=project_id)
-    batches_by_name = {batch.name: batch for batch in existing_batches}
-    existing_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
-    parts_by_serial = {part.serial_number: part for part in existing_parts}
-
-    counters = {
-        "batches_received": len(payload.batches),
-        "parts_received": sum(len(batch.parts) for batch in payload.batches) + len(payload.unassigned_parts),
-        "batches_created": 0,
-        "parts_created": 0,
-        "parts_skipped_existing": 0,
-        "parts_skipped_discrepancy": 0,
-    }
-    discrepancies: List[dict] = []
-    payload_seen_serials: set[str] = set()
-
-    async def ingest_parts(
-        ingest_parts_list: List[schemas.InspectionIngestPartRecord],
-        *,
-        ingest_batch_name: Optional[str],
-        target_batch_id: Optional[uuid.UUID],
-    ) -> None:
-        for ingest_part in ingest_parts_list:
-            serial_number = ingest_part.serial_number.strip()
-            if serial_number in payload_seen_serials:
-                counters["parts_skipped_discrepancy"] += 1
-                discrepancies.append(
-                    {
-                        "code": "duplicate_serial_in_payload",
-                        "batch_name": ingest_batch_name or "unassigned",
-                        "serial_number": serial_number,
-                        "message": "Serial number appears more than once in ingest payload",
-                    }
-                )
-                continue
-            payload_seen_serials.add(serial_number)
-
-            existing_part = parts_by_serial.get(serial_number)
-            if existing_part:
-                if target_batch_id and existing_part.batch_id and existing_part.batch_id != target_batch_id:
-                    counters["parts_skipped_discrepancy"] += 1
-                    discrepancies.append(
-                        {
-                            "code": "serial_already_assigned_to_other_batch",
-                            "batch_name": ingest_batch_name or "unassigned",
-                            "serial_number": serial_number,
-                            "message": "Serial number already belongs to a different batch in this project",
-                        }
-                    )
-                    continue
-                normalized_existing_metadata = await _normalize_ingest_part_metadata(
-                    db=db,
-                    project_id=project_id,
-                    metadata=ingest_part.metadata_json,
-                    configured_parser=configured_parser,
-                    expected_version=expected_version,
-                    expected_hash=expected_hash,
-                    strict=strict_parser_match,
-                )
-                if _metadata_contains_nsipro_payload(normalized_existing_metadata):
-                    metadata_patch = _merge_existing_part_nsipro_metadata(existing_part.metadata_json, normalized_existing_metadata)
-                    if metadata_patch:
-                        updated_part = await crud.update_inspection_part_metadata(
-                            db=db,
-                            project_id=project_id,
-                            part_id=existing_part.id,
-                            metadata_patch=metadata_patch,
-                            updated_by=current_user.email,
-                        )
-                        if updated_part:
-                            parts_by_serial[serial_number] = updated_part
-                counters["parts_skipped_existing"] += 1
-                continue
-
-            normalized_metadata = await _normalize_ingest_part_metadata(
-                db=db,
-                project_id=project_id,
-                metadata=ingest_part.metadata_json,
-                configured_parser=configured_parser,
-                expected_version=expected_version,
-                expected_hash=expected_hash,
-                strict=strict_parser_match,
-            )
-            created_part = await crud.create_inspection_part(
-                db=db,
-                project_id=project_id,
-                part=schemas.InspectionPartCreate(
-                    batch_id=target_batch_id,
-                    serial_number=serial_number,
-                    display_name=ingest_part.display_name,
-                    metadata=normalized_metadata,
-                    review_state=ingest_part.review_state,
-                ),
-                created_by=current_user.email,
-            )
-            parts_by_serial[serial_number] = created_part
-            counters["parts_created"] += 1
-
-    for ingest_batch in payload.batches:
-        target_batch = batches_by_name.get(ingest_batch.name)
-        if target_batch is None:
-            target_batch = await crud.create_inspection_batch(
-                db=db,
-                project_id=project_id,
-                batch=schemas.InspectionBatchCreate(
-                    name=ingest_batch.name,
-                    description=ingest_batch.description,
-                ),
-                created_by=current_user.email,
-            )
-            batches_by_name[ingest_batch.name] = target_batch
-            counters["batches_created"] += 1
-        await ingest_parts(
-            ingest_batch.parts,
-            ingest_batch_name=ingest_batch.name,
-            target_batch_id=target_batch.id,
-        )
-
-    await ingest_parts(
-        payload.unassigned_parts,
-        ingest_batch_name=None,
-        target_batch_id=None,
-    )
-
-    return {
-        "project_id": project_id,
-        "counters": counters,
-        "discrepancies": discrepancies,
-    }
-
-
 def _normalize_layout_model(candidate: object) -> dict:
-    if not isinstance(candidate, dict):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="layout_model must be an object")
-    layout_node = candidate.get("layout")
-    if not isinstance(layout_node, dict) or layout_node.get("type") not in {"row", "tabset"}:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="layout_model must include a valid layout root")
-    return candidate
-
-
-async def _resolve_project_type_interface_layout_default(
-    db: AsyncSession,
-    *,
-    project_type: str,
-) -> Optional[dict]:
-    normalized_project_type = _normalize_project_type(project_type)
-    metadata_key = _project_type_interface_layout_metadata_key(normalized_project_type)
-    stmt = (
-        select(models.ProjectMetadata.value)
-        .join(models.Project, models.Project.id == models.ProjectMetadata.project_id)
-        .where(
-            models.Project.project_type == normalized_project_type,
-            models.ProjectMetadata.key == metadata_key,
-        )
-        .order_by(models.ProjectMetadata.updated_at.desc())
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    value = result.scalar_one_or_none()
-    return value if isinstance(value, dict) else None
+    try:
+        return inspection_workspace_service.normalize_layout_model(candidate)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post(
     "/projects/{project_id}/batches",
-    response_model=schemas.InspectionBatch,
+    response_model=inspection_part_schemas.InspectionBatch,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_inspection_batch(
     project_id: uuid.UUID,
-    batch: schemas.InspectionBatchCreate,
+    project: ReadableProject,
+    batch: inspection_part_schemas.InspectionBatchCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-
-    try:
-        return await crud.create_inspection_batch(
-            db=db,
-            project_id=project_id,
-            batch=batch,
-            created_by=current_user.email,
-        )
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Batch name already exists in this project")
+    return await inspection_batch_service.create_inspection_batch(
+        db=db,
+        project_id=project_id,
+        batch=batch,
+        created_by=current_user.email,
+    )
 
 
-@router.get("/projects/{project_id}/batches", response_model=List[schemas.InspectionBatch])
+@router.get(
+    "/projects/{project_id}/batches",
+    response_model=list[inspection_part_schemas.InspectionBatch],
+)
 async def list_inspection_batches(
     project_id: uuid.UUID,
+    project: ReadableProject,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    return await crud.list_inspection_batches(db=db, project_id=project_id)
+    return await inspection_batch_service.list_inspection_batches(
+        db=db,
+        project_id=project_id,
+    )
 
 
-@router.delete("/projects/{project_id}/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/projects/{project_id}/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def delete_inspection_batch(
     project_id: uuid.UUID,
+    project: ReadableProject,
     batch_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    deleted = await crud.delete_inspection_batch(
+    await inspection_batch_service.delete_inspection_batch(
         db=db,
         project_id=project_id,
         batch_id=batch_id,
         deleted_by=current_user.email,
     )
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection batch not found")
     return None
 
 
-@router.patch("/projects/{project_id}/batches/{batch_id}", response_model=schemas.InspectionBatch)
+@router.patch(
+    "/projects/{project_id}/batches/{batch_id}",
+    response_model=inspection_part_schemas.InspectionBatch,
+)
 async def update_inspection_batch(
     project_id: uuid.UUID,
+    project: ReadableProject,
     batch_id: uuid.UUID,
-    payload: schemas.InspectionBatchUpdate,
+    payload: inspection_part_schemas.InspectionBatchUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    try:
-        updated = await crud.update_inspection_batch(
-            db=db,
-            project_id=project_id,
-            batch_id=batch_id,
-            patch=payload,
-            updated_by=current_user.email,
-        )
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Batch name already exists in this project")
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection batch not found")
-    return updated
+    return await inspection_batch_service.update_inspection_batch(
+        db=db,
+        project_id=project_id,
+        batch_id=batch_id,
+        patch=payload,
+        updated_by=current_user.email,
+    )
 
 
 @router.post(
     "/projects/{project_id}/parts",
-    response_model=schemas.InspectionPart,
+    response_model=inspection_part_schemas.InspectionPart,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_inspection_part(
     project_id: uuid.UUID,
-    part: schemas.InspectionPartCreate,
+    project: ReadableProject,
+    part: inspection_part_schemas.InspectionPartCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-
-    if part.batch_id:
-        batch = await crud.get_inspection_batch(db=db, batch_id=part.batch_id)
-        if not batch or batch.project_id != project_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="batch_id does not belong to this project")
-
-    try:
-        created = await crud.create_inspection_part(
-            db=db,
-            project_id=project_id,
-            part=part,
-            created_by=current_user.email,
-        )
-        return _serialize_inspection_part(created)
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Serial number already exists in this project")
+    return await inspection_part_service.create_inspection_part(
+        db=db,
+        project_id=project_id,
+        part=part,
+        created_by=current_user.email,
+    )
 
 
-@router.get("/projects/{project_id}/parts", response_model=List[schemas.InspectionPart])
+@router.get(
+    "/projects/{project_id}/parts",
+    response_model=list[inspection_part_schemas.InspectionPart],
+)
 async def list_inspection_parts(
     project_id: uuid.UUID,
-    batch_id: Optional[uuid.UUID] = None,
-    review_state: Optional[str] = None,
+    project: ReadableProject,
+    batch_id: uuid.UUID | None = None,
+    review_state: str | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
-): 
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    parts = await crud.list_inspection_parts(
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    return await inspection_part_service.list_inspection_parts(
         db=db,
         project_id=project_id,
         batch_id=batch_id,
         review_state=review_state,
     )
-    return [_serialize_inspection_part(part) for part in parts]
 
 
-@router.put("/projects/{project_id}/parts/{part_id}/metadata-sources", response_model=schemas.InspectionPart)
-async def update_inspection_part_metadata_sources(
+@router.delete("/projects/{project_id}/parts", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_inspection_parts(
     project_id: uuid.UUID,
-    part_id: uuid.UUID,
-    payload: schemas.InspectionPartMetadataSourcesUpdateRequest,
+    project: ReadableProject,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    parser, expected_version, expected_hash, strict_parser_match = _resolve_configured_nsipro_parser(
-        await _load_project_configuration_for_ingest(db=db, project_id=project_id, project_type=project.project_type)
-    )
-    source_refs: list[dict] = []
-    source_payloads: list[dict] = []
-    nsipro_sources: list[dict] = []
-    for key in payload.metadata_source_keys:
-        project_metadata = await crud.get_project_metadata_by_key(db=db, project_id=project_id, key=key)
-        if project_metadata is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metadata source '{key}' not found")
-        value = project_metadata.value if isinstance(project_metadata.value, dict) else {"value": project_metadata.value}
-        reference = {"project_metadata_key": key, "key": key}
-        nsipro_payload = _normalize_nsipro_bundle_payload(
-            bundle=value,
-            reference=reference,
-            configured_parser=parser,
-            expected_version=expected_version,
-            expected_hash=expected_hash,
-            strict=strict_parser_match,
-        )
-        source_refs.append({
-            "project_metadata_key": key,
-            "filename": value.get("filename") or value.get("source_filename"),
-            "file_type": value.get("file_type"),
-            "parser": value.get("parser"),
-            "parser_id": value.get("parser_id"),
-        })
-        source_payloads.append({
-            "key": key,
-            "metadata": (
-                nsipro_payload.get("metadata")
-                if nsipro_payload
-                else value.get("metadata") if isinstance(value.get("metadata"), dict)
-                else value
-            ),
-        })
-        if nsipro_payload:
-            nsipro_sources.append({"key": key, **nsipro_payload})
-
-    current_metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
-    metadata_patch = {
-        "associated_metadata_refs": payload.metadata_source_keys,
-        "associated_metadata_sources": source_refs,
-        "project_metadata_source_values": source_payloads,
-        "project_metadata_combined": _combine_metadata_source_values(source_payloads) if source_payloads else {},
-        "nsipro_metadata_sources": nsipro_sources,
-        "nsipro_metadata": _combine_metadata_source_values(nsipro_sources) if nsipro_sources else {},
-    }
-    if payload.metadata_source_keys:
-        metadata_patch["associated_metadata_ref"] = payload.metadata_source_keys[0]
-        metadata_patch["associated_metadata"] = source_refs[0] if source_refs else {}
-    elif "associated_metadata_ref" in current_metadata or "associated_metadata" in current_metadata:
-        metadata_patch["associated_metadata_ref"] = None
-        metadata_patch["associated_metadata"] = None
-
-    updated = await crud.update_inspection_part_metadata(
+    await inspection_part_service.delete_all_inspection_parts(
         db=db,
         project_id=project_id,
-        part_id=part_id,
-        metadata_patch=metadata_patch,
-        updated_by=current_user.email,
+        deleted_by=current_user.email,
     )
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    return _serialize_inspection_part(updated)
+    return None
 
 
-@router.patch("/projects/{project_id}/parts/{part_id}", response_model=schemas.InspectionPart)
-async def update_inspection_part_review_state(
+@router.put(
+    "/projects/{project_id}/parts/{part_id}/image-display-order",
+    response_model=inspection_part_schemas.InspectionPart,
+)
+async def update_inspection_part_image_display_order(
     project_id: uuid.UUID,
     part_id: uuid.UUID,
-    payload: schemas.InspectionPartUpdate,
+    payload: inspection_part_schemas.InspectionPartImageDisplayOrderUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    updated = await crud.update_inspection_part_review_state(
+    await get_project_or_403_writable(project_id, db, current_user)
+    updated = (
+        await inspection_part_image_identity_service.update_part_image_display_order(
+            db=db,
+            project_id=project_id,
+            part_id=part_id,
+            image_refs=payload.image_refs,
+            updated_by=current_user.email,
+        )
+    )
+    return inspection_part_service.serialize_inspection_part(updated)
+
+
+@router.put(
+    "/projects/{project_id}/parts/{part_id}/metadata-sources",
+    response_model=inspection_part_schemas.InspectionPart,
+)
+async def update_inspection_part_metadata_sources(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    payload: inspection_part_schemas.InspectionPartMetadataSourcesUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    return await part_metadata_sources.update_inspection_part_metadata_sources(
+        db=db,
+        project=project,
+        project_id=project_id,
+        part_id=part_id,
+        payload=payload,
+        user_email=current_user.email,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/parts/{part_id}/volume-splat-assets",
+    response_model=inspection_pt3_schemas.PT3SplatGenerationStatus,
+)
+async def create_pt3_volume_splat_asset(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    payload: inspection_pt3_schemas.PT3SplatConversionRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    launch = await pt3_splat_job_start.launch_simplified_splat_job(
+        db,
+        project_type=project.project_type,
+        project_id=project_id,
+        part_id=part_id,
+        payload=payload,
+        requested_by=current_user.email,
+    )
+    background_tasks.add_task(launch.task, *launch.task_args, **launch.task_kwargs)
+    return launch.status
+
+
+@router.get(
+    "/projects/{project_id}/parts/{part_id}/volume-splat-assets/status",
+    response_model=inspection_pt3_schemas.PT3SplatGenerationStatus,
+)
+async def get_pt3_part_volume_splat_status(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    return await pt3_splat_status.get_part_splat_status(
+        db, project_id=project_id, part_id=part_id
+    )
+
+
+@router.post(
+    "/projects/{project_id}/parts/{part_id}/real-gaussian-splat-assets",
+    response_model=inspection_pt3_schemas.PT3RealSplatGenerationStatus,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_pt3_real_gaussian_splat_asset(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    payload: inspection_pt3_schemas.PT3RealSplatOptimizationRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    launch = await pt3_splat_job_start.launch_real_splat_job(
+        db,
+        project_type=project.project_type,
+        project_id=project_id,
+        part_id=part_id,
+        payload=payload,
+        requested_by=current_user.email,
+    )
+    background_tasks.add_task(launch.task, *launch.task_args, **launch.task_kwargs)
+    return launch.status
+
+
+@router.get(
+    "/projects/{project_id}/parts/{part_id}/real-gaussian-splat-assets/status",
+    response_model=inspection_pt3_schemas.PT3RealSplatGenerationStatus,
+)
+async def get_pt3_real_gaussian_splat_status(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    return await pt3_splat_status.get_part_real_splat_status(
+        db, project_id=project_id, part_id=part_id
+    )
+
+
+@router.get(
+    "/projects/{project_id}/parts/{part_id}/real-gaussian-splat-assets/{cache_key}"
+)
+async def get_pt3_real_gaussian_splat_asset(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    cache_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    asset_path = await pt3_splat_status.real_splat_asset_file(
+        db, project_id=project_id, part_id=part_id, cache_key=cache_key
+    )
+    return FileResponse(
+        asset_path, media_type="application/json", filename=asset_path.name
+    )
+
+
+@router.get(
+    "/projects/{project_id}/volume-stacks/{volume_stack_id}/splat-status",
+    response_model=inspection_pt3_schemas.PT3SplatGenerationStatus,
+)
+async def get_pt3_volume_stack_splat_status(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    volume_stack_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    return await pt3_splat_status.get_volume_stack_splat_status(
+        db, project_id=project_id, volume_stack_id=volume_stack_id
+    )
+
+
+@router.get("/projects/{project_id}/parts/{part_id}/volume-splat-assets/{cache_key}")
+async def get_pt3_volume_splat_asset(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    cache_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    asset_path, media_type = await pt3_splat_status.simplified_splat_asset_file(
+        db, project_id=project_id, part_id=part_id, cache_key=cache_key
+    )
+    return FileResponse(asset_path, media_type=media_type, filename=asset_path.name)
+
+
+@router.patch(
+    "/projects/{project_id}/parts/{part_id}",
+    response_model=inspection_part_schemas.InspectionPart,
+)
+async def update_inspection_part_review_state(
+    project_id: uuid.UUID,
+    project: ReadableProject,
+    part_id: uuid.UUID,
+    payload: inspection_part_schemas.InspectionPartUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schemas.User = Depends(get_current_user),
+):
+    return await inspection_annotation_service.update_part_review_state(
         db=db,
         project_id=project_id,
         part_id=part_id,
         review_state=payload.review_state,
         updated_by=current_user.email,
     )
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    return _serialize_inspection_part(updated)
 
 
-@router.delete("/projects/{project_id}/parts/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/projects/{project_id}/parts/{part_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def delete_inspection_part(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    deleted = await crud.delete_inspection_part(
+    await inspection_part_service.delete_inspection_part(
         db=db,
         project_id=project_id,
         part_id=part_id,
         deleted_by=current_user.email,
     )
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
     return None
 
 
 @router.post(
     "/projects/{project_id}/parts/image-assignments",
-    response_model=schemas.InspectionPartImageAssignmentResponse,
+    response_model=inspection_part_schemas.InspectionPartImageAssignmentResponse,
 )
 async def assign_image_to_part(
     project_id: uuid.UUID,
-    payload: schemas.InspectionPartImageAssignmentRequest,
+    project: ReadableProject,
+    payload: inspection_part_schemas.InspectionPartImageAssignmentRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    target_part = None
-    if payload.to_part_id:
-        target_part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=payload.to_part_id)
-        if not target_part:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target part not found")
-
-    all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
-    filename = payload.filename.strip()
-    payload_image_id = payload.image_id
-    source_entry = None
-    from_part_id = None
-
-    for part in all_parts:
-        metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
-        source_images = metadata.get("source_images")
-        if not isinstance(source_images, list):
-            continue
-        retained = []
-        for record in source_images:
-            if _record_matches_image_identity(record, filename=filename, image_id=payload_image_id):
-                source_entry = {
-                    **record,
-                    "filename": str(record.get("filename") or filename).strip(),
-                    "image_id": record.get("image_id") or (str(payload_image_id) if payload_image_id else None),
-                }
-                from_part_id = part.id
-                continue
-            retained.append(record)
-        if len(retained) != len(source_images):
-            normalized = _rebuild_part_image_maps({**metadata, "source_images": retained})
-            await crud.update_inspection_part_metadata(
-                db=db,
-                project_id=project_id,
-                part_id=part.id,
-                metadata_patch=normalized,
-                updated_by=current_user.email,
-            )
-
-    if source_entry is None:
-        if payload_image_id:
-            image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=payload_image_id)
-        else:
-            image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=filename)
-        if not image:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-        filename = image.filename
-        image_metadata = image.metadata_json if isinstance(image.metadata_json, dict) else {}
-        source_entry = {
-            "filename": filename,
-            "image_id": str(image.id),
-            "side": str(image_metadata.get("side") or "").strip().lower(),
-            "modality": str(image_metadata.get("modality") or "").strip().lower(),
-            "overlay": bool(image_metadata.get("overlay")),
-            "slice_axis": image_metadata.get("slice_axis"),
-            "slice_index": image_metadata.get("slice_index"),
-        }
-        for metadata_key in (
-            "crop_child_image",
-            "parent_image_id",
-            "parent_image_filename",
-            "crop_annotation_id",
-            "crop_title",
-            "crop_subtitle",
-            "crop_bbox",
-            "pixel_dtype",
-            "voxel_dtype",
-            "bit_depth",
-            "bits_per_sample",
-            "pixel_value_range",
-            "data_value_range",
-            "voxel_value_range",
-            "scalar_range",
-            "value_range",
-            "intensity_range",
-            "display_range",
-            "signed",
-        ):
-            if metadata_key in image_metadata:
-                source_entry[metadata_key] = image_metadata.get(metadata_key)
-        if any(key in image_metadata for key in ("pixel_value_range", "value_range", "intensity_range", "pixel_dtype", "voxel_dtype", "bit_depth")):
-            source_entry["metadata"] = {
-                key: image_metadata.get(key)
-                for key in (
-                    "pixel_dtype",
-                    "voxel_dtype",
-                    "bit_depth",
-                    "bits_per_sample",
-                    "pixel_value_range",
-                    "data_value_range",
-                    "voxel_value_range",
-                    "scalar_range",
-                    "value_range",
-                    "intensity_range",
-                    "display_range",
-                    "signed",
-                )
-                if key in image_metadata
-            }
-
-    if target_part:
-        target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
-        target_source_images = target_metadata.get("source_images")
-        target_source_images = target_source_images if isinstance(target_source_images, list) else []
-        target_source_images = [
-            record for record in target_source_images
-            if not _record_matches_image_identity(record, filename=filename, image_id=payload_image_id)
-        ]
-        target_source_images.append(source_entry)
-        normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
-        await crud.update_inspection_part_metadata(
-            db=db,
-            project_id=project_id,
-            part_id=target_part.id,
-            metadata_patch=normalized_target,
-            updated_by=current_user.email,
-        )
-
-    return schemas.InspectionPartImageAssignmentResponse(
+    return await inspection_part_image_service.assign_image_to_part(
+        db=db,
         project_id=project_id,
-        filename=filename,
-        from_part_id=from_part_id,
-        to_part_id=payload.to_part_id,
+        payload=payload,
+        user_email=current_user.email,
     )
 
 
 @router.post(
     "/projects/{project_id}/parts/overlay-assignments",
-    response_model=schemas.InspectionOverlayAssignmentResponse,
+    response_model=inspection_part_schemas.InspectionOverlayAssignmentResponse,
 )
 async def assign_overlay_to_base_image(
     project_id: uuid.UUID,
-    payload: schemas.InspectionOverlayAssignmentRequest,
+    project: ReadableProject,
+    payload: inspection_part_schemas.InspectionOverlayAssignmentRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    overlay_filename = payload.overlay_filename.strip()
-    overlay_image_id = payload.overlay_image_id
-    base_filename = payload.base_filename.strip() if payload.base_filename else None
-    base_image_id = payload.base_image_id
-    if base_filename == "":
-        base_filename = None
-    if base_filename and overlay_filename == base_filename and (not overlay_image_id or not base_image_id or overlay_image_id == base_image_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Overlay image cannot be assigned to itself")
-
-    if overlay_image_id:
-        overlay_image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=overlay_image_id)
-    else:
-        overlay_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=overlay_filename)
-    if not overlay_image:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overlay image not found")
-    overlay_filename = overlay_image.filename
-
-    all_parts = await crud.list_inspection_parts(db=db, project_id=project_id)
-    from_part_id = None
-    overlay_entry = None
-
-    for part in all_parts:
-        metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
-        source_images = metadata.get("source_images")
-        if not isinstance(source_images, list):
-            continue
-        retained = []
-        removed = False
-        for record in source_images:
-            if _record_matches_image_identity(record, filename=overlay_filename, image_id=overlay_image_id):
-                overlay_entry = {**record, "filename": str(record.get("filename") or overlay_filename).strip(), "image_id": record.get("image_id") or str(overlay_image.id)}
-                from_part_id = part.id
-                removed = True
-                continue
-            retained.append(record)
-        if removed:
-            normalized = _rebuild_part_image_maps({**metadata, "source_images": retained})
-            await crud.update_inspection_part_metadata(
-                db=db,
-                project_id=project_id,
-                part_id=part.id,
-                metadata_patch=normalized,
-                updated_by=current_user.email,
-            )
-
-    if overlay_entry is None:
-        overlay_entry = _metadata_for_overlay_assignment(overlay_image)
-    overlay_entry = {**overlay_entry, "overlay": True}
-
-    target_part = None
-    base_entry = None
-    if base_filename:
-        if base_image_id:
-            base_image = await _get_active_project_image_by_id(db=db, project_id=project_id, image_id=base_image_id)
-        else:
-            base_image = await _get_active_project_image_by_filename(db=db, project_id=project_id, filename=base_filename)
-        if not base_image:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base image not found")
-        base_filename = base_image.filename
-        for part in all_parts:
-            metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
-            source_images = metadata.get("source_images")
-            if not isinstance(source_images, list):
-                continue
-            for record in source_images:
-                if _record_matches_image_identity(record, filename=base_filename, image_id=base_image_id) and not bool(record.get("overlay")):
-                    target_part = part
-                    base_entry = record
-                    break
-            if target_part:
-                break
-        if not target_part:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base image is not assigned to an inspection part")
-
-        base_image_id = str(base_entry.get("image_id") or base_image.id)
-        overlay_entry = {
-            **overlay_entry,
-            "overlay": True,
-            "side": str(base_entry.get("side") or overlay_entry.get("side") or "").strip().lower(),
-            "modality": str(overlay_entry.get("modality") or "overlay").strip().lower() or "overlay",
-            "overlay_base_filename": base_filename,
-            "overlay_base_image_id": base_image_id,
-        }
-        target_metadata = target_part.metadata_json if isinstance(target_part.metadata_json, dict) else {}
-        target_source_images = target_metadata.get("source_images")
-        target_source_images = target_source_images if isinstance(target_source_images, list) else []
-        target_source_images = [
-            record for record in target_source_images
-            if not _record_matches_image_identity(record, filename=overlay_filename, image_id=overlay_image_id)
-        ]
-        target_source_images.append(overlay_entry)
-        normalized_target = _rebuild_part_image_maps({**target_metadata, "source_images": target_source_images})
-        await crud.update_inspection_part_metadata(
-            db=db,
-            project_id=project_id,
-            part_id=target_part.id,
-            metadata_patch=normalized_target,
-            updated_by=current_user.email,
-        )
-
-    return schemas.InspectionOverlayAssignmentResponse(
-        project_id=project_id,
-        overlay_filename=overlay_filename,
-        base_filename=base_filename,
-        from_part_id=from_part_id,
-        to_part_id=target_part.id if target_part else None,
+    return await overlay_assignment.assign_overlay_to_base_image(
+        db=db, project_id=project_id, payload=payload, user_email=current_user.email
     )
 
 
 @router.post(
     "/projects/{project_id}/parts/batch-assignments",
-    response_model=schemas.InspectionPartBatchAssignmentResponse,
+    response_model=inspection_part_schemas.InspectionPartBatchAssignmentResponse,
 )
 async def assign_part_to_batch(
     project_id: uuid.UUID,
-    payload: schemas.InspectionPartBatchAssignmentRequest,
+    project: ReadableProject,
+    payload: inspection_part_schemas.InspectionPartBatchAssignmentRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    if payload.to_batch_id:
-        batch = await crud.get_inspection_batch(db=db, batch_id=payload.to_batch_id)
-        if not batch or batch.project_id != project_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="to_batch_id does not belong to this project")
-
-    updated = await crud.update_inspection_part_batch_assignment(
+    assignment = await inspection_part_service.assign_part_to_batch(
         db=db,
         project_id=project_id,
         part_id=payload.part_id,
         to_batch_id=payload.to_batch_id,
         updated_by=current_user.email,
     )
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    return schemas.InspectionPartBatchAssignmentResponse(
-        project_id=project_id,
-        part_id=payload.part_id,
-        to_batch_id=payload.to_batch_id,
-    )
+    return inspection_part_schemas.InspectionPartBatchAssignmentResponse(**assignment)
 
 
-@router.patch("/projects/{project_id}/parts/{part_id}/source-images/{image_ref:path}", response_model=schemas.InspectionPart)
+@router.patch(
+    "/projects/{project_id}/parts/{part_id}/source-images/{image_ref:path}",
+    response_model=inspection_part_schemas.InspectionPart,
+)
 async def update_inspection_part_source_image(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
     image_ref: str,
-    payload: schemas.InspectionPartSourceImageUpdateRequest,
+    payload: inspection_part_schemas.InspectionPartSourceImageUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    metadata = part.metadata_json if isinstance(part.metadata_json, dict) else {}
-    source_images = metadata.get("source_images")
-    if not isinstance(source_images, list):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source image not found")
-    target_ref = str(image_ref or "").strip()
-    updated_images = []
-    found = False
-    for record in source_images:
-        if not isinstance(record, dict):
-            updated_images.append(record)
-            continue
-        record_refs = {
-            str(record.get("image_id") or "").strip(),
-            str(record.get("filename") or "").strip(),
-        }
-        if target_ref and target_ref in record_refs:
-            found = True
-            next_record = dict(record)
-            if payload.crop_subtitle is not None:
-                next_record["crop_subtitle"] = payload.crop_subtitle.strip()
-            updated_images.append(next_record)
-        else:
-            updated_images.append(record)
-    if not found:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source image not found")
-    normalized = _rebuild_part_image_maps({**metadata, "source_images": updated_images})
-    updated = await crud.update_inspection_part_metadata(
+    return await part_source_images.update_part_source_image(
         db=db,
         project_id=project_id,
         part_id=part_id,
-        metadata_patch=normalized,
-        updated_by=current_user.email,
+        image_ref=image_ref,
+        payload=payload,
+        user_email=current_user.email,
     )
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    return _serialize_inspection_part(updated)
 
-@router.patch("/projects/{project_id}/parts/{part_id}/manual-flag", response_model=schemas.InspectionPart)
+
+@router.patch(
+    "/projects/{project_id}/parts/{part_id}/manual-flag",
+    response_model=inspection_part_schemas.InspectionPart,
+)
 async def update_inspection_part_manual_flag(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
-    payload: schemas.InspectionPartManualFlagUpdateRequest,
+    payload: inspection_part_schemas.InspectionPartManualFlagUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    updated = await crud.update_inspection_part_metadata(
+    updated = await inspection_repository.update_inspection_part_metadata(
         db=db,
         project_id=project_id,
         part_id=part_id,
@@ -1869,324 +523,170 @@ async def update_inspection_part_manual_flag(
         updated_by=current_user.email,
     )
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    return _serialize_inspection_part(updated)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found"
+        )
+    return inspection_part_service.serialize_inspection_part(updated)
 
 
 @router.post(
     "/projects/{project_id}/parts/{part_id}/segmentation-runs",
-    response_model=schemas.InspectionSegmentationInvokeResponse,
+    response_model=inspection_volume_schemas.InspectionSegmentationInvokeResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def invoke_part_segmentation(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
-    payload: schemas.InspectionSegmentationInvokeRequest,
+    payload: inspection_volume_schemas.InspectionSegmentationInvokeRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    created_at = datetime.now(timezone.utc)
-    run_id = uuid.uuid4()
-    overlay_id = f"segmentation-{payload.axis}-{payload.slice_index}"
-    run_entry = {
-        "run_id": str(run_id),
-        "axis": payload.axis,
-        "slice_index": payload.slice_index,
-        "status": "completed",
-        "overlay_id": overlay_id,
-        "created_at": created_at.isoformat(),
-        "requested_by": current_user.email,
-    }
-
-    existing_runs = []
-    if isinstance(part.metadata_json, dict):
-        existing_runs = list(part.metadata_json.get("segmentation_runs") or [])
-    updated_part = await crud.update_inspection_part_metadata(
-        db=db,
+    return await inspection_measurement_service.invoke_part_segmentation(
+        db,
         project_id=project_id,
         part_id=part_id,
-        metadata_patch={"segmentation_runs": [*existing_runs, run_entry]},
-        updated_by=current_user.email,
+        axis=payload.axis,
+        slice_index=payload.slice_index,
+        user_email=current_user.email,
     )
-    if not updated_part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    return {
-        "run_id": run_id,
-        "part_id": part_id,
-        "axis": payload.axis,
-        "slice_index": payload.slice_index,
-        "status": "completed",
-        "overlay_id": overlay_id,
-        "created_at": created_at,
-    }
 
 
 @router.post(
     "/projects/{project_id}/parts/{part_id}/slice-segmentation",
-    response_model=schemas.InspectionSliceSegmentationResponse,
+    response_model=inspection_volume_schemas.InspectionSliceSegmentationResponse,
 )
 async def segment_inspection_slice(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
-    payload: schemas.InspectionSliceSegmentationRequest,
+    payload: inspection_volume_schemas.InspectionSliceSegmentationRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    if payload.method_id not in SLICE_SEGMENTATION_METHOD_IDS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported slice segmentation method")
-
-    image_bytes = _decode_slice_image_payload(payload.image_data_base64)
-    workflow = _slice_segmentation_workflow(payload.method_id, payload.parameters)
-    image_input = WorkflowImageInput(
-        image_id=uuid.uuid4(),
-        filename=payload.filename,
-        content_type="image/png",
-        data=image_bytes,
-        metadata={
-            "part_id": str(part_id),
-            "axis": payload.axis,
-            "slice_index": payload.slice_index,
-        },
+    return await inspection_measurement_service.segment_inspection_slice(
+        db, project_id=project_id, part_id=part_id, payload=payload
     )
-
-    try:
-        result = execute_image_workflow(workflow, [image_input])
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Slice segmentation failed: {exc}") from exc
-
-    regions = _regions_from_toolbox_result(result)
-    selected_region = _select_clicked_region(regions, payload.click_x, payload.click_y)
-    summary = {
-        "workflow_name": result.workflow_name,
-        "image_count": result.image_count,
-        "region_count": len(regions),
-        "click": {"x": payload.click_x, "y": payload.click_y},
-    }
-    for node_result in result.node_results:
-        if node_result.method_id == payload.method_id and isinstance(node_result.summary, dict):
-            summary.update({key: value for key, value in node_result.summary.items() if key not in {"measurements", "detections"}})
-
-    return {
-        "run_id": result.run_id,
-        "part_id": part_id,
-        "axis": payload.axis,
-        "slice_index": payload.slice_index,
-        "method_id": payload.method_id,
-        "status": result.status,
-        "cached": False,
-        "regions": regions,
-        "selected_region": selected_region,
-        "summary": summary,
-        "warnings": result.warnings,
-    }
 
 
 @router.post(
     "/projects/{project_id}/parts/{part_id}/measurement-runs",
-    response_model=schemas.InspectionMeasurementInvokeResponse,
+    response_model=inspection_volume_schemas.InspectionMeasurementInvokeResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def invoke_ai_measurements(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
-    payload: schemas.InspectionMeasurementInvokeRequest,
+    payload: inspection_volume_schemas.InspectionMeasurementInvokeRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    synthetic_level = 0
-    if isinstance(part.metadata_json, dict):
-        synthetic_level = int(part.metadata_json.get("synthetic_level") or 0)
-
-    complexity_multiplier = max(1, synthetic_level)
-    values = {
-        "crack_length_mm": round((12.4 + len(payload.include_overlays) * 1.7) * complexity_multiplier, 2),
-        "pore_area_mm2": round((2.1 + len(payload.measurement_profile) * 0.08) * complexity_multiplier, 2),
-        "edge_offset_mm": round((0.35 + (complexity_multiplier * 0.11)), 2),
-    }
-
-    created_at = datetime.now(timezone.utc)
-    run_id = uuid.uuid4()
-    result_entry = {
-        "run_id": str(run_id),
-        "measurement_profile": payload.measurement_profile,
-        "include_overlays": payload.include_overlays,
-        "status": "completed",
-        "units": "mm",
-        "values": values,
-        "created_at": created_at.isoformat(),
-        "requested_by": current_user.email,
-    }
-
-    existing_runs = []
-    if isinstance(part.metadata_json, dict):
-        existing_runs = list(part.metadata_json.get("measurement_runs") or [])
-
-    updated_part = await crud.update_inspection_part_metadata(
-        db=db,
+    return await inspection_measurement_service.invoke_ai_measurements(
+        db,
         project_id=project_id,
         part_id=part_id,
-        metadata_patch={"measurement_runs": [*existing_runs, result_entry]},
-        updated_by=current_user.email,
+        measurement_profile=payload.measurement_profile,
+        include_overlays=payload.include_overlays,
+        user_email=current_user.email,
     )
-    if not updated_part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    return {
-        "run_id": run_id,
-        "part_id": part_id,
-        "status": "completed",
-        "measurement_profile": payload.measurement_profile,
-        "units": "mm",
-        "values": values,
-        "created_at": created_at,
-    }
 
 
 @router.get(
     "/projects/{project_id}/parts/{part_id}/annotations",
-    response_model=schemas.InspectionAnnotationListResponse,
+    response_model=inspection_annotation_schemas.InspectionAnnotationListResponse,
 )
 async def list_part_annotations(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
     include_hidden: bool = True,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
+    part = await inspection_repository.get_inspection_part(
+        db=db, project_id=project_id, part_id=part_id
+    )
     if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found"
+        )
 
-    annotations = _part_annotations(part)
+    annotations = inspection_annotation_service.part_annotations(part)
     if not include_hidden:
-        annotations = [annotation for annotation in annotations if not annotation.get("hidden", False)]
+        annotations = [
+            annotation
+            for annotation in annotations
+            if not annotation.get("hidden", False)
+        ]
     return {"part_id": part_id, "annotations": annotations}
 
 
 @router.post(
     "/projects/{project_id}/parts/{part_id}/annotations",
-    response_model=schemas.InspectionAnnotation,
+    response_model=inspection_annotation_schemas.InspectionAnnotation,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_part_annotation(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
-    payload: schemas.InspectionAnnotationCreate,
+    payload: inspection_annotation_schemas.InspectionAnnotationCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    now = datetime.now(timezone.utc)
-    attribution_owner = ""
-    if part.batch_id:
-        batch = await crud.get_inspection_batch(db=db, batch_id=part.batch_id)
-        attribution_owner = str(batch.owner or "").strip() if batch else ""
-    if not attribution_owner:
-        config_metadata = await crud.get_project_metadata_by_key(db=db, project_id=project_id, key=PROJECT_CONFIGURATION_KEY)
-        config_value = config_metadata.value if config_metadata and isinstance(config_metadata.value, dict) else {}
-        project_owner = config_value.get("project_owner") if isinstance(config_value.get("project_owner"), dict) else {}
-        attribution_owner = str(project_owner.get("email") or project_owner.get("name") or "").strip()
-        if not attribution_owner:
-            current_config_user = config_value.get("current_user") if isinstance(config_value.get("current_user"), dict) else {}
-            username = str(current_config_user.get("username") or "").strip()
-            if username:
-                sso_authenticated = bool(current_config_user.get("sso_authenticated"))
-                attribution_owner = username if sso_authenticated else f"{username} (manual)"
-
-    annotation_entry = {
-        "id": str(uuid.uuid4()),
-        **payload.model_dump(),
-        "created_at": now.isoformat(),
-        "created_by": attribution_owner or current_user.email,
-        "updated_at": now.isoformat(),
-        "updated_by": current_user.email,
-    }
-    annotations = _part_annotations(part)
-    annotations.append(annotation_entry)
-    updated_part = await crud.update_inspection_part_metadata(
+    part = await inspection_repository.get_inspection_part_for_update(
         db=db,
         project_id=project_id,
         part_id=part_id,
-        metadata_patch={ANNOTATIONS_METADATA_KEY: annotations},
-        updated_by=current_user.email,
     )
-    if not updated_part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    return annotation_entry
+    if not part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found"
+        )
+
+    return await inspection_annotation_service.create_part_annotation(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        part=part,
+        payload=payload,
+        current_user_email=current_user.email,
+    )
 
 
 @router.patch(
     "/projects/{project_id}/parts/{part_id}/annotations/{annotation_id}",
-    response_model=schemas.InspectionAnnotation,
+    response_model=inspection_annotation_schemas.InspectionAnnotation,
 )
 async def update_part_annotation(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
     annotation_id: uuid.UUID,
-    payload: schemas.InspectionAnnotationUpdate,
+    payload: inspection_annotation_schemas.InspectionAnnotationUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    existing_annotations = _part_annotations(part)
-    update_payload = payload.model_dump(exclude_none=True)
-    now = datetime.now(timezone.utc).isoformat()
-    updated_annotation = None
-    updated_annotations = []
-
-    for annotation in existing_annotations:
-        if annotation.get("id") == str(annotation_id):
-            annotation = {
-                **annotation,
-                **update_payload,
-                "updated_at": now,
-                "updated_by": current_user.email,
-            }
-            updated_annotation = annotation
-        updated_annotations.append(annotation)
-
-    if not updated_annotation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annotation not found")
-
-    persisted = await crud.update_inspection_part_metadata(
+    part = await inspection_repository.get_inspection_part_for_update(
         db=db,
         project_id=project_id,
         part_id=part_id,
-        metadata_patch={ANNOTATIONS_METADATA_KEY: updated_annotations},
-        updated_by=current_user.email,
     )
-    if not persisted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-    return updated_annotation
+    if not part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found"
+        )
+
+    return await inspection_annotation_service.update_part_annotation(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        part=part,
+        annotation_id=annotation_id,
+        payload=payload,
+        current_user_email=current_user.email,
+    )
 
 
 @router.delete(
@@ -2195,89 +695,66 @@ async def update_part_annotation(
 )
 async def delete_part_annotation(
     project_id: uuid.UUID,
+    project: ReadableProject,
     part_id: uuid.UUID,
     annotation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    part = await crud.get_inspection_part(db=db, project_id=project_id, part_id=part_id)
-    if not part:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
-
-    existing_annotations = _part_annotations(part)
-    updated_annotations = [
-        annotation for annotation in existing_annotations
-        if annotation.get("id") != str(annotation_id)
-    ]
-    if len(updated_annotations) == len(existing_annotations):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annotation not found")
-
-    persisted = await crud.update_inspection_part_metadata(
+    part = await inspection_repository.get_inspection_part_for_update(
         db=db,
         project_id=project_id,
         part_id=part_id,
-        metadata_patch={ANNOTATIONS_METADATA_KEY: updated_annotations},
-        updated_by=current_user.email,
     )
-    if not persisted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found")
+    if not part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Inspection part not found"
+        )
+
+    await inspection_annotation_service.delete_part_annotation(
+        db=db,
+        project_id=project_id,
+        part_id=part_id,
+        part=part,
+        annotation_id=annotation_id,
+        current_user_email=current_user.email,
+    )
 
 
 @router.get(
     "/projects/{project_id}/workspace-state",
-    response_model=schemas.InspectionWorkspaceStateResponse,
+    response_model=inspection_workspace_schemas.InspectionWorkspaceStateResponse,
 )
 async def get_inspection_workspace_state(
     project_id: uuid.UUID,
+    project: ReadableProject,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    metadata_key = _workspace_state_metadata_key(current_user.email)
-    metadata = await crud.get_project_metadata_by_key(
+    return await inspection_workspace_service.get_workspace_state(
         db=db,
         project_id=project_id,
-        key=metadata_key,
+        user_email=current_user.email,
     )
-    raw_state = metadata.value if metadata else {}
-    safe_state = _normalize_workspace_state(raw_state)
-    return {
-        "project_id": project_id,
-        "user_email": current_user.email,
-        "state": safe_state,
-        "updated_at": metadata.updated_at if metadata else None,
-    }
 
 
 @router.put(
     "/projects/{project_id}/workspace-state",
-    response_model=schemas.InspectionWorkspaceStateResponse,
+    response_model=inspection_workspace_schemas.InspectionWorkspaceStateResponse,
 )
 async def update_inspection_workspace_state(
     project_id: uuid.UUID,
-    payload: schemas.InspectionWorkspaceStatePayload,
+    project: ReadableProject,
+    payload: inspection_workspace_schemas.InspectionWorkspaceStatePayload,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    metadata_key = _workspace_state_metadata_key(current_user.email)
-    updated = await crud.create_or_update_project_metadata(
+    return await inspection_workspace_service.update_workspace_state(
         db=db,
-        metadata=schemas.ProjectMetadataCreate(
-            project_id=project_id,
-            key=metadata_key,
-            value=_normalize_workspace_state(payload.state),
-        ),
-        created_by=current_user.email,
+        project_id=project_id,
+        user_email=current_user.email,
+        state=payload.state,
     )
-    safe_state = _normalize_workspace_state(updated.value)
-    return {
-        "project_id": project_id,
-        "user_email": current_user.email,
-        "state": safe_state,
-        "updated_at": updated.updated_at,
-    }
 
 
 @router.get(
@@ -2285,142 +762,98 @@ async def update_inspection_workspace_state(
 )
 async def get_project_configuration(
     project_id: uuid.UUID,
+    project: ReadableProject,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    metadata = await crud.get_project_metadata_by_key(
+    return await inspection_workspace_service.get_project_configuration(
         db=db,
         project_id=project_id,
-        key=PROJECT_CONFIGURATION_KEY,
+        project=project,
     )
-    default_config = _default_project_configuration(project.project_type)
-    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else default_config
-    resolved_config = dict(raw_config)
-    interface_layout = resolved_config.get("interface_layout")
-    has_project_default_layout = (
-        isinstance(interface_layout, dict)
-        and isinstance(interface_layout.get("default_model"), dict)
-    )
-    if not has_project_default_layout:
-        project_type_default = await _resolve_project_type_interface_layout_default(
-            db,
-            project_type=project.project_type or "PT1",
-        )
-        if project_type_default:
-            resolved_config["interface_layout"] = {
-                "default_model": project_type_default,
-            }
-    return {
-        "project_id": project_id,
-        "config": resolved_config,
-        "updated_at": metadata.updated_at if metadata else None,
-    }
 
 
 @router.put(
     "/projects/{project_id}/configuration",
-    response_model=schemas.InspectionProjectConfigurationResponse,
+    response_model=inspection_workspace_schemas.InspectionProjectConfigurationResponse,
     response_model_exclude_unset=True,
 )
 async def update_project_configuration(
     project_id: uuid.UUID,
-    payload: schemas.InspectionProjectConfigurationPayload,
+    project: WritableProject,
+    payload: inspection_workspace_schemas.InspectionProjectConfigurationPayload,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    updated = await crud.create_or_update_project_metadata(
+    return await inspection_workspace_service.update_project_configuration(
         db=db,
-        metadata=schemas.ProjectMetadataCreate(
-            project_id=project_id,
-            key=PROJECT_CONFIGURATION_KEY,
-            value=_dump_project_configuration_payload(payload.config),
-        ),
-        created_by=current_user.email,
+        project_id=project_id,
+        project=project,
+        config=payload.config,
+        user_email=current_user.email,
     )
-    persisted = updated.value if isinstance(updated.value, dict) else _default_project_configuration(project.project_type)
-    return {
-        "project_id": project_id,
-        "config": persisted,
-        "updated_at": updated.updated_at,
-    }
 
 
 @router.post(
     "/projects/{project_id}/configuration/interface-layout/default",
-    response_model=schemas.InspectionProjectConfigurationResponse,
+    response_model=inspection_workspace_schemas.InspectionProjectConfigurationResponse,
+    response_model_exclude_unset=True,
 )
 async def save_project_default_interface_layout(
     project_id: uuid.UUID,
-    payload: schemas.InspectionInterfaceLayoutDefaultPayload,
+    project: ReadableProject,
+    payload: inspection_workspace_schemas.InspectionInterfaceLayoutDefaultPayload,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    metadata = await crud.get_project_metadata_by_key(
+    return await inspection_workspace_service.save_project_default_interface_layout(
         db=db,
         project_id=project_id,
-        key=PROJECT_CONFIGURATION_KEY,
+        project=project,
+        layout_model=payload.layout_model,
+        user_email=current_user.email,
     )
-    default_config = _default_project_configuration(project.project_type)
-    raw_config = metadata.value if metadata and isinstance(metadata.value, dict) else default_config
-    config = {
-        **default_config,
-        **raw_config,
-    }
-    config["interface_layout"] = {
-        "default_model": _normalize_layout_model(payload.layout_model),
-    }
-    updated = await crud.create_or_update_project_metadata(
-        db=db,
-        metadata=schemas.ProjectMetadataCreate(
-            project_id=project_id,
-            key=PROJECT_CONFIGURATION_KEY,
-            value=config,
-        ),
-        created_by=current_user.email,
-    )
-    persisted = updated.value if isinstance(updated.value, dict) else _default_project_configuration(project.project_type)
-    return {
-        "project_id": project_id,
-        "config": persisted,
-        "updated_at": updated.updated_at,
-    }
 
 
 @router.post(
     "/projects/{project_id}/configuration/interface-layout/project-type-default",
-    response_model=schemas.InspectionProjectConfigurationResponse,
+    response_model=inspection_workspace_schemas.InspectionProjectConfigurationResponse,
 )
 async def save_project_type_default_interface_layout(
     project_id: uuid.UUID,
-    payload: schemas.InspectionInterfaceLayoutDefaultPayload,
+    project: ReadableProject,
+    payload: inspection_workspace_schemas.InspectionInterfaceLayoutDefaultPayload,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
     raw_groups_header = request.headers.get("X-User-Groups", "[]")
     try:
-        parsed_groups = json.loads(raw_groups_header) if isinstance(raw_groups_header, str) else []
+        parsed_groups = (
+            json.loads(raw_groups_header) if isinstance(raw_groups_header, str) else []
+        )
     except json.JSONDecodeError:
         parsed_groups = []
-    normalized_groups = {str(group).strip().lower() for group in parsed_groups if isinstance(group, str)}
+    normalized_groups = {
+        str(group).strip().lower() for group in parsed_groups if isinstance(group, str)
+    }
     if not ({"admin", "admins"} & normalized_groups):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required to save project type defaults")
-    normalized_layout = _normalize_layout_model(payload.layout_model)
-    metadata_key = _project_type_interface_layout_metadata_key(project.project_type or "PT1")
-    await crud.create_or_update_project_metadata(
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required to save project type defaults",
+        )
+    await inspection_workspace_service.save_project_type_default_interface_layout(
         db=db,
-        metadata=schemas.ProjectMetadataCreate(
-            project_id=project_id,
-            key=metadata_key,
-            value=normalized_layout,
-        ),
-        created_by=current_user.email,
+        project_id=project_id,
+        project=project,
+        layout_model=payload.layout_model,
+        user_email=current_user.email,
     )
-    return await get_project_configuration(project_id=project_id, db=db, current_user=current_user)
+    return await inspection_workspace_service.get_project_configuration(
+        db=db,
+        project_id=project_id,
+        project=project,
+    )
 
 
 @router.post(
@@ -2428,20 +861,18 @@ async def save_project_type_default_interface_layout(
 )
 async def clone_project_configuration(
     project_id: uuid.UUID,
-    payload: schemas.InspectionProjectConfigurationCloneRequest,
+    target_project: WritableProject,
+    payload: inspection_workspace_schemas.InspectionProjectConfigurationCloneRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    target_project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
     if payload.source_project_id == project_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="source_project_id must be different from project_id",
         )
-    source_project = await _get_project_with_access_check(
-        project_id=payload.source_project_id,
-        db=db,
-        current_user=current_user,
+    source_project = await get_project_or_403(
+        payload.source_project_id, db, current_user
     )
     if source_project.project_type != target_project.project_type:
         raise HTTPException(
@@ -2452,31 +883,14 @@ async def clone_project_configuration(
             ),
         )
 
-    source_metadata = await crud.get_project_metadata_by_key(
+    return await inspection_workspace_service.clone_project_configuration(
         db=db,
-        project_id=payload.source_project_id,
-        key=PROJECT_CONFIGURATION_KEY,
+        project_id=project_id,
+        target_project=target_project,
+        source_project=source_project,
+        source_project_id=payload.source_project_id,
+        user_email=current_user.email,
     )
-    source_config = (
-        source_metadata.value
-        if source_metadata and isinstance(source_metadata.value, dict)
-        else _default_project_configuration(source_project.project_type)
-    )
-    updated = await crud.create_or_update_project_metadata(
-        db=db,
-        metadata=schemas.ProjectMetadataCreate(
-            project_id=project_id,
-            key=PROJECT_CONFIGURATION_KEY,
-            value=source_config,
-        ),
-        created_by=current_user.email,
-    )
-    return {
-        "project_id": project_id,
-        "source_project_id": payload.source_project_id,
-        "config": _strip_optional_default_sections(source_config),
-        "updated_at": updated.updated_at,
-    }
 
 
 @router.post(
@@ -2484,170 +898,35 @@ async def clone_project_configuration(
 )
 async def load_project_test_data(
     project_id: uuid.UUID,
+    project: ReadableProject,
+    fixture: str | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(require_authenticated_user),
 ):
-    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    project_type = (project.project_type or "PT1").upper()
-    uploaded_records: List[dict] = []
-    images_created = 0
-
-    if project_type == "PT3":
-        if not PT3_TEST_STACK_ROOT.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PT3 test stack not found")
-        volume_info = load_slice_stack(PT3_TEST_STACK_ROOT)
-        nsipro_metadata = _load_nsipro_metadata_fixture(PT3_TEST_STACK_ROOT)
-        for index, file_path in enumerate(sorted(PT3_TEST_STACK_ROOT.glob("*.png"))):
-            metadata = {
-                "source": "vista-test-data",
-                "project_type": "PT3",
-                "volume_stack_id": "PT3_SYNTH_MPR_001",
-                "slice_index": index,
-                "slice_axis": "Z",
-                "axis_labels": ["XY", "XZ", "YZ"],
-                "overlay": False,
-                "modality": "volume-slice",
-            }
-            if nsipro_metadata:
-                metadata["selected_metadata_file"] = nsipro_metadata["source_filename"]
-            image, created = await _create_test_image_if_missing(
-                project_id=project_id,
-                file_path=file_path,
-                metadata=metadata,
-                db=db,
-                current_user=current_user,
-                allow_metadata_only=True,
-            )
-            images_created += 1 if created else 0
-            uploaded_records.append({
-                "filename": file_path.name,
-                "image_id": str(image.id),
-                "metadata": metadata,
-                **metadata,
-            })
-
-            overlay_path = PT3_TEST_STACK_ROOT / "overlays" / f"{file_path.stem}_overlay.png"
-            if overlay_path.exists():
-                overlay_metadata = {
-                    "source": "vista-test-data",
-                    "project_type": "PT3",
-                    "volume_stack_id": "PT3_SYNTH_MPR_001",
-                    "slice_index": index,
-                    "slice_axis": "Z",
-                    "axis_labels": ["XY", "XZ", "YZ"],
-                    "overlay": True,
-                    "modality": "segmentation",
-                    "overlay_base_filename": file_path.name,
-                    "overlay_base_image_id": str(image.id),
-                }
-                if nsipro_metadata:
-                    overlay_metadata["selected_metadata_file"] = nsipro_metadata["source_filename"]
-                overlay_image, overlay_created = await _create_test_image_if_missing(
-                    project_id=project_id,
-                    file_path=overlay_path,
-                    metadata=overlay_metadata,
-                    db=db,
-                    current_user=current_user,
-                    allow_metadata_only=True,
-                )
-                images_created += 1 if overlay_created else 0
-                uploaded_records.append({
-                    "filename": overlay_path.name,
-                    "image_id": str(overlay_image.id),
-                    "metadata": overlay_metadata,
-                    **overlay_metadata,
-                })
-
-        part_metadata = {
-            "source": "vista-test-data",
-            "volume_stack_id": "PT3_SYNTH_MPR_001",
-            "volume_shape": {
-                "axial": volume_info.shape[0],
-                "coronal": volume_info.shape[1],
-                "sagittal": volume_info.shape[2],
-            },
-            "mpr": {
-                "volume_shape": {
-                    "axial": volume_info.shape[0],
-                    "coronal": volume_info.shape[1],
-                    "sagittal": volume_info.shape[2],
-                },
-                "axis_labels": ["XY", "XZ", "YZ"],
-            },
-            "source_images": uploaded_records,
-        }
-        if nsipro_metadata:
-            part_metadata["nsipro_metadata"] = nsipro_metadata
-        ingest_payload = schemas.InspectionBulkIngestPayload(
-            batches=[
-                schemas.InspectionIngestBatchRecord(
-                    name="PT3_SYNTH_MPR_BATCH01",
-                    description="Synthetic PT3 3D stack test data",
-                    parts=[
-                        schemas.InspectionIngestPartRecord(
-                            serial_number="SN3D0001",
-                            display_name="PT3 synthetic MPR stack",
-                            metadata=part_metadata,
-                        )
-                    ],
-                )
-            ]
-        )
-    else:
-        fixture_paths = sorted(
-            path
-            for path in TEST_DATA_ROOT.iterdir()
-            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".txt"}
-        )
-        if not fixture_paths:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PT1/PT2 test data not found")
-        for file_path in fixture_paths:
-            metadata = _metadata_from_hierarchy_filename(file_path)
-            if metadata is None:
-                continue
-            metadata = {**metadata, "project_type": project_type}
-            image, created = await _create_test_image_if_missing(
-                project_id=project_id,
-                file_path=file_path,
-                metadata=metadata,
-                db=db,
-                current_user=current_user,
-            )
-            images_created += 1 if created else 0
-            uploaded_records.append({"filename": file_path.name, "image_id": str(image.id), "metadata": metadata})
-        ingest_payload = _build_hierarchy_ingest_records(uploaded_records)
-
-    ingest_result = await _bulk_ingest_project_parts(
-        project_id=project_id,
-        payload=ingest_payload,
+    return await test_fixtures.load_project_test_data(
         db=db,
-        current_user=current_user,
-        project_type=project.project_type,
+        project=project,
+        project_id=project_id,
+        fixture=fixture,
+        user_email=current_user.email,
     )
-    return {
-        "project_id": project_id,
-        "project_type": project_type,
-        "images_received": len(uploaded_records),
-        "images_created": images_created,
-        "ingest": ingest_result,
-    }
 
 
 @router.post(
     "/projects/{project_id}/ingest",
-    response_model=schemas.InspectionBulkIngestResponse,
+    response_model=inspection_part_schemas.InspectionBulkIngestResponse,
 )
 async def bulk_ingest_project_parts(
     project_id: uuid.UUID,
-    payload: schemas.InspectionBulkIngestPayload,
+    project: ReadableProject,
+    payload: inspection_part_schemas.InspectionBulkIngestPayload,
     db: AsyncSession = Depends(get_db),
-    current_user: schemas.User = Depends(get_current_user),
+    current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await _get_project_with_access_check(project_id=project_id, db=db, current_user=current_user)
-    return await _bulk_ingest_project_parts(
+    return await part_ingest.bulk_ingest_project_parts(
+        db=db,
         project_id=project_id,
         payload=payload,
-        db=db,
-        current_user=current_user,
+        user_email=current_user.email,
         project_type=project.project_type,
     )
