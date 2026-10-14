@@ -1,5 +1,6 @@
 import logging
 import warnings
+
 import pytest
 
 # Suppress warnings
@@ -7,6 +8,7 @@ warnings.filterwarnings("ignore")
 
 # Completely disable all logging during tests
 logging.disable(logging.CRITICAL)
+
 
 @pytest.fixture(autouse=True)
 def disable_logging():

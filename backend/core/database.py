@@ -1,18 +1,22 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import text
-from typing import AsyncGenerator
 import sys
+from collections.abc import AsyncGenerator
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from .config import settings
 
 
 def normalize_async_database_url(database_url: str) -> str:
     """Return a SQLAlchemy async URL for supported VISTA databases."""
     normalized = (database_url or "").strip()
-    if normalized.startswith('sqlite:') and not normalized.startswith('sqlite+aiosqlite:'):
-        return normalized.replace('sqlite:', 'sqlite+aiosqlite:', 1)
-    if normalized.startswith('postgresql://'):
-        return normalized.replace('postgresql://', 'postgresql+asyncpg://', 1)
+    if normalized.startswith("sqlite:") and not normalized.startswith(
+        "sqlite+aiosqlite:"
+    ):
+        return normalized.replace("sqlite:", "sqlite+aiosqlite:", 1)
+    if normalized.startswith("postgresql://"):
+        return normalized.replace("postgresql://", "postgresql+asyncpg://", 1)
     return normalized
 
 
@@ -78,6 +82,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
 
+
 async def create_db_and_tables():
     try:
         async with engine.begin() as conn:
@@ -92,7 +97,9 @@ async def create_db_and_tables():
             print("Cannot connect to PostgreSQL database.")
             print("The database hostname cannot be resolved.")
             print("\nPossible solutions:")
-            print("1. Make sure PostgreSQL container is running: cd backend && ./run.sh")
+            print(
+                "1. Make sure PostgreSQL container is running: cd backend && ./run.sh"
+            )
             print("2. Check if Docker/container engine is running")
             print("3. Verify DATABASE_URL in .env file")
             print(f"   Current DATABASE_URL: {settings.DATABASE_URL}")
@@ -107,13 +114,18 @@ async def create_db_and_tables():
             print(f"   Current DATABASE_URL: {settings.DATABASE_URL}")
             print("3. Check if the database port is correct (default: 5433)")
 
-        elif "authentication failed" in error_msg or "password authentication failed" in error_msg:
+        elif (
+            "authentication failed" in error_msg
+            or "password authentication failed" in error_msg
+        ):
             print("\n❌ DATABASE AUTHENTICATION ERROR:")
             print("Invalid database credentials.")
             print("\nPossible solutions:")
             print("1. Check database username/password in .env file")
             print("2. Verify PostgreSQL container was created with correct credentials")
-            print(f"   Current credentials: {settings.POSTGRES_USER}@{settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'unknown'}")
+            print(
+                f"   Current credentials: {settings.POSTGRES_USER}@{settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'unknown'}"
+            )
 
         elif "does not exist" in error_msg and "database" in error_msg:
             print("\n❌ DATABASE DOES NOT EXIST:")
@@ -128,9 +140,11 @@ async def create_db_and_tables():
             print("An unexpected database error occurred.")
             print(f"Error details: {error_msg}")
             print("\nGeneral solutions:")
-            print("1. Make sure PostgreSQL container is running: cd backend && ./run.sh")
+            print(
+                "1. Make sure PostgreSQL container is running: cd backend && ./run.sh"
+            )
             print("2. Check your .env file configuration")
 
-        print(f"\nFull error for debugging:")
+        print("\nFull error for debugging:")
         print(f"{type(e).__name__}: {error_msg}")
         sys.exit(1)
