@@ -2,6 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import ImageGallery from './ImageGallery';
 import '../App.css';
+import { fetchGroup } from '../api/groups';
+import { fetchProjectImages } from '../api/images';
+import { fetchProject } from '../api/projects';
+import useRouteRequestOwnership, { isAbortError } from '../utils/useRouteRequestOwnership';
 
 function GroupGalleryView() {
   const { id: projectId, groupId } = useParams();
@@ -14,10 +18,18 @@ function GroupGalleryView() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const {
+    beginRequest,
+    isCurrent,
+    releaseRequest,
+  } = useRouteRequestOwnership(`${projectId}:${groupId || '__ungrouped__'}`);
 
   const groupIdentifier = groupInfo?.display_name || groupInfo?.identifier || location.state?.groupIdentifier || (isUngrouped ? 'Ungrouped' : groupId);
 
-  const fetchImages = useCallback(async (opts = {}) => {
+  const fetchImages = useCallback(async (opts = {}, existingRequest = null) => {
+    const request = existingRequest || beginRequest();
+    const ownsRequest = !existingRequest;
+    if (!isCurrent(request)) return;
     setLoading(true);
     setError(null);
     try {
@@ -39,35 +51,60 @@ function GroupGalleryView() {
         const params = new URLSearchParams(baseParams);
         params.set('skip', String(skip));
         params.set('limit', String(PAGE_SIZE));
-        const resp = await fetch(`/api/projects/${projectId}/images?${params}`);
-        if (!resp.ok) throw new Error(`Failed to load images (HTTP ${resp.status})`);
-        const batch = await resp.json();
+        const batch = await fetchProjectImages(projectId, Object.fromEntries(params.entries()), {
+          signal: request.controller.signal,
+        });
+        if (!isCurrent(request)) return;
         allImages = allImages.concat(batch);
         hasMore = batch.length === PAGE_SIZE;
         skip += PAGE_SIZE;
       }
+      if (!isCurrent(request)) return;
       setImages(allImages.filter(img => !img.deleted_at));
     } catch (err) {
-      setError(err.message);
+      if (isAbortError(err, request) || !isCurrent(request)) return;
+      setError(err.message?.startsWith('Failed to load images')
+        ? err.message
+        : `Failed to load images: ${err.message}`);
     } finally {
-      setLoading(false);
+      if (isCurrent(request)) {
+        setLoading(false);
+      }
+      if (ownsRequest) {
+        releaseRequest(request);
+      }
     }
-  }, [projectId, groupId, isUngrouped]);
+  }, [beginRequest, groupId, isCurrent, isUngrouped, projectId, releaseRequest]);
 
   useEffect(() => {
+    const request = beginRequest();
     setGroupInfo(null);
-    fetch(`/api/projects/${projectId}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => setProject(data))
-      .catch(() => {});
+    fetchProject(projectId, { signal: request.controller.signal })
+      .then(data => {
+        if (isCurrent(request)) setProject(data);
+      })
+      .catch((err) => {
+        if (!isAbortError(err, request) && isCurrent(request)) {
+          // Project metadata is non-critical for the gallery body.
+        }
+      });
     if (groupId && !isUngrouped) {
-      fetch(`/api/groups/${groupId}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => setGroupInfo(data))
-        .catch(() => {});
+      fetchGroup(groupId, { signal: request.controller.signal })
+        .then(data => {
+          if (isCurrent(request)) setGroupInfo(data);
+        })
+        .catch((err) => {
+          if (!isAbortError(err, request) && isCurrent(request)) {
+            // The route-state identifier remains usable if group metadata fails.
+          }
+        });
     }
-    fetchImages();
-  }, [projectId, groupId, isUngrouped, fetchImages]);
+    fetchImages({}, request).finally(() => releaseRequest(request));
+    return () => {
+      request.controller.abort();
+      releaseRequest(request);
+    };
+  }, [beginRequest, fetchImages, groupId, isCurrent, isUngrouped, projectId, releaseRequest]);
 
   const handleImageUpdated = (updatedImage) => {
     setImages(prev => {

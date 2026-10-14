@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { deleteProjectImage, restoreProjectImage } from '../api/images';
 
 // Minimal shared deletion controls for single image view
 // Props: projectId, image, setImage, onImageRemoved (optional), refreshProjectImages (optional)
@@ -45,16 +46,7 @@ function ImageDeletionControls({ projectId, image, setImage, onImageRemoved, ref
     }
     setSubmitting(true);
     try {
-      const resp = await fetch(`/api/projects/${projectId}/images/${image.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: reason.trim(), force })
-      });
-      if (!resp.ok) {
-        const detail = await resp.text();
-        throw new Error(`Delete failed (${resp.status}): ${detail}`);
-      }
-      const data = await resp.json();
+      const data = await deleteProjectImage(projectId, image.id, { reason: reason.trim(), force });
       setImage(data);
       if (onImageRemoved && !data.deleted_at) {
         onImageRemoved(data.id);
@@ -71,12 +63,7 @@ function ImageDeletionControls({ projectId, image, setImage, onImageRemoved, ref
   const handleRestore = async () => {
     setSubmitting(true);
     try {
-      const resp = await fetch(`/api/projects/${projectId}/images/${image.id}/restore`, { method: 'POST' });
-      if (!resp.ok) {
-        const detail = await resp.text();
-        throw new Error(`Restore failed (${resp.status}): ${detail}`);
-      }
-      const data = await resp.json();
+      const data = await restoreProjectImage(projectId, image.id);
       setImage(data);
       if (refreshProjectImages) refreshProjectImages();
     } catch (e) {

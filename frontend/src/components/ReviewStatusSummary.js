@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { fetchProjectReviewStatus } from '../api/projects';
 
 function ReviewStatusSummary({ projectId }) {
   const [summary, setSummary] = useState(null);
@@ -8,10 +9,8 @@ function ReviewStatusSummary({ projectId }) {
     if (!projectId) return;
     try {
       setLoading(true);
-      const response = await fetch(`/api/projects/${projectId}/review-status`);
-      if (response.ok) {
-        setSummary(await response.json());
-      }
+      const data = await fetchProjectReviewStatus(projectId);
+      setSummary(data);
     } catch (err) {
       console.error('Failed to load review summary:', err);
     } finally {

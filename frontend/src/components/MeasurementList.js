@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import MeasurementListItem from './MeasurementListItem';
 
 export default function MeasurementList({
@@ -9,19 +9,33 @@ export default function MeasurementList({
   onToggleVisibility,
   visibleMeasurementIds,
   selectedMeasurementId,
-  onSelectMeasurement
+  onSelectMeasurement,
+  readOnly = false
 }) {
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
 
+  useEffect(() => {
+    if (readOnly) {
+      setEditingId(null);
+      setEditingName('');
+    }
+  }, [readOnly]);
+
   const handleStartRename = (measurement) => {
+    if (readOnly) return;
     setEditingId(measurement.id);
     setEditingName(measurement.name);
   };
 
   const handleSaveRename = () => {
+    if (readOnly) {
+      setEditingId(null);
+      setEditingName('');
+      return;
+    }
     if (editingName.trim() && onRenameMeasurement) {
       onRenameMeasurement(editingId, editingName.trim());
     }
@@ -35,6 +49,7 @@ export default function MeasurementList({
   };
 
   const handleDelete = (measurementId, measurementName) => {
+    if (readOnly) return;
     if (window.confirm(`Delete measurement "${measurementName}"?`)) {
       if (onDeleteMeasurement) {
         onDeleteMeasurement(measurementId);
@@ -159,6 +174,7 @@ export default function MeasurementList({
               key={measurement.id}
               measurement={measurement}
               calibration={calibration}
+              readOnly={readOnly}
               isSelected={selectedMeasurementId === measurement.id}
               isEditing={editingId === measurement.id}
               editingName={editingName}

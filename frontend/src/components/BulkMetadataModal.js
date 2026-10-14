@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { updateImageMetadata } from '../api/images';
 
 const BATCH_SIZE = 15;
 
@@ -20,14 +21,7 @@ function BulkMetadataModal({ selectedImages, onClose, onImageUpdated, refreshPro
   }, [metaValue]);
 
   const updateMetadata = (imageId, key, value) =>
-    fetch(`/api/images/${imageId}/metadata`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    }).then(resp => {
-      if (!resp.ok) return resp.text().then(t => { throw new Error(t); });
-      return resp.json();
-    });
+    updateImageMetadata(imageId, key, value);
 
   const handleSubmit = async () => {
     if (metaKey.trim() === '') {

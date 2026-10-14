@@ -20,6 +20,7 @@ export default function CalibrationDisplay({
   isImageOverride,
   matchedRule,
   isLoading,
+  readOnly = false,
   onClearOverride,
   onDeleteMetadataRule,
   onStartEdit
@@ -37,21 +38,23 @@ export default function CalibrationDisplay({
         }}>
           No calibration set. Set calibration to enable measurements.
         </div>
-        <button
-          onClick={onStartEdit}
-          style={{
-            padding: '8px 12px',
-            fontSize: '14px',
-            background: '#3b82f6',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            width: '100%'
-          }}
-        >
-          Set Calibration
-        </button>
+        {!readOnly && (
+          <button
+            onClick={onStartEdit}
+            style={{
+              padding: '8px 12px',
+              fontSize: '14px',
+              background: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              width: '100%'
+            }}
+          >
+            Set Calibration
+          </button>
+        )}
       </div>
     );
   }
@@ -92,7 +95,7 @@ export default function CalibrationDisplay({
       }}>
         {statusLabel}
       </div>
-      {isImageOverride && (
+      {!readOnly && isImageOverride && (
         <button
           onClick={onClearOverride}
           disabled={isLoading}
@@ -101,7 +104,7 @@ export default function CalibrationDisplay({
           {isLoading ? 'Clearing...' : 'Clear Image Override'}
         </button>
       )}
-      {matchedRule && !isImageOverride && (
+      {!readOnly && matchedRule && !isImageOverride && (
         <button
           onClick={onDeleteMetadataRule}
           disabled={isLoading}

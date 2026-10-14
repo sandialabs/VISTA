@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { deleteProjectImage } from '../api/images';
 
 const MIN_DELETE_REASON = 5;
 const BATCH_SIZE = 15;
@@ -10,14 +11,7 @@ function BulkDeleteModal({ projectId, selectedImages, onClose, onImageUpdated, r
   const [error, setError] = useState(null);
 
   const deleteImage = (imageId) =>
-    fetch(`/api/projects/${projectId}/images/${imageId}`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: reason.trim(), force }),
-    }).then(resp => {
-      if (!resp.ok) return resp.text().then(t => { throw new Error(t); });
-      return resp.json();
-    });
+    deleteProjectImage(projectId, imageId, { reason: reason.trim(), force });
 
   const handleSubmit = async () => {
     if (reason.trim().length < MIN_DELETE_REASON) {

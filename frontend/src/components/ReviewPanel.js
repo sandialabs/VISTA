@@ -1,4 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import {
+  createImageReview,
+  deleteImageReview,
+  fetchImageReviews,
+} from '../api/images';
 
 const STATUS_LABELS = {
   unreviewed: 'Unreviewed',
@@ -26,9 +31,7 @@ function ReviewPanel({ imageId, readOnly = false }) {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`/api/images/${imageId}/reviews`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
+      const data = await fetchImageReviews(imageId);
       setReviews(data);
       setCurrentStatus(data.length > 0 ? data[0].status : 'unreviewed');
     } catch (err) {
@@ -47,19 +50,11 @@ function ReviewPanel({ imageId, readOnly = false }) {
     try {
       setSubmitting(true);
       setError(null);
-      const response = await fetch(`/api/images/${imageId}/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Review failed (${response.status}): ${detail}`);
-      }
+      await createImageReview(imageId, status);
       await loadReviews();
     } catch (err) {
       console.error('Failed to submit review:', err);
-      setError(err.message);
+      setError(`Review failed: ${err.message}`);
     } finally {
       setSubmitting(false);
     }
@@ -69,17 +64,11 @@ function ReviewPanel({ imageId, readOnly = false }) {
     try {
       setSubmitting(true);
       setError(null);
-      const response = await fetch(`/api/reviews/${reviewId}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Revoke failed (${response.status}): ${detail}`);
-      }
+      await deleteImageReview(reviewId);
       await loadReviews();
     } catch (err) {
       console.error('Failed to revoke review:', err);
-      setError(err.message);
+      setError(`Revoke failed: ${err.message}`);
     } finally {
       setSubmitting(false);
     }

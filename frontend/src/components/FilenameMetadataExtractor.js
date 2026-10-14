@@ -113,7 +113,12 @@ export function applyOverlayIndicatorMetadata(filename, metadata, values, keys, 
   return nextMetadata;
 }
 
+export function isFilenameConventionEnabled(fileNamingScheme) {
+  return fileNamingScheme?.use_filename_convention !== false;
+}
+
 export function buildConfiguredFilenameFields(fileNamingScheme) {
+  if (!isFilenameConventionEnabled(fileNamingScheme)) return [];
   const hierarchyLevels = Array.isArray(fileNamingScheme?.hierarchy_levels)
     ? fileNamingScheme.hierarchy_levels
     : [];
@@ -189,7 +194,8 @@ function FilenameMetadataExtractor({
   title = 'Extract Metadata from Filenames (Optional)',
 }) {
   const initialMode = initialConfig?.mode === 'advanced' ? 'advanced' : 'simple';
-  const initialPattern = String(initialConfig?.pattern || initialConfig?.delimiter || fileNamingScheme?.delimiter || '');
+  const filenameConventionEnabled = isFilenameConventionEnabled(fileNamingScheme);
+  const initialPattern = String(initialConfig?.pattern || initialConfig?.delimiter || (filenameConventionEnabled ? fileNamingScheme?.delimiter : '') || '');
   const initialKeys = Array.isArray(initialConfig?.keys)
     ? initialConfig.keys.join(', ')
     : String(initialConfig?.keysInput || '');
@@ -206,7 +212,7 @@ function FilenameMetadataExtractor({
   const previewStem = activePreviewFilename ? stripExtension(activePreviewFilename) : '';
 
   useEffect(() => {
-    if (userEditedConfig || !previewStem || keysInput) return;
+    if (!filenameConventionEnabled || userEditedConfig || !previewStem || keysInput) return;
     const candidateDelimiters = [VISTA_HIERARCHY_DELIMITER, '-', '.'];
     const activeDelimiter = mode === 'simple' && pattern ? pattern : '';
     if (activeDelimiter && configuredFields.length > 0) {
@@ -247,7 +253,7 @@ function FilenameMetadataExtractor({
     setMode('simple');
     setPattern(VISTA_HIERARCHY_DELIMITER);
     setKeysInput(hierarchyKeys.join(', '));
-  }, [configuredFields, keysInput, pattern, previewStem, userEditedConfig]);
+  }, [configuredFields, filenameConventionEnabled, keysInput, mode, pattern, previewStem, userEditedConfig]);
 
   // Live-preview results for the first selected filename.
   // Also validates the regex pattern even when no file is selected.

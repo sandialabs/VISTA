@@ -1,4 +1,9 @@
 import React, { useState } from 'react';
+import {
+  createImageClass,
+  deleteImageClass,
+  updateImageClass,
+} from '../api/classes';
 
 function ClassManager({ projectId, classes, setClasses, loading, setLoading, setError }) {
   // Form states
@@ -20,24 +25,7 @@ function ClassManager({ projectId, classes, setClasses, loading, setLoading, set
     
     try {
       setClassActionLoading(true);
-      
-      const response = await fetch(`/api/projects/${projectId}/classes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project_id: projectId,
-          name: newClass.name,
-          description: newClass.description,
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const newClassData = await response.json();
+      const newClassData = await createImageClass(projectId, newClass);
       
       // Update the classes state
       setClasses(prevClasses => [...prevClasses, newClassData]);
@@ -56,23 +44,7 @@ function ClassManager({ projectId, classes, setClasses, loading, setLoading, set
   const handleEditClass = async () => {
     try {
       setClassActionLoading(true);
-      
-      const response = await fetch(`/api/classes/${editingClass.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: editingClass.name,
-          description: editingClass.description,
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const updatedClass = await response.json();
+      const updatedClass = await updateImageClass(editingClass.id, editingClass);
       
       // Update the classes state
       setClasses(prevClasses => 
@@ -99,14 +71,7 @@ function ClassManager({ projectId, classes, setClasses, loading, setLoading, set
     
     try {
       setClassActionLoading(true);
-      
-      const response = await fetch(`/api/classes/${id}`, {
-        method: 'DELETE',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      await deleteImageClass(id);
       
       // Update the classes state
       setClasses(prevClasses => prevClasses.filter(cls => cls.id !== id));

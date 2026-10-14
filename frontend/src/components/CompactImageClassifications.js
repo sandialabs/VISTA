@@ -1,8 +1,69 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  createImageClassification,
+  deleteImageClassification,
+  fetchImageClassifications,
+} from '../api/images';
+import useRouteRequestOwnership, { isAbortError } from '../utils/useRouteRequestOwnership';
 
 function CompactImageClassifications({ imageId, classes, loading, setLoading, setError, onClassificationsChange, readOnly = false }) {
   const [imageClassifications, setImageClassifications] = useState([]);
   const [showHelp, setShowHelp] = useState(false);
+  const imageIdStr = imageId == null ? '' : String(imageId);
+  const classificationsRef = useRef([]);
+  const pendingMutationsRef = useRef(new Map());
+  const setLoadingRef = useRef(setLoading);
+  const setErrorRef = useRef(setError);
+  const onClassificationsChangeRef = useRef(onClassificationsChange);
+  const {
+    beginRequest,
+    isCurrent,
+    releaseRequest
+  } = useRouteRequestOwnership(`image:${imageIdStr}`);
+
+  setLoadingRef.current = setLoading;
+  setErrorRef.current = setError;
+  onClassificationsChangeRef.current = onClassificationsChange;
+
+  const commitClassifications = useCallback((nextClassifications, owner) => {
+    if (owner && !isCurrent(owner)) {
+      return;
+    }
+
+    classificationsRef.current = nextClassifications;
+    setImageClassifications(nextClassifications);
+    onClassificationsChangeRef.current?.(nextClassifications);
+  }, [isCurrent]);
+
+  const beginMutation = useCallback(() => {
+    const request = beginRequest();
+    pendingMutationsRef.current.forEach((_, generation) => {
+      if (generation !== request.generation) {
+        pendingMutationsRef.current.delete(generation);
+      }
+    });
+    const pendingCount = pendingMutationsRef.current.get(request.generation) || 0;
+    pendingMutationsRef.current.set(request.generation, pendingCount + 1);
+    if (isCurrent(request)) {
+      setLoadingRef.current?.(true);
+    }
+    return request;
+  }, [beginRequest, isCurrent]);
+
+  const finishMutation = useCallback((request) => {
+    const pendingCount = pendingMutationsRef.current.get(request.generation) || 0;
+    const nextCount = Math.max(0, pendingCount - 1);
+    if (nextCount === 0) {
+      pendingMutationsRef.current.delete(request.generation);
+    } else {
+      pendingMutationsRef.current.set(request.generation, nextCount);
+    }
+
+    if (isCurrent(request) && nextCount === 0) {
+      setLoadingRef.current?.(false);
+    }
+    releaseRequest(request);
+  }, [isCurrent, releaseRequest]);
 
   // Generate hotkey mapping for classes
   const generateHotkeys = useCallback((classList) => {
@@ -60,111 +121,117 @@ function CompactImageClassifications({ imageId, classes, loading, setLoading, se
 
   // Load classifications for the image
   useEffect(() => {
+    classificationsRef.current = [];
+    setImageClassifications([]);
+
+    if (!imageIdStr) {
+      return undefined;
+    }
+
+    const request = beginRequest();
+
     const loadClassifications = async () => {
       try {
-        const imageIdStr = String(imageId);
-        const response = await fetch(`/api/images/${imageIdStr}/classifications`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
+        const classificationsData = await fetchImageClassifications(imageIdStr, {
+          signal: request.controller.signal
+        });
+
+        if (!Array.isArray(classificationsData)) {
+          throw new Error('Invalid classifications response');
         }
-        
-        const classificationsData = await response.json();
-        setImageClassifications(classificationsData);
-        if (onClassificationsChange) {
-          onClassificationsChange(classificationsData);
+        if (!isCurrent(request)) {
+          return;
         }
-        
+
+        commitClassifications(classificationsData, request);
       } catch (error) {
+        if (!isCurrent(request) || isAbortError(error, request)) {
+          return;
+        }
         console.error('Error loading classifications:', error);
-        setError('Failed to load classifications. Please try again later.');
+        setErrorRef.current?.('Failed to load classifications. Please try again later.');
+      } finally {
+        releaseRequest(request);
       }
     };
 
-    if (imageId) {
-      loadClassifications();
-    }
-  }, [imageId, setError, onClassificationsChange]);
+    loadClassifications();
+
+    return () => {
+      request.controller.abort();
+    };
+  }, [beginRequest, commitClassifications, imageIdStr, isCurrent, releaseRequest]);
 
   // Handle deleting a classification
   const handleDeleteClassification = useCallback(async (id) => {
+    const request = beginMutation();
     try {
-      setLoading(true);
-      
       const idStr = String(id);
-      const response = await fetch(`/api/classifications/${idStr}`, {
-        method: 'DELETE',
+      await deleteImageClassification(idStr, {
+        signal: request.controller.signal,
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
+      if (!isCurrent(request)) {
+        return;
       }
-      
-      const newClassifications = imageClassifications.filter(classification => String(classification.id) !== idStr);
-      setImageClassifications(newClassifications);
-      if (onClassificationsChange) {
-        onClassificationsChange(newClassifications);
-      }
-      setError(null);
+
+      const newClassifications = classificationsRef.current.filter(
+        classification => String(classification.id) !== idStr
+      );
+      commitClassifications(newClassifications, request);
+      setErrorRef.current?.(null);
       
     } catch (error) {
+      if (!isCurrent(request) || isAbortError(error, request)) {
+        return;
+      }
       console.error('Error removing classification:', error);
-      setError('Failed to remove classification. Please try again later.');
+      setErrorRef.current?.('Failed to remove classification. Please try again later.');
     } finally {
-      setLoading(false);
+      finishMutation(request);
     }
-  }, [imageClassifications, setLoading, setError, onClassificationsChange]);
+  }, [beginMutation, commitClassifications, finishMutation, isCurrent]);
 
   // Handle classifying an image
   const handleClassifyImage = useCallback(async (classId) => {
+    const classIdStr = String(classId);
+    const existingClassification = classificationsRef.current.find(
+      classification => String(classification.class_id) === classIdStr
+    );
+
+    if (existingClassification) {
+      // If already classified, remove the classification.
+      await handleDeleteClassification(existingClassification.id);
+      return;
+    }
+
+    const request = beginMutation();
     try {
-      setLoading(true);
-      
-      const classIdStr = String(classId);
-      const existingClassification = imageClassifications.find(
-        classification => String(classification.class_id) === classIdStr
-      );
-      
-      if (existingClassification) {
-        // If already classified, remove the classification
-        await handleDeleteClassification(existingClassification.id);
+      const newClassification = await createImageClassification(imageIdStr, classIdStr, {
+        signal: request.controller.signal,
+      });
+      if (!isCurrent(request)) {
         return;
       }
-      
-      const imageIdStr = String(imageId);
-      const payload = {
-        image_id: imageIdStr,
-        class_id: classIdStr
-      };
-      
-      const response = await fetch(`/api/images/${imageIdStr}/classifications`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! Status: ${response.status}, Details: ${errorText}`);
-      }
-      
-      const newClassification = await response.json();
-      const newClassifications = [...imageClassifications, newClassification];
-      setImageClassifications(newClassifications);
-      if (onClassificationsChange) {
-        onClassificationsChange(newClassifications);
-      }
-      setError(null);
+
+      const newClassifications = [
+        ...classificationsRef.current.filter(
+          classification => String(classification.id) !== String(newClassification.id)
+        ),
+        newClassification
+      ];
+      commitClassifications(newClassifications, request);
+      setErrorRef.current?.(null);
       
     } catch (error) {
+      if (!isCurrent(request) || isAbortError(error, request)) {
+        return;
+      }
       console.error('Error classifying image:', error);
-      setError('Failed to classify image. Please try again later.');
+      setErrorRef.current?.('Failed to classify image. Please try again later.');
     } finally {
-      setLoading(false);
+      finishMutation(request);
     }
-  }, [imageId, imageClassifications, setLoading, setError, handleDeleteClassification, onClassificationsChange]);
+  }, [beginMutation, commitClassifications, finishMutation, handleDeleteClassification, imageIdStr, isCurrent]);
 
   // Check if a class is selected
   const isClassSelected = (classId) => {

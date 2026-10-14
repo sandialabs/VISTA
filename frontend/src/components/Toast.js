@@ -6,11 +6,12 @@ import React, { useEffect } from 'react';
  * @param {string} props.message - Message to display
  * @param {string} props.type - Type of toast (success, error, warning, info)
  * @param {Function} props.onClose - Function to call when toast is closed
- * @param {number} props.duration - Duration in ms before auto-closing (default: 5000)
+ * @param {?number} props.duration - Duration in ms before auto-closing; null disables auto-close (default: 5000)
  */
 const Toast = ({ message, type = 'info', onClose, duration = 5000 }) => {
-  // Auto-dismiss after duration
+  // Auto-dismiss after duration unless persistence is requested
   useEffect(() => {
+    if (duration == null) return undefined;
     const timer = setTimeout(() => {
       onClose();
     }, duration);
@@ -53,6 +54,8 @@ const Toast = ({ message, type = 'info', onClose, duration = 5000 }) => {
     <div style={{ ...baseStyles, ...getTypeStyles() }}>
       <div>{message}</div>
       <button 
+        type="button"
+        aria-label="Close notification"
         onClick={onClose}
         style={{
           background: 'transparent',

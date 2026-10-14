@@ -30,6 +30,7 @@ export default function MeasurementTool({
   const [isDrawing, setIsDrawing] = useState(false);
   const [validationError, setValidationError] = useState(null);
   const overlayRef = useRef(null);
+  const pendingContextMenuBlockRef = useRef(null);
 
   const calculateDistance = (line) => {
     if (!line) return 0;
@@ -67,7 +68,7 @@ export default function MeasurementTool({
     };
 
     const distance = calculateDistance(finalLine);
-    if (distance < 5) {
+    if (distance < 1) {
       setDrawingLine(null);
       setIsDrawing(false);
       return;
@@ -88,6 +89,23 @@ export default function MeasurementTool({
 
     e.stopPropagation(); // Prevent pan from starting
     e.preventDefault();
+
+    // For right-click or ctrl+click, register a one-shot capture listener that blocks
+    // the contextmenu event fired by the browser when the button is released.
+    // This targets only the single gesture without suppressing unrelated right-clicks
+    // elsewhere in the app.
+    if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
+      if (pendingContextMenuBlockRef.current) {
+        document.removeEventListener('contextmenu', pendingContextMenuBlockRef.current, true);
+      }
+      const blockOnce = (evt) => {
+        evt.preventDefault();
+        document.removeEventListener('contextmenu', blockOnce, true);
+        pendingContextMenuBlockRef.current = null;
+      };
+      pendingContextMenuBlockRef.current = blockOnce;
+      document.addEventListener('contextmenu', blockOnce, true);
+    }
 
     const coords = getAdjustedCoordinates(e);
     setDrawingLine({
@@ -246,6 +264,16 @@ export default function MeasurementTool({
     };
   }, [finishDrawing, getAdjustedCoordinates, isDrawing]);
 
+  // Clean up any pending one-shot contextmenu blocker on unmount.
+  useEffect(() => {
+    return () => {
+      if (pendingContextMenuBlockRef.current) {
+        document.removeEventListener('contextmenu', pendingContextMenuBlockRef.current, true);
+        pendingContextMenuBlockRef.current = null;
+      }
+    };
+  }, []);
+
   // Show calibration error immediately when measure mode is active without calibration
   if (!calibration && leftClickEnabled) {
     return (
@@ -301,8 +329,6 @@ export default function MeasurementTool({
           left: 0,
           width: containerSize.width,
           height: containerSize.height,
-          transform: `scale(${zoomLevel})`,
-          transformOrigin: 'top left',
           cursor,
           zIndex: 1000,
           pointerEvents: 'auto'
