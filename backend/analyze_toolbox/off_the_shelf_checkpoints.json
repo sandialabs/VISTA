@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "checkpoints": [
+    {
+      "id": "ots-yolo11n-seg",
+      "label": "YOLO11n Segmentation",
+      "model_family": "yolo",
+      "model_type": "YOLO",
+      "model_version": "YOLO11",
+      "filename": "yolo11n-seg.pt",
+      "source": "Ultralytics assets",
+      "download_url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.pt",
+      "default_options": {
+        "model": "yolo11n-seg.pt",
+        "pretrained_model": "yolo11n-seg.pt"
+      },
+      "available": true
+    },
+    {
+      "id": "ots-anomalib-patchcore-default",
+      "label": "Anomalib PatchCore Default",
+      "model_family": "anomalib",
+      "model_type": "Anomalib",
+      "model_version": "PatchCore",
+      "filename": "patchcore_default.ckpt",
+      "source": "Anomalib PatchCore recipe with torchvision pretrained backbone",
+      "download_url": null,
+      "default_options": {
+        "model_name": "patchcore",
+        "model": "patchcore_default.ckpt",
+        "checkpoint_path": "patchcore_default.ckpt",
+        "backbone": "wide_resnet50_2",
+        "accelerator": "cpu",
+        "devices": 1
+      },
+      "available": true
+    },
+    {
+      "id": "ots-sam-vit-b",
+      "label": "SAM ViT-B",
+      "model_family": "sam",
+      "model_type": "SAM",
+      "model_version": "SAM1 vit_b",
+      "filename": "sam_vit_b_01ec64.pth",
+      "source": "Meta Segment Anything",
+      "download_url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+      "default_options": {
+        "model_type": "vit_b",
+        "model_checkpoint": "sam_vit_b_01ec64.pth"
+      },
+      "available": true
+    }
+  ]
+}

@@ -1,17 +1,18 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from core import schemas
+from core.config import settings
 from core.database import (
     get_current_database_url,
     normalize_async_database_url,
     switch_database_url,
 )
 from core.models import DataInstance, InspectionPart, Project
-from sqlalchemy.ext.asyncio import create_async_engine
-
+from schemas import projects as project_schemas
+from schemas import users as user_schemas
+from utils.dependencies import require_authenticated_user
 
 router = APIRouter(
     prefix="/dashboard/settings",
@@ -33,7 +34,9 @@ class DatabaseUrlRequest(BaseModel):
             "sqlite+aiosqlite://",
         )
         if not cleaned.startswith(supported_prefixes):
-            raise ValueError("Database URL must use postgresql, postgresql+asyncpg, sqlite, or sqlite+aiosqlite.")
+            raise ValueError(
+                "Database URL must use postgresql, postgresql+asyncpg, sqlite, or sqlite+aiosqlite."
+            )
         return cleaned
 
 
@@ -41,7 +44,11 @@ class DatabaseUrlResponse(BaseModel):
     database_url: str
 
 
-class DashboardProjectPreview(schemas.Project):
+class DashboardVersionResponse(BaseModel):
+    gitlab_commit_sha: str
+
+
+class DashboardProjectPreview(project_schemas.Project):
     image_count: int = 0
     part_count: int = 0
 
@@ -53,10 +60,20 @@ class DatabaseUrlPreviewResponse(BaseModel):
 
 
 async def _load_dashboard_preview(database_url: str) -> DatabaseUrlPreviewResponse:
-    preview_engine = create_async_engine(normalize_async_database_url(database_url), echo=False, future=True)
+    preview_engine = create_async_engine(
+        normalize_async_database_url(database_url), echo=False, future=True
+    )
     try:
         async with AsyncSession(preview_engine) as db:
-            project_rows = (await db.execute(select(Project).order_by(Project.created_at.desc()).limit(100))).scalars().all()
+            project_rows = (
+                (
+                    await db.execute(
+                        select(Project).order_by(Project.created_at.desc()).limit(100)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             project_ids = [project.id for project in project_rows]
             image_counts = {project_id: 0 for project_id in project_ids}
             part_counts = {project_id: 0 for project_id in project_ids}
@@ -64,17 +81,24 @@ async def _load_dashboard_preview(database_url: str) -> DatabaseUrlPreviewRespon
             if project_ids:
                 image_count_rows = await db.execute(
                     select(DataInstance.project_id, func.count(DataInstance.id))
-                    .where(DataInstance.project_id.in_(project_ids), DataInstance.deleted_at.is_(None))
+                    .where(
+                        DataInstance.project_id.in_(project_ids),
+                        DataInstance.deleted_at.is_(None),
+                    )
                     .group_by(DataInstance.project_id)
                 )
-                image_counts.update({project_id: count for project_id, count in image_count_rows})
+                image_counts.update(
+                    {project_id: count for project_id, count in image_count_rows}
+                )
 
                 part_count_rows = await db.execute(
                     select(InspectionPart.project_id, func.count(InspectionPart.id))
                     .where(InspectionPart.project_id.in_(project_ids))
                     .group_by(InspectionPart.project_id)
                 )
-                part_counts.update({project_id: count for project_id, count in part_count_rows})
+                part_counts.update(
+                    {project_id: count for project_id, count in part_count_rows}
+                )
 
             projects = [
                 DashboardProjectPreview.model_validate(project).model_copy(
@@ -95,12 +119,24 @@ async def _load_dashboard_preview(database_url: str) -> DatabaseUrlPreviewRespon
 
 
 @router.get("/database-url", response_model=DatabaseUrlResponse)
-async def read_database_url():
+async def read_database_url(
+    _current_user: user_schemas.User = Depends(require_authenticated_user),
+):
     return DatabaseUrlResponse(database_url=get_current_database_url())
 
 
+@router.get("/version", response_model=DashboardVersionResponse)
+async def read_dashboard_version():
+    return DashboardVersionResponse(
+        gitlab_commit_sha=settings.GITLAB_COMMIT_SHA.strip()
+    )
+
+
 @router.post("/database-url/preview", response_model=DatabaseUrlPreviewResponse)
-async def preview_database_url(payload: DatabaseUrlRequest):
+async def preview_database_url(
+    payload: DatabaseUrlRequest,
+    _current_user: user_schemas.User = Depends(require_authenticated_user),
+):
     try:
         return await _load_dashboard_preview(payload.database_url)
     except Exception as exc:
@@ -111,7 +147,10 @@ async def preview_database_url(payload: DatabaseUrlRequest):
 
 
 @router.post("/database-url/accept", response_model=DatabaseUrlResponse)
-async def accept_database_url(payload: DatabaseUrlRequest):
+async def accept_database_url(
+    payload: DatabaseUrlRequest,
+    _current_user: user_schemas.User = Depends(require_authenticated_user),
+):
     try:
         accepted_url = await switch_database_url(payload.database_url)
     except Exception as exc:

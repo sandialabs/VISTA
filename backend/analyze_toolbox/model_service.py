@@ -1,11 +1,11 @@
 import base64
 import importlib
 import importlib.util
-import os
-from typing import List
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+
+from core.config import settings
 
 from .contracts import ToolboxExecutionResult, WorkflowGraph, WorkflowImageInput
 from .executor import execute_image_workflow
@@ -22,14 +22,14 @@ class WorkflowImagePayload(BaseModel):
 
 class WorkflowExecutionPayload(BaseModel):
     workflow: WorkflowGraph
-    images: List[WorkflowImagePayload] = Field(default_factory=list)
+    images: list[WorkflowImagePayload] = Field(default_factory=list)
 
 
 app = FastAPI(title="VISTA backend analyze toolbox model service", version="0.1.0")
 
 
 def _accelerator_status() -> dict:
-    requested_device = os.environ.get("VISTA_MODEL_SERVICE_DEVICE", "auto")
+    requested_device = settings.VISTA_MODEL_SERVICE_DEVICE
     status = {
         "requested_device": requested_device,
         "selected_device": "cpu",
@@ -48,8 +48,7 @@ def _accelerator_status() -> dict:
         cuda_available = bool(torch.cuda.is_available())
         cuda_device_count = int(torch.cuda.device_count()) if cuda_available else 0
         cuda_devices = [
-            torch.cuda.get_device_name(index)
-            for index in range(cuda_device_count)
+            torch.cuda.get_device_name(index) for index in range(cuda_device_count)
         ]
     except Exception as exc:
         status["cuda_error"] = str(exc)
@@ -59,7 +58,9 @@ def _accelerator_status() -> dict:
 
     mps_available = False
     try:
-        mps_available = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
+        mps_available = bool(
+            getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+        )
     except Exception:
         mps_available = False
 
@@ -71,13 +72,15 @@ def _accelerator_status() -> dict:
     elif mps_available:
         selected_device = "mps"
 
-    status.update({
-        "selected_device": selected_device,
-        "cuda_available": cuda_available,
-        "cuda_device_count": cuda_device_count,
-        "cuda_devices": cuda_devices,
-        "mps_available": mps_available,
-    })
+    status.update(
+        {
+            "selected_device": selected_device,
+            "cuda_available": cuda_available,
+            "cuda_device_count": cuda_device_count,
+            "cuda_devices": cuda_devices,
+            "mps_available": mps_available,
+        }
+    )
     return status
 
 
