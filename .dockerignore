@@ -121,3 +121,16 @@ Dockerfile.dev
 scripts/dev.sh
 scripts/test-docker.sh
 README.docker.md
+
+# Local dependency trees and generated test artifacts
+.venv/
+backend/tests/
+backend/_cache/
+backend/logs/
+frontend/e2e/
+frontend/artifacts/
+frontend/test-results/
+frontend/playwright-report/
+frontend/coverage/
+frontend/.cache/
+frontend/node_modules/.cache/

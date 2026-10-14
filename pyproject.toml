@@ -16,7 +16,6 @@ dependencies = [
     "minio",
     "python-multipart",
     "httpx",
-    "aiocache",
     "Pillow",
     "boto3==1.35.99",
     "requests",
@@ -24,21 +23,121 @@ dependencies = [
     "swagger-ui-bundle",
     "fastmcp",
     "openpyxl",
+    "numpy>=2.4.4",
+    "defusedxml>=0.7.1",
+    "ultralytics",
+    "segment-anything",
+    "opencv-python-headless",
+    "scikit-image",
 ]
 
 [dependency-groups]
 dev = [
+    "mypy",
     "pytest",
     "pytest-asyncio",
+    "pytest-xdist",
     "aiosqlite",
     "podman-compose",
     "numpy>=2.4.4",
+    "ruff",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "aiosqlite",
+    "podman-compose",
+    "numpy>=2.4.4",
+    "ruff",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
+markers = [
+    "smoke: representative backend user workflows for fast local validation",
+    "postgres: opt-in Alembic-backed PostgreSQL integration contracts (serial only)",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
 ]
 addopts = "--tb=short --show-capture=no"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+exclude = ["frontend*", "docs*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["backend", "scripts", "deploy", "test"]
+extend-exclude = [
+    ".cache",
+    ".scratch",
+    ".venv",
+    "*.pyi",
+    "dist",
+    "public",
+    "uv.lock",
+]
+extend-include = [
+    "*.pyw",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # E (pycodestyle) error-related style guide violation rules
+    "W",    # W (pycodestyle) warning-related style guide violations rules
+    "F",    # F (Pyflakes) detecting various errors in Python code rules
+    "I",    # I (isort) import sorting and organization rules
+    "B",    # B (flake8-bugbear) opinionated bug-finding rules
+    "D",    # D (pydocstyle) rules for docstring style conventions
+    "D401", # D401 augment docstring convention by requiring imperative mood
+]
+ignore = [
+    "E203", # E203 whitespace-before-punctuation, ignore for ruff or black formatters
+    # "E701", # E701 multiple-statements-on-one-line-colon
+    # "E501", # E501 line-too-long
+] # Common ignores to avoid conflicts with Black's spacing rules
+per-file-ignores = {"*.ipynb" = ["D100"]}
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.nbqa.addopts]
+ruff = [
+    "--extend-ignore=D100,E402"
+]
+
+[tool.nbqa.files]
+ruff = "^[a-z/].*/.*\\.ipynb"
+
+[tool.mypy]
+python_version = "3.11"
+explicit_package_bases = true
+files = [
+    "backend/metadata/nsipro_field_normalizers.py",
+    "backend/metadata/nsipro_fields.py",
+    "backend/metadata/nsipro_parsers.py",
+    "backend/middleware",
+    "backend/services/images/storage_cleanup.py",
+    "backend/utils/metadata_values.py",
+]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = true
