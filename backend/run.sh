@@ -41,7 +41,7 @@ check_postgres() {
     local max_attempts=30
     local attempt=1
     local postgres_host="${POSTGRES_SERVER:-localhost}"
-    local postgres_port="${POSTGRES_PORT:-5433}"
+    local postgres_port="${POSTGRES_PORT:-5432}"
 
     echo "Checking PostgreSQL at ${postgres_host}:${postgres_port}..."
     while [ $attempt -le $max_attempts ]; do

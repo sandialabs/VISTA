@@ -6,8 +6,8 @@ Create Date: 2026-04-24
 """
 
 # revision identifiers, used by Alembic.
-revision = '20260424_0007'
-down_revision = ('20260328_0006', '20260331_0005')
+revision = "20260424_0007"
+down_revision = ("20260328_0006", "20260331_0005")
 branch_labels = None
 depends_on = None
 
