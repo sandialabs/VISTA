@@ -7,7 +7,7 @@ describe('ReviewStatusSummary', () => {
   });
 
   test('fetches and renders review stats', async () => {
-    fetch.mockResolvedValueOnce({
+    fetch.mockResolvedValue({
       ok: true,
       json: async () => ({
         total_images: 10,
@@ -25,7 +25,7 @@ describe('ReviewStatusSummary', () => {
       expect(screen.getByText('Review Progress')).toBeInTheDocument();
     });
 
-    expect(fetch).toHaveBeenCalledWith('/api/projects/123/review-status');
+    expect(fetch).toHaveBeenCalledWith('/api/projects/123/review-status', expect.any(Object));
     expect(screen.getByText('7/10 reviewed (70%)')).toBeInTheDocument();
     expect(screen.getByText('Unreviewed:')).toBeInTheDocument();
     expect(screen.getByText('Pass:')).toBeInTheDocument();
@@ -34,7 +34,7 @@ describe('ReviewStatusSummary', () => {
   });
 
   test('omits zero-count chips', async () => {
-    fetch.mockResolvedValueOnce({
+    fetch.mockResolvedValue({
       ok: true,
       json: async () => ({
         total_images: 2,

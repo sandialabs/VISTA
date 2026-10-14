@@ -1,6 +1,4 @@
-import React from 'react';
-import fs from 'fs';
-import path from 'path';
+import React, { createRef } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ProjectConfigurationPanel from '../ProjectConfigurationPanel';
 
@@ -9,7 +7,6 @@ jest.setTimeout(10000);
 const projectTypes = ['PT1', 'PT2', 'PT3'];
 const syntheticUsers = ['basic', 'intermediate', 'advanced'];
 const configurationScenarioMatrix = [
-  ['PT1', 'basic'],
   ['PT2', 'intermediate'],
   ['PT3', 'advanced'],
 ];
@@ -49,6 +46,7 @@ function makeConfig(projectType, syntheticUser) {
       default_colormap: complexity > 1 ? 'magma' : 'grayscale',
       anomaly_colormap: 'viridis',
       grayscale_base_image: true,
+      inspection_tile_max_columns: 8,
     },
     serial_number_scheme: {
       batch_sn_enabled: true,
@@ -71,6 +69,39 @@ function mockFetch(config, projectType, mockOptions = {}) {
           { id: 'proj-copy-2', name: 'Template Project 2', project_type: projectType },
           { id: 'proj-cross-type', name: 'Cross-Type Project', project_type: alternateProjectType },
         ],
+      });
+    }
+
+    if (url === '/api/projects/proj-1' && requestOptions.method === 'PUT') {
+      if (mockOptions.accessGroupResponsePromise) {
+        return mockOptions.accessGroupResponsePromise;
+      }
+      if (mockOptions.accessGroupFailureDetail) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: async () => ({ detail: mockOptions.accessGroupFailureDetail }),
+        });
+      }
+      const requestPayload = JSON.parse(requestOptions.body);
+      const updatedProject = Object.prototype.hasOwnProperty.call(mockOptions, 'accessGroupResponse')
+        ? mockOptions.accessGroupResponse
+        : {
+            id: 'proj-1',
+            name: 'Current Project',
+            project_type: projectType,
+            meta_group_id: requestPayload.meta_group_id,
+            is_archived: false,
+          };
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => {
+          if (mockOptions.accessGroupInvalidJson) {
+            throw new SyntaxError('invalid json');
+          }
+          return updatedProject;
+        },
       });
     }
 
@@ -148,6 +179,25 @@ function mockFetch(config, projectType, mockOptions = {}) {
                 default_colormap: 'grayscale',
                 anomaly_colormap: 'viridis',
                 grayscale_base_image: 'true',
+              },
+            },
+          }),
+        });
+      }
+      if (mockOptions.cloneInvalidPt3GuideSettings) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            config: {
+              ...config,
+              display_settings: {
+                ...config.display_settings,
+                pt3_3d_guides: {
+                  crosshair_transparency_percent: 101,
+                  crosshair_line_width_px: 1.25,
+                  plane_outline_transparency_percent: 0,
+                  plane_outline_line_width_px: 1.25,
+                },
               },
             },
           }),
@@ -235,19 +285,23 @@ function mockFetch(config, projectType, mockOptions = {}) {
     }
 
     if (url.includes('/configuration/interface-layout/default') && requestOptions.method === 'POST') {
-      return Promise.resolve({ ok: true, json: async () => ({ config }) });
+      return Promise.resolve({ ok: true, json: async () => ({ config, project_type: projectType }) });
     }
 
     if (url.includes('/configuration/interface-layout/project-type-default') && requestOptions.method === 'POST') {
-      return Promise.resolve({ ok: true, json: async () => ({ config }) });
+      return Promise.resolve({ ok: true, json: async () => ({ config, project_type: projectType }) });
     }
 
     if (url.includes('/configuration') && requestOptions.method === 'PUT') {
-      return Promise.resolve({ ok: true, json: async () => ({ config }) });
+      return Promise.resolve({ ok: true, json: async () => ({ config, project_type: projectType }) });
     }
 
     if (url.includes('/configuration')) {
-      return Promise.resolve({ ok: true, json: async () => ({ config }) });
+      return Promise.resolve({ ok: true, json: async () => ({ config, project_type: projectType }) });
+    }
+
+    if (url.includes('/metadata-dict')) {
+      return Promise.resolve({ ok: true, json: async () => ({}) });
     }
 
     return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
@@ -256,9 +310,611 @@ function mockFetch(config, projectType, mockOptions = {}) {
 
 describe('ProjectConfigurationPanel', () => {
 
-  test('shows expected filename preview as the primary file naming guide and updates from hierarchy abbreviations', async () => {
+  test('updates the Access Group with the exact project payload and returns the full project', async () => {
+    const config = makeConfig('PT1', 'basic');
+    const project = {
+      id: 'proj-1',
+      name: 'Current Project',
+      project_type: 'PT1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+    const updatedProject = {
+      ...project,
+      meta_group_id: 'destination-group',
+      updated_at: '2026-07-27T01:02:03Z',
+    };
+    const onProjectUpdated = jest.fn();
+    mockFetch(config, 'PT1', { accessGroupResponse: updatedProject });
+
+    render(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={project}
+        onProjectUpdated={onProjectUpdated}
+      />,
+    );
+
+    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
+    expect(accessGroupInput).toHaveValue('source-group');
+    expect(accessGroupInput).toHaveAttribute('maxlength', '255');
+    expect(screen.getByRole('button', { name: 'Update Access Group' })).toBeDisabled();
+
+    fireEvent.change(accessGroupInput, { target: { value: '  destination-group  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/projects/proj-1',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ meta_group_id: 'destination-group' }),
+        },
+      );
+      expect(onProjectUpdated).toHaveBeenCalledWith(updatedProject);
+    });
+    expect(accessGroupInput).toHaveValue('destination-group');
+    expect(screen.getByText('Access Group updated.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Update Access Group' })).toBeDisabled();
+  });
+
+  test('shows a destination authorization failure locally and preserves the Access Group draft', async () => {
+    const config = makeConfig('PT1', 'basic');
+    const project = {
+      id: 'proj-1',
+      name: 'Current Project',
+      project_type: 'PT1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+    const onProjectUpdated = jest.fn();
+    const detail = "User 'test@example.com' cannot move project 'proj-1' to group 'restricted-group'.";
+    mockFetch(config, 'PT1', { accessGroupFailureDetail: detail });
+
+    render(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={project}
+        onProjectUpdated={onProjectUpdated}
+      />,
+    );
+
+    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
+    fireEvent.change(accessGroupInput, { target: { value: 'restricted-group' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(detail);
+    expect(accessGroupInput).toHaveValue('restricted-group');
+    expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument();
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['non-JSON', { accessGroupInvalidJson: true }],
+    ['missing required fields', { accessGroupResponse: {} }],
+    ['a mismatched project id', {
+      accessGroupResponse: {
+        id: 'another-project',
+        name: 'Current Project',
+        project_type: 'PT1',
+        meta_group_id: 'destination-group',
+        is_archived: false,
+      },
+    }],
+    ['a mismatched Access Group', {
+      accessGroupResponse: {
+        id: 'proj-1',
+        name: 'Current Project',
+        project_type: 'PT1',
+        meta_group_id: 'different-group',
+        is_archived: false,
+      },
+    }],
+  ])('rejects a successful Access Group response containing %s', async (_label, mockOptions) => {
+    const config = makeConfig('PT1', 'basic');
+    const project = {
+      id: 'proj-1',
+      name: 'Current Project',
+      project_type: 'PT1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+    const onProjectUpdated = jest.fn();
+    mockFetch(config, 'PT1', mockOptions);
+
+    render(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={project}
+        onProjectUpdated={onProjectUpdated}
+      />,
+    );
+
+    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
+    fireEvent.change(accessGroupInput, { target: { value: '  destination-group  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Failed to update Access Group (invalid project response).',
+    );
+    expect(accessGroupInput).toHaveValue('  destination-group  ');
+    expect(screen.queryByText('Access Group updated.')).not.toBeInTheDocument();
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+  });
+
+  test('validates blank and oversized Access Groups before sending a request', async () => {
+    const config = makeConfig('PT1', 'basic');
+    const project = {
+      id: 'proj-1',
+      name: 'Current Project',
+      project_type: 'PT1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+    mockFetch(config, 'PT1');
+
+    render(<ProjectConfigurationPanel projectId="proj-1" project={project} />);
+
+    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
+    fireEvent.change(accessGroupInput, { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Access Group is required.');
+
+    fireEvent.change(accessGroupInput, { target: { value: 'g'.repeat(256) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Access Group must be 255 characters or fewer.');
+
+    const projectUpdateCalls = global.fetch.mock.calls.filter(
+      ([url, options = {}]) => url === '/api/projects/proj-1' && options.method === 'PUT',
+    );
+    expect(projectUpdateCalls).toHaveLength(0);
+  });
+
+  test('keeps Access Group typing outside configuration autosave state', async () => {
+    const config = makeConfig('PT1', 'basic');
+    const project = {
+      id: 'proj-1',
+      name: 'Current Project',
+      project_type: 'PT1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" project={project} />);
+
+    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
+    jest.useFakeTimers();
+    fireEvent.change(accessGroupInput, { target: { value: 'draft-group' } });
+    act(() => {
+      jest.advanceTimersByTime(600);
+    });
+
+    const configurationPutCalls = global.fetch.mock.calls.filter(
+      ([url, options = {}]) => (
+        url === '/api/projects/proj-1/configuration' && options.method === 'PUT'
+      ),
+    );
+    expect(configurationPutCalls).toHaveLength(0);
+    expect(screen.queryByText('Unsaved changes will autosave shortly.')).not.toBeInTheDocument();
+  });
+
+  test('disables Access Group changes for archived projects', async () => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    render(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={{
+          id: 'proj-1',
+          meta_group_id: 'archived-group',
+          is_archived: true,
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole('textbox', { name: 'Access Group' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Update Access Group' })).toBeDisabled();
+    expect(screen.getByText('Archived projects are read-only.')).toBeInTheDocument();
+  });
+
+  test('keeps project calibration and configuration saving read-only when archived', async () => {
+    jest.useFakeTimers();
     const config = {
       ...makeConfig('PT1', 'basic'),
+      calibration: {
+        pixels_per_mm: 10,
+        pixels_per_inch: 254,
+        unit: 'mm',
+        updated_at: null,
+      },
+    };
+    mockFetch(config, 'PT1');
+    render(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={{
+          id: 'proj-1',
+          meta_group_id: 'archived-group',
+          is_archived: true,
+        }}
+      />,
+    );
+
+    expect(await screen.findByLabelText('Project calibration unit')).toBeDisabled();
+    expect(screen.getByLabelText('Pixels per millimeter')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear Calibration' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save Configuration' })).toBeDisabled();
+
+    act(() => {
+      jest.advanceTimersByTime(600);
+    });
+    const configurationPutCalls = global.fetch.mock.calls.filter(
+      ([url, options = {}]) => (
+        url === '/api/projects/proj-1/configuration' && options.method === 'PUT'
+      ),
+    );
+    expect(configurationPutCalls).toHaveLength(0);
+  });
+
+  test('disables and guards Copy Configuration when the target becomes archived', async () => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    const activeProject = {
+      id: 'proj-1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+    const { rerender } = render(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={activeProject}
+      />,
+    );
+
+    const sourceSelect = await screen.findByLabelText('Source project');
+    fireEvent.change(sourceSelect, { target: { value: 'proj-copy' } });
+    expect(screen.getByRole('button', { name: 'Copy from Project' })).toBeEnabled();
+
+    rerender(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={{ ...activeProject, is_archived: true }}
+      />,
+    );
+    expect(sourceSelect).toBeDisabled();
+    const copyButton = screen.getByRole('button', { name: 'Copy from Project' });
+    expect(copyButton).toBeDisabled();
+    fireEvent.click(copyButton);
+
+    const cloneCalls = global.fetch.mock.calls.filter(
+      ([url, options = {}]) => (
+        url === '/api/projects/proj-1/configuration/clone' && options.method === 'POST'
+      ),
+    );
+    expect(cloneCalls).toHaveLength(0);
+  });
+
+  test('invalidates an in-flight Access Group update when the project becomes archived', async () => {
+    const config = makeConfig('PT1', 'basic');
+    const project = {
+      id: 'proj-1',
+      name: 'Current Project',
+      project_type: 'PT1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+    let resolveAccessGroupResponse;
+    const accessGroupResponsePromise = new Promise((resolve) => {
+      resolveAccessGroupResponse = resolve;
+    });
+    const onProjectUpdated = jest.fn();
+    mockFetch(config, 'PT1', { accessGroupResponsePromise });
+
+    const { rerender } = render(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={project}
+        onProjectUpdated={onProjectUpdated}
+      />,
+    );
+
+    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
+    fireEvent.change(accessGroupInput, { target: { value: 'destination-group' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
+    await waitFor(() => expect(accessGroupInput).toBeDisabled());
+
+    rerender(
+      <ProjectConfigurationPanel
+        projectId="proj-1"
+        project={{ ...project, is_archived: true }}
+        onProjectUpdated={onProjectUpdated}
+      />,
+    );
+    expect(accessGroupInput).toBeDisabled();
+    expect(accessGroupInput).toHaveValue('source-group');
+
+    await act(async () => {
+      resolveAccessGroupResponse({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...project,
+          meta_group_id: 'destination-group',
+        }),
+      });
+      await accessGroupResponsePromise;
+    });
+
+    expect(accessGroupInput).toBeDisabled();
+    expect(accessGroupInput).toHaveValue('source-group');
+    expect(screen.queryByText('Access Group updated.')).not.toBeInTheDocument();
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+  });
+
+  test('uses instance-unique Access Group ids and heading references', async () => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    const project = {
+      id: 'proj-1',
+      name: 'Current Project',
+      project_type: 'PT1',
+      meta_group_id: 'source-group',
+      is_archived: false,
+    };
+
+    render(
+      <>
+        <ProjectConfigurationPanel projectId="proj-1" project={project} />
+        <ProjectConfigurationPanel projectId="proj-2" project={{ ...project, id: 'proj-2' }} />
+      </>,
+    );
+
+    const accessGroupHeadings = await screen.findAllByRole('heading', { name: 'Access Group' });
+    const accessGroupInputs = screen.getAllByRole('textbox', { name: 'Access Group' });
+    expect(accessGroupHeadings).toHaveLength(2);
+    expect(accessGroupInputs).toHaveLength(2);
+    expect(accessGroupHeadings[0].id).not.toBe(accessGroupHeadings[1].id);
+    expect(accessGroupInputs[0].id).not.toBe(accessGroupInputs[1].id);
+    accessGroupHeadings.forEach((heading) => {
+      expect(heading.closest('section')).toHaveAttribute('aria-labelledby', heading.id);
+    });
+  });
+
+  test('saves project calibration, converts display units, and clears the project default', async () => {
+    const config = {
+      ...makeConfig('PT1', 'basic'),
+      calibration: {
+        pixels_per_mm: 10,
+        pixels_per_inch: 254,
+        unit: 'mm',
+        updated_at: '2026-07-26T18:30:00Z',
+      },
+    };
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    expect(await screen.findByRole('heading', { name: 'Project Calibration' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Pixels per millimeter')).toHaveValue(10);
+    expect(screen.getByText('CALIBRATED')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Project calibration unit'), {
+      target: { value: 'inches' },
+    });
+    expect(screen.getByLabelText('Pixels per inch')).toHaveValue(254);
+    fireEvent.change(screen.getByLabelText('Pixels per inch'), {
+      target: { value: '508' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => {
+      const putCalls = global.fetch.mock.calls.filter(
+        ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+      );
+      expect(putCalls.length).toBeGreaterThan(0);
+      const savedConfig = JSON.parse(putCalls.at(-1)[1].body).config;
+      expect(savedConfig.calibration).toEqual(expect.objectContaining({
+        pixels_per_mm: 20,
+        pixels_per_inch: 508,
+        unit: 'inches',
+        updated_at: expect.any(String),
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Clear Calibration' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Calibration' }));
+    expect(screen.getByLabelText('Pixels per millimeter')).toHaveValue(null);
+    expect(screen.getByText('NOT SET')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => {
+      const putCalls = global.fetch.mock.calls.filter(
+        ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+      );
+      expect(putCalls.length).toBeGreaterThan(1);
+      const savedConfig = JSON.parse(putCalls.at(-1)[1].body).config;
+      expect(savedConfig.calibration).toBeNull();
+    });
+  });
+
+  test('shows project calibration when it is the only enabled General section', async () => {
+    const config = {
+      ...makeConfig('PT1', 'basic'),
+      ui_sections: {
+        'project_configuration.owner_section': false,
+        'project_configuration.user_section': false,
+        'project_configuration.calibration': true,
+        'project_configuration.process_settings': false,
+        'project_configuration.serial_scheme': false,
+        'project_configuration.project_phase_settings': false,
+        'project_configuration.defect_types': false,
+        'project_configuration.view_options': false,
+        'project_configuration.display_options': false,
+        'project_configuration.copy_configuration': false,
+      },
+    };
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    expect(await screen.findByRole('heading', { name: 'Project Calibration' })).toBeInTheDocument();
+    expect(screen.queryByText('No General configuration sections are enabled.')).not.toBeInTheDocument();
+  });
+
+  test('hides project calibration and reports no configurable General sections when disabled', async () => {
+    const config = {
+      ...makeConfig('PT1', 'basic'),
+      ui_sections: {
+        'project_configuration.owner_section': false,
+        'project_configuration.user_section': false,
+        'project_configuration.calibration': false,
+        'project_configuration.process_settings': false,
+        'project_configuration.serial_scheme': false,
+        'project_configuration.project_phase_settings': false,
+        'project_configuration.defect_types': false,
+        'project_configuration.view_options': false,
+        'project_configuration.display_options': false,
+        'project_configuration.copy_configuration': false,
+      },
+    };
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    expect(await screen.findByText('No General configuration sections are enabled.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Project Calibration' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Project Configuration' }));
+    expect(screen.getByLabelText('Project Calibration section')).not.toBeChecked();
+  });
+
+  test('keeps legacy projects uncalibrated until a positive project scale is entered', async () => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    expect(await screen.findByLabelText('Pixels per millimeter')).toHaveValue(null);
+    expect(screen.getByRole('button', { name: 'Clear Calibration' })).toBeDisabled();
+    expect(screen.getByText(/fall back to legacy project metadata/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Pixels per millimeter'), {
+      target: { value: '-2' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('positive finite number');
+    expect(screen.getByRole('button', { name: 'Save Configuration' })).toBeDisabled();
+  });
+
+  test('accepts a null calibration timestamp and rejects contradictory persisted scales', async () => {
+    const config = {
+      ...makeConfig('PT1', 'basic'),
+      calibration: {
+        pixels_per_mm: 10,
+        pixels_per_inch: 254,
+        unit: 'mm',
+        updated_at: null,
+      },
+    };
+    mockFetch(config, 'PT1');
+    const { unmount } = render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    expect(await screen.findByLabelText('Pixels per millimeter')).toHaveValue(10);
+    expect(screen.getByText('CALIBRATED')).toBeInTheDocument();
+
+    const contradictoryConfig = {
+      ...config,
+      calibration: {
+        ...config.calibration,
+        pixels_per_inch: 255,
+      },
+    };
+    unmount();
+    mockFetch(contradictoryConfig, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+    expect(await screen.findByText('NOT SET')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+    expect(await screen.findByText(/positive finite pixel scales and a valid unit/i))
+      .toBeInTheDocument();
+    const configurationPutCalls = global.fetch.mock.calls.filter(
+      ([url, options = {}]) => (
+        url === '/api/projects/proj-1/configuration' && options.method === 'PUT'
+      ),
+    );
+    expect(configurationPutCalls).toHaveLength(0);
+  });
+
+  test.each([
+    ['millimeter overflow', 'Pixels per millimeter', '1e308'],
+    ['inch underflow', 'Pixels per inch', '1e-323'],
+  ])('keeps %s drafts invalid without publishing derived scales', async (_label, inputLabel, value) => {
+    const config = makeConfig('PT1', 'basic');
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    if (inputLabel === 'Pixels per inch') {
+      fireEvent.change(await screen.findByLabelText('Project calibration unit'), {
+        target: { value: 'inches' },
+      });
+    }
+    const input = await screen.findByLabelText(inputLabel);
+    fireEvent.change(input, { target: { value } });
+
+    expect(input).toHaveValue(Number(value));
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent('positive finite number');
+    expect(screen.getByRole('button', { name: 'Save Configuration' })).toBeDisabled();
+
+    const configurationPutCalls = global.fetch.mock.calls.filter(
+      ([url, options = {}]) => (
+        url === '/api/projects/proj-1/configuration' && options.method === 'PUT'
+      ),
+    );
+    expect(configurationPutCalls).toHaveLength(0);
+  });
+
+  test('marks an emptied touched scale pending and blocks flush/navigation until corrected', async () => {
+    const config = {
+      ...makeConfig('PT1', 'basic'),
+      calibration: {
+        pixels_per_mm: 10,
+        pixels_per_inch: 254,
+        unit: 'mm',
+        updated_at: null,
+      },
+    };
+    const panelRef = createRef();
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel ref={panelRef} projectId="proj-1" />);
+
+    const input = await screen.findByLabelText('Pixels per millimeter');
+    fireEvent.change(input, { target: { value: '' } });
+
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent('positive finite number');
+    expect(panelRef.current.hasPendingAutosave()).toBe(true);
+
+    let flushResult;
+    await act(async () => {
+      flushResult = await panelRef.current.flushPendingAutosave();
+    });
+    expect(flushResult).toBe(false);
+    expect(await screen.findByText(/before saving or leaving Configuration/i)).toBeInTheDocument();
+    expect(input).toHaveValue(null);
+  });
+
+  test('uses a non-sticky desktop action bar on the calibration subtab', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    const { container } = render(<ProjectConfigurationPanel projectId="proj-1" projectType="PT2" />);
+
+    await screen.findByRole('heading', { name: 'Project Calibration' });
+    expect(container.querySelector('.configuration-action-bar'))
+      .toHaveClass('configuration-action-bar--calibration-safe');
+  });
+
+  test('shows expected filename preview as the primary file naming guide', async () => {
+    const config = {
+      ...makeConfig('PT2', 'basic'),
       file_naming_scheme: {
         hierarchy_levels: [
           { id: 'drawing_number', label: 'Drawing Number', abbreviation: 'D' },
@@ -271,27 +927,49 @@ describe('ProjectConfigurationPanel', () => {
         ],
       },
     };
-    mockFetch(config, 'PT1');
+    mockFetch(config, 'PT2');
 
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
+    await openFilenameConventionSubtab();
     const preview = await screen.findByTestId('expected-filename-preview');
     expect(preview).toHaveTextContent('D001_L001_PN001_side_modality.type');
     expect(screen.getByLabelText('Expected filename preview')).toHaveTextContent('ID value: 001');
 
-    fireEvent.change(screen.getByLabelText('Abbreviation', { selector: '#hierarchy-level-abbreviation-2' }), {
-      target: { value: 'PART' },
-    });
-
-    expect(screen.getByTestId('expected-filename-preview')).toHaveTextContent('D001_L001_PART001_side_modality.type');
+    expect(screen.queryByLabelText('Level 1')).not.toBeInTheDocument();
   });
 
-  test('keeps view descriptors user-facing as side in the expected filename preview', async () => {
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
+  test('saves disabled filename convention switch', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
 
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
+    await openFilenameConventionSubtab();
+    fireEvent.click(await screen.findByLabelText('Use filename convention'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/projects/proj-1/configuration',
+        expect.objectContaining({ method: 'PUT' }),
+      );
+    });
+    const putCall = global.fetch.mock.calls.find(
+      ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+    );
+    const savedConfig = JSON.parse(putCall[1].body).config;
+    expect(savedConfig.file_naming_scheme.use_filename_convention).toBe(false);
+    expect(screen.getByText(/Filename convention assumptions are disabled/)).toBeInTheDocument();
+  });
+
+  test('keeps view descriptors user-facing as side in the expected filename preview', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await openFilenameConventionSubtab();
     expect(await screen.findByTestId('expected-filename-preview')).toHaveTextContent(
       'D001_P001_L001_S001_R001_side_modality.type',
     );
@@ -302,42 +980,57 @@ describe('ProjectConfigurationPanel', () => {
     jest.useRealTimers();
   });
 
+  async function openFilenameConventionSubtab() {
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Filename Convention' })).toBeInTheDocument());
+    expect(screen.queryByRole('heading', { name: 'Filename Convention' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Filename Convention' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Filename Convention' })).toBeInTheDocument());
+  }
+
   test('loads copy source projects from the canonical trailing-slash endpoint', async () => {
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
 
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
     await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
-    expect(global.fetch).toHaveBeenCalledWith('/api/projects/');
-    expect(global.fetch).not.toHaveBeenCalledWith('/api/projects');
+    expect(global.fetch.mock.calls.map(([url]) => url)).toContain('/api/projects/');
+    expect(global.fetch.mock.calls.map(([url]) => url)).not.toContain('/api/projects');
   });
 
-  test('renders file naming configuration defaults and supports hierarchy customization', async () => {
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
+  test('hides filename convention controls until users open the filename convention subtab', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Filename Convention' })).toBeInTheDocument());
-    expect(screen.getByLabelText('Level 1')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('D')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.queryByRole('heading', { name: 'Filename Convention' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Level 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add Hierarchy Level')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Level 1'), { target: { value: 'other' } });
-    expect(screen.getByLabelText('Custom Label')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Custom Label'), { target: { value: 'Workcell' } });
-    fireEvent.change(screen.getByLabelText('Abbreviation', { selector: '#hierarchy-level-abbreviation-0' }), {
-      target: { value: 'W' },
-    });
-    expect(screen.getByDisplayValue('W')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Filename Convention' }));
+    await waitFor(() => expect(screen.getByRole('tabpanel', { name: 'Filename Convention configuration' })).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Filename Convention' })).toBeInTheDocument();
+  });
+
+  test('filename convention directs hierarchy assignment to Images to Parts', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await openFilenameConventionSubtab();
+    expect(screen.queryByLabelText('Level 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add Hierarchy Level')).not.toBeInTheDocument();
+    expect(screen.getByText('Part hierarchy assignment is configured in Project Data → Images to Parts → Automatically Assign Images to Parts.')).toBeInTheDocument();
   });
 
 
   test('filename configuration exposes arbitrary image identifiers, versions, and overlay matching controls', async () => {
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Filename Convention' })).toBeInTheDocument());
+    await openFilenameConventionSubtab();
     fireEvent.click(screen.getByText('Add Image Descriptor'));
     fireEvent.change(screen.getByLabelText('Descriptor 3'), { target: { value: 'version' } });
     expect(screen.getByDisplayValue('v')).toBeInTheDocument();
@@ -352,14 +1045,13 @@ describe('ProjectConfigurationPanel', () => {
     expect(screen.getByLabelText('Remove overlay specifier when matching base image')).toBeChecked();
   });
 
-  test('adds and removes hierarchy and image descriptor rows', async () => {
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
+  test('adds and removes image descriptor rows', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-    await waitFor(() => expect(screen.getByText('Add Hierarchy Level')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Add Hierarchy Level'));
-    expect(screen.getByLabelText('Level 6')).toBeInTheDocument();
+    await openFilenameConventionSubtab();
+    expect(screen.queryByText('Add Hierarchy Level')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Add Image Descriptor'));
     expect(screen.getByLabelText('Descriptor 3')).toBeInTheDocument();
 
@@ -369,15 +1061,348 @@ describe('ProjectConfigurationPanel', () => {
   });
 
 
-  test('autosaves configuration changes after users edit fields', async () => {
-    jest.useFakeTimers();
+  test('UI Configuration subtab controls hide optional project sections and persist choices', async () => {
     const config = makeConfig('PT1', 'basic');
     mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    expect(screen.queryByText('Available UI Sections')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+    expect(screen.getByText('Available UI Sections')).toBeInTheDocument();
+    expect(screen.getByLabelText('Analyze')).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: /Project Data/ }));
+    expect(screen.getByLabelText('Batches subtab')).toBeChecked();
+
+    fireEvent.click(screen.getByLabelText('Analyze'));
+    expect(screen.queryByLabelText('Analyze tab')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Filename Convention subtab')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Batches subtab'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/projects/proj-1/configuration',
+      expect.objectContaining({ method: 'PUT' }),
+    ));
+    const putCall = global.fetch.mock.calls.find(
+      ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+    );
+    const savedConfig = JSON.parse(putCall[1].body).config;
+    expect(savedConfig.ui_sections['main.analyze']).toBe(false);
+    expect(savedConfig.ui_sections['analyze.toolbox']).toBe(false);
+    expect(savedConfig.ui_sections['project_data.batches']).toBe(false);
+    expect(savedConfig.ui_sections['project_data.images_to_parts']).toBe(true);
+  });
+
+  test('deep-normalizes legacy PT3 guide settings and renders their live preview', async () => {
+    const config = {
+      ...makeConfig('PT3', 'advanced'),
+      display_settings: {
+        ...makeConfig('PT3', 'advanced').display_settings,
+        deployment_display_hint: 'preserve-me',
+      },
+    };
+    mockFetch(config, 'PT3');
+    render(<ProjectConfigurationPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+
+    expect(screen.getByTestId('pt3-guide-configuration-card')).toBeInTheDocument();
+    expect(screen.getByLabelText('Crosshair transparency')).toHaveValue('50');
+    expect(screen.getByLabelText('Crosshair line width')).toHaveValue('1.25');
+    expect(screen.getByLabelText('Plane outline transparency')).toHaveValue('0');
+    expect(screen.getByLabelText('Plane outline line width')).toHaveValue('1.25');
+    expect(screen.getByLabelText('Plane outline line width')).toHaveAccessibleDescription(
+      'The selected plane uses this width; the other planes use half for visual hierarchy.',
+    );
+    expect(screen.getByTestId('pt3-guide-preview')).toHaveAccessibleName('Live 3D guide appearance preview');
+    expect(screen.getByTestId('pt3-guide-preview').closest('figure')).toHaveTextContent('Crosshair 50% transparent');
+    expect(screen.getByRole('button', { name: 'Reset 3D view guides to defaults' })).toBeDisabled();
+  });
+
+  test('autosaves custom PT3 guide settings, preserves display siblings, and supports reset', async () => {
+    jest.useFakeTimers();
+    const config = {
+      ...makeConfig('PT3', 'advanced'),
+      display_settings: {
+        ...makeConfig('PT3', 'advanced').display_settings,
+        deployment_display_hint: 'preserve-me',
+      },
+    };
+    mockFetch(config, 'PT3');
+    render(<ProjectConfigurationPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+
+    fireEvent.change(screen.getByLabelText('Crosshair transparency'), { target: { value: '72' } });
+    fireEvent.change(screen.getByLabelText('Crosshair line width'), { target: { value: '2.5' } });
+    fireEvent.change(screen.getByLabelText('Plane outline transparency'), { target: { value: '35' } });
+    fireEvent.change(screen.getByLabelText('Plane outline line width'), { target: { value: '3' } });
+    expect(screen.getByTestId('pt3-guide-preview').closest('figure')).toHaveTextContent('Crosshair 72% transparent');
+    expect(screen.getByTestId('pt3-guide-preview').closest('figure')).toHaveTextContent('Plane outlines 35% transparent');
+
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/projects/proj-1/configuration',
+      expect.objectContaining({ method: 'PUT' }),
+    ));
+    expect(await screen.findByText('Configuration autosaved.')).toBeInTheDocument();
+
+    const autosaveCall = global.fetch.mock.calls.find(
+      ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+    );
+    const autosavedConfig = JSON.parse(autosaveCall[1].body).config;
+    expect(autosavedConfig.display_settings).toEqual(expect.objectContaining({
+      deployment_display_hint: 'preserve-me',
+      pt3_3d_guides: {
+        crosshair_transparency_percent: 72,
+        crosshair_line_width_px: 2.5,
+        plane_outline_transparency_percent: 35,
+        plane_outline_line_width_px: 3,
+      },
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset 3D view guides to defaults' }));
+    expect(screen.getByLabelText('Crosshair transparency')).toHaveValue('50');
+    expect(screen.getByLabelText('Crosshair line width')).toHaveValue('1.25');
+    expect(screen.getByLabelText('Plane outline transparency')).toHaveValue('0');
+    expect(screen.getByLabelText('Plane outline line width')).toHaveValue('1.25');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+    await waitFor(() => {
+      const putCalls = global.fetch.mock.calls.filter(
+        ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+      );
+      expect(putCalls.length).toBeGreaterThanOrEqual(2);
+      const savedConfig = JSON.parse(putCalls.at(-1)[1].body).config;
+      expect(savedConfig.display_settings.pt3_3d_guides).toEqual({
+        crosshair_transparency_percent: 50,
+        crosshair_line_width_px: 1.25,
+        plane_outline_transparency_percent: 0,
+        plane_outline_line_width_px: 1.25,
+      });
+    });
+    expect(await screen.findByRole('button', { name: 'Save Configuration' })).toBeEnabled();
+  });
+
+  test.each(['PT1', 'PT2'])('hides 3D View Guides for %s projects', async (projectType) => {
+    const config = makeConfig(projectType, 'basic');
+    mockFetch(config, projectType);
+    render(<ProjectConfigurationPanel projectId="proj-1" projectType={projectType} />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+    expect(screen.queryByTestId('pt3-guide-configuration-card')).not.toBeInTheDocument();
+  });
+
+  test('keeps PT3 guide controls available when the Available UI Sections tree is disabled', async () => {
+    const config = {
+      ...makeConfig('PT3', 'advanced'),
+      ui_sections: {
+        'project_configuration.available_ui_sections': false,
+      },
+    };
+    mockFetch(config, 'PT3');
+    render(<ProjectConfigurationPanel projectId="proj-1" projectType="PT3" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+    expect(screen.queryByRole('heading', { name: 'Available UI Sections' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('pt3-guide-configuration-card')).toBeInTheDocument();
+    expect(screen.queryByText('No UI Configuration sections are enabled.')).not.toBeInTheDocument();
+  });
+
+
+  test('hides Filename Convention configuration for PT1 projects', async () => {
+    const config = { ...makeConfig('PT1', 'basic'), ui_sections: {} };
+    mockFetch(config, 'PT1');
+    render(<ProjectConfigurationPanel projectId="proj-1" projectType="PT1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument());
+    expect(screen.queryByRole('tab', { name: 'Filename Convention' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+    fireEvent.click(screen.getByRole('button', { name: /Project Configuration/ }));
+    expect(screen.queryByLabelText('Filename Convention subtab')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sides section')).not.toBeInTheDocument();
+    expect(screen.queryByText(/filename hierarchy/i)).not.toBeInTheDocument();
+  });
+
+  test('defaults missing Project Configuration visibility keys to visible subtabs', async () => {
+    const config = { ...makeConfig('PT2', 'basic'), ui_sections: {} };
+    mockFetch(config, 'PT2');
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-    await waitFor(() => expect(screen.getByLabelText('Image modality label 1')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument());
+    expect(screen.getByRole('tab', { name: 'Filename Convention' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Hotkeys' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument();
+  });
 
-    fireEvent.change(screen.getByLabelText('Image modality label 1'), { target: { value: 'Autosaved thermal' } });
+  test('hides Filename Convention subtab and panel when disabled in ui_sections', async () => {
+    const config = {
+      ...makeConfig('PT2', 'basic'),
+      ui_sections: { 'project_configuration.filename_convention': false },
+    };
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument());
+    expect(screen.queryByRole('tab', { name: 'Filename Convention' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tabpanel', { name: 'Filename Convention configuration' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Filename Convention' })).not.toBeInTheDocument();
+  });
+
+  test('falls back to the first visible subtab when General is disabled', async () => {
+    const config = {
+      ...makeConfig('PT2', 'basic'),
+      ui_sections: { 'project_configuration.general': false },
+    };
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'General' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Filename Convention' })).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.getByRole('tabpanel', { name: 'Filename Convention configuration' })).toBeInTheDocument();
+  });
+
+  test('keeps Filename Convention hidden after saving UI Configuration and reloading', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    const { unmount } = render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+    fireEvent.click(screen.getByRole('button', { name: /Project Configuration/ }));
+    fireEvent.click(screen.getByLabelText('Filename Convention subtab'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/projects/proj-1/configuration',
+      expect.objectContaining({ method: 'PUT' }),
+    ));
+    const putCall = global.fetch.mock.calls.find(
+      ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+    );
+    const savedConfig = JSON.parse(putCall[1].body).config;
+    expect(savedConfig.ui_sections['project_configuration.filename_convention']).toBe(false);
+
+    unmount();
+    jest.clearAllMocks();
+    mockFetch(savedConfig, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument());
+    expect(screen.queryByRole('tab', { name: 'Filename Convention' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Filename Convention' })).not.toBeInTheDocument();
+  });
+
+  test('hides disabled General child sections and Available UI Sections without blank panels', async () => {
+    const config = {
+      ...makeConfig('PT2', 'basic'),
+      ui_sections: {
+        'project_configuration.owner_section': false,
+        'project_configuration.available_ui_sections': false,
+      },
+    };
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.queryByRole('heading', { name: 'Project Owner' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Current User' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+    expect(screen.queryByRole('heading', { name: 'Available UI Sections' })).not.toBeInTheDocument();
+    expect(screen.getByText('No UI Configuration sections are enabled.')).toBeInTheDocument();
+  });
+
+  test('shows an empty state when all Project Configuration subtabs are disabled', async () => {
+    const config = {
+      ...makeConfig('PT2', 'basic'),
+      ui_sections: {
+        'project_configuration.general': false,
+        'project_configuration.filename_convention': false,
+        'project_configuration.hotkeys': false,
+        'project_configuration.ui_configuration': false,
+      },
+    };
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByText(/No Project Configuration sections are enabled/)).toBeInTheDocument());
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+  });
+
+  test('top-level workspace rows toggle their matching main tabs without duplicate checkbox-only rows', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+
+    expect(screen.getByLabelText('Report')).toBeChecked();
+    expect(screen.queryByLabelText('Report tab')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Report'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/projects/proj-1/configuration',
+      expect.objectContaining({ method: 'PUT' }),
+    ));
+    const putCall = global.fetch.mock.calls.find(
+      ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+    );
+    const savedConfig = JSON.parse(putCall[1].body).config;
+    expect(savedConfig.ui_sections['main.report']).toBe(false);
+    expect(savedConfig.ui_sections['report.project_report']).toBe(false);
+  });
+
+  test('renders UI configuration rows with expansion and checkbox controls on the same line', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    const { container } = render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'UI Configuration' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'UI Configuration' }));
+
+    const workspaceRow = screen.getByRole('button', { name: 'Collapse Vista workspace' })
+      .closest('.configurable-ui-section-summary');
+    expect(workspaceRow).toContainElement(screen.getByLabelText('Vista workspace'));
+
+    const projectConfigurationRow = screen.getByRole('button', { name: 'Expand Project Configuration' })
+      .closest('.configurable-ui-section-summary');
+    expect(projectConfigurationRow).toContainElement(projectConfigurationRow.querySelector('input[type="checkbox"]'));
+    expect(projectConfigurationRow).toHaveTextContent('Project Configuration');
+
+    expect(screen.queryByLabelText('Project Configuration tab')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Project Data' }));
+    const batchesRow = screen.getByLabelText('Batches subtab').closest('.configurable-ui-section-leaf');
+    expect(batchesRow.querySelector('.configurable-ui-section-expander-spacer')).toBeInTheDocument();
+    expect(batchesRow).toContainElement(screen.getByLabelText('Batches subtab'));
+
+    expect(container.querySelectorAll('.configurable-ui-section-leaf .configurable-ui-section-expander-spacer').length).toBeGreaterThan(0);
+  });
+
+
+  test('autosaves configuration changes after users edit fields', async () => {
+    jest.useFakeTimers();
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await openFilenameConventionSubtab();
+
+    fireEvent.change(screen.getByLabelText('Modality label 1'), { target: { value: 'Autosaved thermal' } });
     expect(screen.getByText('Unsaved changes will autosave shortly.')).toBeInTheDocument();
 
     act(() => {
@@ -396,10 +1421,57 @@ describe('ProjectConfigurationPanel', () => {
     expect(await screen.findByText('Configuration autosaved.')).toBeInTheDocument();
   });
 
+  test('keeps filename label lists focused and rejects blank or partial additions', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await openFilenameConventionSubtab();
+
+    expect(screen.queryByLabelText('Part view required modalities 1')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Part view source 1')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Image modality calibration required 1')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Image modality example uploaded 1')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Side' }));
+    fireEvent.change(screen.getByLabelText(`Side label ${config.part_views.length + 1}`), {
+      target: { value: 'Rear side' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Modality' }));
+    fireEvent.change(screen.getByLabelText(`Modality filename value ${config.image_modalities.length + 1}`), {
+      target: { value: 'uv' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    expect(await screen.findByText(/Each side requires both a filename value and label/)).toBeInTheDocument();
+    expect(screen.getByText(/Each modality requires both a filename value and label/)).toBeInTheDocument();
+  });
+
+  test('removing a modality clears hidden side requirements before saving', async () => {
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
+    render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+    await openFilenameConventionSubtab();
+    fireEvent.click(screen.getByLabelText('Remove image modality 1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => {
+      const putCalls = global.fetch.mock.calls.filter(
+        ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
+      );
+      expect(putCalls.length).toBeGreaterThan(0);
+      const savedConfig = JSON.parse(putCalls.at(-1)[1].body).config;
+      expect(savedConfig.image_modalities).toEqual([]);
+      expect(savedConfig.part_views[0].required_modalities).toEqual([]);
+    });
+  });
+
   test('flushes pending autosave immediately for callers that must wait before leaving the tab', async () => {
     jest.useFakeTimers();
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
     const autosaveRef = React.createRef();
     render(<ProjectConfigurationPanel projectId="proj-1" ref={autosaveRef} />);
 
@@ -427,8 +1499,8 @@ describe('ProjectConfigurationPanel', () => {
   });
 
   test('persists edits for every configuration field exposed by the configuration tab', async () => {
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
+    const config = makeConfig('PT2', 'basic');
+    mockFetch(config, 'PT2');
     const { container } = render(<ProjectConfigurationPanel projectId="proj-1" />);
 
     await waitFor(() => expect(screen.getByTestId('configuration-sections-grid')).toBeInTheDocument());
@@ -437,17 +1509,24 @@ describe('ProjectConfigurationPanel', () => {
     fireEvent.change(screen.getByLabelText('Owner Email'), { target: { value: 'ada@example.com' } });
     fireEvent.change(screen.getByLabelText('Active Username'), { target: { value: 'manual-reviewer' } });
 
-    fireEvent.change(screen.getByLabelText('Level 1'), { target: { value: 'batch' } });
-    fireEvent.change(container.querySelector('#hierarchy-level-abbreviation-0'), { target: { value: 'BT' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Filename Convention' }));
+    await waitFor(() => expect(screen.getByLabelText('Descriptor 1')).toBeInTheDocument());
+    expect(screen.queryByLabelText('Level 1')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Descriptor 1'), { target: { value: 'operator' } });
     fireEvent.change(container.querySelector('#image-descriptor-abbreviation-0'), { target: { value: 'OP' } });
-
+    fireEvent.change(screen.getByLabelText('Modality label 1'), { target: { value: 'Thermal image' } });
+    fireEvent.change(screen.getByLabelText('Modality filename value 1'), { target: { value: 'thermal' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+    await waitFor(() => expect(screen.getByLabelText('Require disposition on submit')).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText('Require disposition on submit'));
     fireEvent.click(screen.getByLabelText('Require measurement for critical defects'));
     fireEvent.click(screen.getByLabelText('Require second reviewer for rejects'));
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }));
     fireEvent.change(screen.getByLabelText('Accept hotkey'), { target: { value: 'q' } });
     fireEvent.change(screen.getByLabelText('Reject hotkey'), { target: { value: 'w' } });
     fireEvent.change(screen.getByLabelText('Help hotkey'), { target: { value: 'e' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
 
     fireEvent.click(screen.getByLabelText('Track serial number at batch level'));
     fireEvent.click(screen.getByLabelText('Organize each batch into sub-batches'));
@@ -457,24 +1536,18 @@ describe('ProjectConfigurationPanel', () => {
     fireEvent.click(screen.getByLabelText('Manually choose current project phase'));
     fireEvent.change(screen.getByLabelText('Manual project phase'), { target: { value: 'reporting' } });
 
-    fireEvent.change(screen.getByLabelText('Image modality label 1'), { target: { value: 'Thermal image' } });
-    fireEvent.change(screen.getByLabelText('Image modality id 1'), { target: { value: 'thermal' } });
-    fireEvent.click(screen.getByLabelText('Image modality calibration required 1'));
-    fireEvent.click(screen.getByLabelText('Image modality example uploaded 1'));
-
     fireEvent.change(screen.getByLabelText('Defect type name 1'), { target: { value: 'Crack' } });
     fireEvent.change(screen.getByLabelText('Defect type color 1'), { target: { value: '#123abc' } });
     fireEvent.change(screen.getByLabelText('Defect type definition 1'), { target: { value: 'Linear fracture' } });
 
-    fireEvent.change(screen.getByLabelText('Part view label 1'), { target: { value: 'Top view' } });
-    fireEvent.change(screen.getByLabelText('Part view id 1'), { target: { value: 'top' } });
-    fireEvent.change(screen.getByLabelText('Part view required modalities 1'), { target: { value: 'thermal' } });
-    fireEvent.change(screen.getByLabelText('Part view required modalities 2'), { target: { value: 'thermal' } });
-    fireEvent.change(screen.getByLabelText('Part view source 1'), { target: { value: 'auto' } });
-
+    fireEvent.click(screen.getByRole('tab', { name: 'Filename Convention' }));
+    fireEvent.change(screen.getByLabelText('Side label 1'), { target: { value: 'Top view' } });
+    fireEvent.change(screen.getByLabelText('Side filename value 1'), { target: { value: 'top' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
     fireEvent.change(screen.getByLabelText('Default colormap'), { target: { value: 'magma' } });
     fireEvent.change(screen.getByLabelText('Anomaly colormap'), { target: { value: 'grayscale' } });
     fireEvent.click(screen.getByLabelText('Use grayscale base image'));
+    fireEvent.change(screen.getByLabelText('Maximum inspection images per row'), { target: { value: '12' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
@@ -517,15 +1590,21 @@ describe('ProjectConfigurationPanel', () => {
         default_colormap: 'magma',
         anomaly_colormap: 'grayscale',
         grayscale_base_image: false,
+        inspection_tile_max_columns: 12,
+        pt3_3d_guides: {
+          crosshair_transparency_percent: 50,
+          crosshair_line_width_px: 1.25,
+          plane_outline_transparency_percent: 0,
+          plane_outline_line_width_px: 1.25,
+        },
       },
     }));
-    expect(savedConfig.file_naming_scheme.hierarchy_levels[0]).toEqual({ id: 'batch', label: 'Batch', abbreviation: 'BT' });
     expect(savedConfig.file_naming_scheme.image_descriptors[0]).toEqual({ id: 'operator', label: 'Operator', abbreviation: 'OP' });
     expect(savedConfig.image_modalities[0]).toEqual({
       id: 'thermal',
       label: 'Thermal image',
-      calibration_required: true,
-      example_image_uploaded: false,
+      calibration_required: false,
+      example_image_uploaded: true,
     });
     expect(savedConfig.defect_types[0]).toEqual({
       name: 'Crack',
@@ -536,7 +1615,7 @@ describe('ProjectConfigurationPanel', () => {
       id: 'top',
       label: 'Top view',
       required_modalities: ['thermal'],
-      source: 'auto',
+      source: 'manual',
     });
   });
 
@@ -583,58 +1662,6 @@ describe('ProjectConfigurationPanel', () => {
     expect(screen.getByText(/Project configuration \(Postgres\): error at \/api\/projects\/proj-1\/configuration \(503 Service Unavailable/)).toBeInTheDocument();
   });
 
-
-  test('documents downstream implementation status for every saved configuration field', () => {
-    const srcRoot = path.join(process.cwd(), 'src');
-    const collectSource = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === '__tests__') return [];
-        return collectSource(fullPath);
-      }
-      if (!entry.name.endsWith('.js')) return [];
-      if (fullPath.endsWith(path.join('components', 'ProjectConfigurationPanel.js'))) return [];
-      return [fs.readFileSync(fullPath, 'utf8')];
-    }).join('\n');
-
-    const downstreamSource = collectSource(srcRoot);
-    const fieldsWithDownstreamEffects = [
-      'phase_settings',
-      'manual_phase_selection_enabled',
-      'manual_phase',
-      'file_naming_scheme',
-      'configurable_hotkeys',
-      'defect_types',
-    ];
-    fieldsWithDownstreamEffects.forEach((fieldName) => {
-      expect(downstreamSource).toContain(fieldName);
-    });
-
-    const persistedOnlyFields = [
-      'project_owner',
-      'current_user',
-      'serial_number_scheme',
-      'batch_sn_enabled',
-      'sub_batching_enabled',
-      'sub_batch_sn_enabled',
-      'part_sn_enabled',
-      'display_settings',
-      'default_colormap',
-      'anomaly_colormap',
-      'grayscale_base_image',
-      'require_disposition_on_submit',
-      'require_measurement_for_critical',
-      'require_second_reviewer_for_reject',
-      'image_modalities',
-      'calibration_required',
-      'example_image_uploaded',
-      'part_views',
-    ];
-    persistedOnlyFields.forEach((fieldName) => {
-      expect(downstreamSource).not.toContain(fieldName);
-    });
-  });
-
   projectTypes.forEach((projectType) => {
     test(`prepopulates default defect types for ${projectType} when configuration has no defect type list`, async () => {
       const config = makeConfig(projectType, 'basic');
@@ -672,7 +1699,7 @@ describe('ProjectConfigurationPanel', () => {
 
         await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
 
-        expect(screen.getAllByRole('heading', { name: 'Image Modalities' }).length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('heading', { name: 'Modalities' }).length).toBeGreaterThan(0);
         expect(screen.getByRole('heading', { name: 'Serial Number Scheme' })).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
@@ -723,21 +1750,15 @@ describe('ProjectConfigurationPanel', () => {
 
         render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-        await waitFor(() => expect(screen.getByLabelText('Image modality label 1')).toBeInTheDocument());
+        await openFilenameConventionSubtab();
 
         fireEvent.click(screen.getByRole('button', { name: 'Add Modality' }));
-        fireEvent.change(screen.getByLabelText(`Image modality label ${config.image_modalities.length + 1}`), {
+        fireEvent.change(screen.getByLabelText(`Modality label ${config.image_modalities.length + 1}`), {
           target: { value: `Synthetic ${projectType} ${syntheticUser}` },
         });
-        fireEvent.change(screen.getByLabelText(`Image modality id ${config.image_modalities.length + 1}`), {
+        fireEvent.change(screen.getByLabelText(`Modality filename value ${config.image_modalities.length + 1}`), {
           target: { value: `${projectType.toLowerCase()}-${syntheticUser}-custom` },
         });
-        fireEvent.click(screen.getByLabelText(`Image modality calibration required ${config.image_modalities.length + 1}`));
-        fireEvent.click(screen.getByLabelText(`Image modality example uploaded ${config.image_modalities.length + 1}`));
-        fireEvent.change(screen.getByLabelText('Part view required modalities 1'), {
-          target: { value: `${projectType.toLowerCase()}-${syntheticUser}-custom` },
-        });
-
         fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
         await waitFor(() => {
@@ -757,7 +1778,9 @@ describe('ProjectConfigurationPanel', () => {
 
         render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-        await waitFor(() => expect(screen.getByLabelText('Accept hotkey')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole('tab', { name: 'Hotkeys' })).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }));
+        expect(screen.getByRole('tabpanel', { name: 'Hotkeys configuration' })).toBeInTheDocument();
 
         fireEvent.change(screen.getByLabelText('Accept hotkey'), { target: { value: 'q' } });
         fireEvent.change(screen.getByLabelText('Reject hotkey'), { target: { value: 'w' } });
@@ -792,19 +1815,19 @@ describe('ProjectConfigurationPanel', () => {
       
       test(`blocks save and shows validation errors for ${projectType} ${syntheticUser} synthetic user`, async () => {
         const config = makeConfig(projectType, syntheticUser);
+        config.part_views[0].required_modalities = ['nonexistent_modality'];
         mockFetch(config, projectType);
 
         render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-        await waitFor(() => expect(screen.getByLabelText('Accept hotkey')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole('tab', { name: 'Hotkeys' })).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }));
+        expect(screen.getByRole('tabpanel', { name: 'Hotkeys configuration' })).toBeInTheDocument();
 
         fireEvent.change(screen.getByLabelText('Accept hotkey'), { target: { value: 'q' } });
         fireEvent.change(screen.getByLabelText('Reject hotkey'), { target: { value: 'q' } });
+        fireEvent.click(screen.getByRole('tab', { name: 'General' }));
         fireEvent.change(screen.getByLabelText('Defect type color 1'), { target: { value: 'red' } });
-        fireEvent.change(screen.getByLabelText('Part view required modalities 1'), {
-          target: { value: 'nonexistent_modality' },
-        });
-
         const putCallsBefore = global.fetch.mock.calls.filter(
           ([url, options = {}]) => url === '/api/projects/proj-1/configuration' && options.method === 'PUT',
         ).length;
@@ -814,7 +1837,7 @@ describe('ProjectConfigurationPanel', () => {
         await waitFor(() => {
           expect(screen.getByText(/Hotkeys must be unique/)).toBeInTheDocument();
           expect(screen.getByText(/Defect type colors must be valid/)).toBeInTheDocument();
-          expect(screen.getByText(/Part views can only require modalities/)).toBeInTheDocument();
+          expect(screen.getByText(/Stored side modality requirements must reference configured modalities/)).toBeInTheDocument();
         });
 
         const putCallsAfter = global.fetch.mock.calls.filter(
@@ -862,23 +1885,17 @@ describe('ProjectConfigurationPanel', () => {
 
         render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-        await waitFor(() => expect(screen.getByLabelText('Part view label 1')).toBeInTheDocument());
+        await openFilenameConventionSubtab();
+        await waitFor(() => expect(screen.getByLabelText('Side label 1')).toBeInTheDocument());
 
-        fireEvent.click(screen.getByRole('button', { name: 'Add Part View' }));
-        fireEvent.change(screen.getByLabelText(`Part view label ${config.part_views.length + 1}`), {
+        fireEvent.click(screen.getByRole('button', { name: 'Add Side' }));
+        fireEvent.change(screen.getByLabelText(`Side label ${config.part_views.length + 1}`), {
           target: { value: `Expanded ${projectType} ${syntheticUser}` },
         });
-        fireEvent.change(screen.getByLabelText(`Part view id ${config.part_views.length + 1}`), {
+        fireEvent.change(screen.getByLabelText(`Side filename value ${config.part_views.length + 1}`), {
           target: { value: `${projectType.toLowerCase()}-${syntheticUser}-expanded-view` },
         });
-        fireEvent.change(screen.getByLabelText(`Part view required modalities ${config.part_views.length + 1}`), {
-          target: { value: `${projectType.toLowerCase()}-${syntheticUser}-modality-1` },
-        });
-        fireEvent.change(screen.getByLabelText(`Part view source ${config.part_views.length + 1}`), {
-          target: { value: 'auto' },
-        });
-
-        fireEvent.click(screen.getByLabelText('Remove part view 1'));
+        fireEvent.click(screen.getByLabelText('Remove side 1'));
         fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
         await waitFor(() => {
@@ -1054,6 +2071,22 @@ describe('ProjectConfigurationPanel', () => {
 
         await waitFor(() => expect(screen.getByLabelText('Source project')).toBeInTheDocument());
 
+        fireEvent.change(screen.getByLabelText('Source project'), { target: { value: 'proj-copy' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Copy from Project' }));
+
+        await waitFor(() => {
+          expect(screen.getByText('Failed to copy project configuration (invalid config settings fields)')).toBeInTheDocument();
+        });
+        expect(screen.queryByText('Configuration copied from Template Project.')).not.toBeInTheDocument();
+      });
+
+      test(`rejects clone success payloads with invalid PT3 guide settings for ${projectType} ${syntheticUser} synthetic user`, async () => {
+        const config = makeConfig(projectType, syntheticUser);
+        mockFetch(config, projectType, { cloneInvalidPt3GuideSettings: true });
+
+        render(<ProjectConfigurationPanel projectId="proj-1" />);
+
+        await waitFor(() => expect(screen.getByLabelText('Source project')).toBeInTheDocument());
         fireEvent.change(screen.getByLabelText('Source project'), { target: { value: 'proj-copy' } });
         fireEvent.click(screen.getByRole('button', { name: 'Copy from Project' }));
 

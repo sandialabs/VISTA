@@ -1,7 +1,12 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import GroupGalleryView from '../GroupGalleryView';
+
+// The complete frontend suite runs several CPU-heavy rendering tests in parallel.
+// Give this integration-style suite enough headroom for React to flush its async
+// fetch updates when a shared CI worker is under load.
+jest.setTimeout(15000);
 
 let mockParams = { id: 'proj-1', groupId: 'grp-1' };
 const mockNavigate = jest.fn();
@@ -34,6 +39,16 @@ const mockImages = [
 
 const mockProject = { id: 'proj-1', name: 'Test Project' };
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 function setupFetch({ images = mockImages, project = mockProject } = {}) {
   global.fetch = jest.fn((url) => {
     if (url.startsWith('/api/projects/proj-1/images')) {
@@ -63,6 +78,10 @@ describe('GroupGalleryView', () => {
 
     expect(screen.getAllByText('SN001').length).toBeGreaterThan(0);
     expect(screen.getByText('Back to Groups')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('image-gallery')).toBeInTheDocument();
+      expect(screen.getByText('Test Project')).toBeInTheDocument();
+    });
   });
 
   test('fetches and renders images for the group', async () => {
@@ -82,7 +101,8 @@ describe('GroupGalleryView', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('group_id=grp-1')
+        expect.stringContaining('group_id=grp-1'),
+        expect.any(Object)
       );
     });
   });
@@ -94,7 +114,8 @@ describe('GroupGalleryView', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('ungrouped=true')
+        expect.stringContaining('ungrouped=true'),
+        expect.any(Object)
       );
     });
   });
@@ -106,6 +127,10 @@ describe('GroupGalleryView', () => {
     render(<BrowserRouter><GroupGalleryView /></BrowserRouter>);
 
     expect(screen.getAllByText('Ungrouped').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getByTestId('image-gallery')).toBeInTheDocument();
+      expect(screen.getByText('Test Project')).toBeInTheDocument();
+    });
   });
 
   test('filters out deleted images', async () => {
@@ -166,5 +191,52 @@ describe('GroupGalleryView', () => {
     await waitFor(() => {
       expect(screen.getByText(/Failed to load images/)).toBeInTheDocument();
     });
+  });
+
+  test('ignores stale image responses after route changes', async () => {
+    const firstImages = createDeferred();
+    const secondImages = createDeferred();
+    global.fetch = jest.fn((url) => {
+      if (url === '/api/projects/proj-1') {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', name: 'Project One' }) });
+      }
+      if (url === '/api/projects/proj-2') {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-2', name: 'Project Two' }) });
+      }
+      if (url === '/api/groups/grp-1') {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'grp-1', display_name: 'Group One' }) });
+      }
+      if (url === '/api/groups/grp-2') {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'grp-2', display_name: 'Group Two' }) });
+      }
+      if (url.startsWith('/api/projects/proj-1/images')) {
+        return firstImages.promise;
+      }
+      if (url.startsWith('/api/projects/proj-2/images')) {
+        return secondImages.promise;
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    const { rerender } = render(<BrowserRouter><GroupGalleryView /></BrowserRouter>);
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/projects/proj-1/images'), expect.any(Object)));
+
+    mockParams = { id: 'proj-2', groupId: 'grp-2' };
+    mockLocation.state = { groupIdentifier: 'SN002' };
+    rerender(<BrowserRouter><GroupGalleryView /></BrowserRouter>);
+
+    await act(async () => {
+      secondImages.resolve({ ok: true, json: async () => [{ id: 'img-2', filename: 'fresh.png', deleted_at: null }] });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText('fresh.png')).toBeInTheDocument());
+
+    await act(async () => {
+      firstImages.resolve({ ok: true, json: async () => [{ id: 'img-1', filename: 'stale.png', deleted_at: null }] });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('stale.png')).not.toBeInTheDocument();
   });
 });

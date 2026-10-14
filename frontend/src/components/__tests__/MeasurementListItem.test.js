@@ -227,6 +227,42 @@ describe('MeasurementListItem', () => {
     });
   });
 
+  describe('Read-only mode', () => {
+    test('hides and guards rename and delete controls', () => {
+      render(<MeasurementListItem {...defaultProps} readOnly />);
+
+      expect(screen.queryByTitle('Delete')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('Test Measurement'));
+      expect(defaultProps.onStartRename).not.toHaveBeenCalled();
+      expect(defaultProps.onDelete).not.toHaveBeenCalled();
+    });
+
+    test('does not expose an externally requested rename editor', () => {
+      render(
+        <MeasurementListItem
+          {...defaultProps}
+          readOnly
+          isEditing={true}
+          editingName="Test Measurement"
+        />
+      );
+
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(screen.queryByText('Save')).not.toBeInTheDocument();
+      expect(screen.getByText('Test Measurement')).toBeInTheDocument();
+    });
+
+    test('preserves visibility and detail interactions', () => {
+      render(<MeasurementListItem {...defaultProps} readOnly />);
+
+      fireEvent.click(screen.getByTitle('Hide'));
+      expect(defaultProps.onToggleVisibility).toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText('28.28 mm'));
+      expect(defaultProps.onToggleExpanded).toHaveBeenCalled();
+    });
+  });
+
   describe('Event propagation', () => {
     test('stops propagation on name click', () => {
       render(<MeasurementListItem {...defaultProps} />);

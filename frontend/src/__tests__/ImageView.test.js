@@ -3,6 +3,16 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom';
 import ImageView from '../ImageView';
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 // Mock react-router-dom
 let mockParams = { imageId: 'test-image-id' };
 let mockSearchParams = new URLSearchParams('project=test-project-id');
@@ -17,8 +27,13 @@ jest.mock('react-router-dom', () => ({
 
 // Mock child components
 jest.mock('../components/ImageDisplay', () => {
-  return function MockImageDisplay({ image, imageId }) {
-    return <div data-testid="image-display">ImageDisplay - {image ? image.filename : 'Loading'}</div>;
+  return function MockImageDisplay({ image, projectImages }) {
+    return (
+      <div data-testid="image-display">
+        ImageDisplay - {image ? image.filename : 'Loading'}
+        <span data-testid="project-image-count">{projectImages?.length || 0}</span>
+      </div>
+    );
   };
 });
 
@@ -55,6 +70,24 @@ jest.mock('../components/ImageDeletionControls', () => {
 jest.mock('../components/ImageGroupPanel', () => {
   return function MockImageGroupPanel() {
     return <div data-testid="image-group-panel">ImageGroupPanel</div>;
+  };
+});
+
+jest.mock('../components/CalibrationManager', () => {
+  return function MockCalibrationManager() {
+    return <div data-testid="calibration-manager">CalibrationManager</div>;
+  };
+});
+
+jest.mock('../components/MLAnalysisPanel', () => {
+  return function MockMLAnalysisPanel() {
+    return <div data-testid="ml-analysis-panel">MLAnalysisPanel</div>;
+  };
+});
+
+jest.mock('../components/ReviewPanel', () => {
+  return function MockReviewPanel() {
+    return <div data-testid="review-panel">ReviewPanel</div>;
   };
 });
 
@@ -155,7 +188,10 @@ describe('ImageView', () => {
         expect(screen.getByText('test-image.jpg')).toBeInTheDocument();
       });
 
-      expect(fetch).toHaveBeenCalledWith('/api/images/test-image-id');
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/images/test-image-id',
+        expect.objectContaining({ signal: expect.anything() }),
+      );
       expect(screen.getByTestId('image-display')).toHaveTextContent('test-image.jpg');
     });
 
@@ -194,13 +230,17 @@ describe('ImageView', () => {
       });
 
       // Verify expected endpoints were called
-      expect(fetch).toHaveBeenCalledWith('/api/images/test-image-id');
-      expect(fetch).toHaveBeenCalledWith('/api/projects/test-project-id/images?include_deleted=true');
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/images/test-image-id',
+        expect.objectContaining({ signal: expect.anything() }),
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/projects/test-project-id/images?include_deleted=true',
+        expect.objectContaining({ signal: expect.anything() }),
+      );
     });
 
-    test('logs fallback attempt when direct fetch fails', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-
+    test('loads fallback project image when direct fetch fails', async () => {
       fetch.mockImplementation((url) => {
         if (url === '/api/users/me') return Promise.resolve({ ok: false, status: 401 });
         if (url === `/api/images/${mockParams.imageId}`) return Promise.resolve({ ok: false, status: 404 });
@@ -212,12 +252,8 @@ describe('ImageView', () => {
       renderImageView();
 
       await waitFor(() => {
-        expect(consoleSpy).toHaveBeenCalledWith(
-          'Direct image fetch failed, trying project endpoint with deleted images...'
-        );
+        expect(screen.getByText('deleted-image.jpg')).toBeInTheDocument();
       });
-
-      consoleSpy.mockRestore();
     });
 
     test('sets document title correctly for deleted images loaded via fallback', async () => {
@@ -312,7 +348,10 @@ describe('ImageView', () => {
       renderImageView();
 
       await waitFor(() => {
-        expect(fetch).toHaveBeenCalledWith('/api/projects/test-project-id/images?include_deleted=true');
+        expect(fetch).toHaveBeenCalledWith(
+          '/api/projects/test-project-id/images?include_deleted=true',
+          expect.objectContaining({ signal: expect.anything() }),
+        );
       });
     });
 
@@ -489,6 +528,51 @@ describe('ImageView', () => {
       expect(mockNavigate).toHaveBeenCalledWith(
         expect.stringContaining('/view/img-c?')
       );
+    });
+
+    test('cancels a pending navigation timer when a newer route supersedes it', async () => {
+      const imagesById = new Map(mockNavImages.map((image) => [image.id, image]));
+      const supersedingImageRequest = createDeferred();
+      mockParams = { imageId: mockImageB.id };
+      fetch.mockImplementation((url) => {
+        if (url === '/api/users/me') return Promise.resolve({ ok: false, status: 401 });
+        if (url.endsWith('/reviews')) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        if (url.startsWith('/api/images/')) {
+          const requestedImageId = url.split('/').at(-1);
+          if (requestedImageId === mockImageA.id) return supersedingImageRequest.promise;
+          return Promise.resolve({
+            ok: true,
+            json: async () => imagesById.get(requestedImageId),
+          });
+        }
+        if (url.startsWith('/api/projects/test-project-id/images')) {
+          return Promise.resolve({ ok: true, json: async () => mockNavImages });
+        }
+        if (url.startsWith('/api/projects/test-project-id/classes')) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({ is_archived: false }) });
+      });
+
+      const view = renderImageView();
+      await waitForImageLoad('bravo.png');
+      await waitFor(() => {
+        expect(screen.getByTestId('project-image-count')).toHaveTextContent('3');
+      });
+      fireEvent.keyDown(document, { key: 'ArrowRight' });
+      expect(mockNavigate).not.toHaveBeenCalled();
+
+      await act(async () => {
+        mockParams = { imageId: mockImageA.id };
+        view.rerender(<BrowserRouter><ImageView /></BrowserRouter>);
+      });
+      act(() => {
+        jest.advanceTimersByTime(300);
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
     });
 
     test('ArrowLeft navigates to previous image in name-sorted order', async () => {
@@ -722,6 +806,35 @@ describe('ImageView', () => {
       );
     });
 
+    test('uses URL gallery params for copied URL navigation without localStorage', async () => {
+      localStorage.clear();
+      mockSearchParams = new URLSearchParams('project=test-project-id&galleryKey=test-project-id&searchField=filename&searchValue=bravo&sortBy=name&sortOrder=asc&reviewFilter=all');
+      setupNavFetch();
+      renderImageView();
+      await waitForImageLoad('bravo.png');
+
+      pressArrowAndAdvance('ArrowRight');
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    test('preserves all recognized gallery params in previous/next navigation URLs', async () => {
+      mockSearchParams = new URLSearchParams('project=test-project-id&galleryKey=test-project-id&searchField=filename&searchValue=&sortBy=name&sortOrder=asc&reviewFilter=all&groupId=grp-1&ungrouped=false&thumbnailSize=500');
+      setupNavFetch();
+      renderImageView();
+      await waitForImageLoad('bravo.png');
+
+      pressArrowAndAdvance('ArrowRight');
+      const navUrl = mockNavigate.mock.calls.at(-1)[0];
+      expect(navUrl).toContain('/view/img-c?');
+      expect(navUrl).toContain('galleryKey=test-project-id');
+      expect(navUrl).toContain('searchField=filename');
+      expect(navUrl).toContain('sortBy=name');
+      expect(navUrl).toContain('sortOrder=asc');
+      expect(navUrl).toContain('reviewFilter=all');
+      expect(navUrl).toContain('groupId=grp-1');
+      expect(navUrl).not.toContain('thumbnailSize');
+    });
+
     test('preserves galleryKey in navigation URLs', async () => {
       mockSearchParams = new URLSearchParams(
         'project=test-project-id&galleryKey=test-project-id_ungrouped'
@@ -767,5 +880,30 @@ describe('ImageView', () => {
         '/view/img-c?project=test-project-id'
       );
     });
+  });
+});
+
+describe('ImageView link sharing', () => {
+  test('copies the exact current browser URL from the compact image header', async () => {
+    mockParams = { imageId: 'test-image-id' };
+    mockSearchParams = new URLSearchParams('project=test-project-id');
+    window.history.pushState({}, '', '/images/test-image-id?project=test-project-id&galleryKey=recent');
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    fetch.mockImplementation((url) => {
+      if (url === '/api/users/me') return Promise.resolve({ ok: false, status: 401 });
+      if (url === `/api/images/${mockParams.imageId}`) return Promise.resolve({ ok: true, json: async () => mockRegularImage });
+      if (url === `/api/projects/test-project-id/images?include_deleted=true`) return Promise.resolve({ ok: true, json: async () => mockProjectImages });
+      if (url === `/api/projects/test-project-id/classes`) return Promise.resolve({ ok: true, json: async () => [] });
+      return Promise.resolve({ ok: true, json: async () => [] });
+    });
+
+    renderImageView();
+    await waitFor(() => expect(screen.getByText('test-image.jpg')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(window.location.href));
+    expect(screen.getByRole('status')).toHaveTextContent('Link copied to clipboard.');
   });
 });

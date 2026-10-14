@@ -72,7 +72,10 @@ describe('ProjectDataMetadataTab', () => {
       if (url.includes('/workspace-state')) return Promise.resolve({ ok: true, json: async () => ({ state: { selected_batch_id: 'batch-pt3', selected_part_id: 'part-pt3-1' } }) });
       if (url.includes('/configuration')) return Promise.resolve({ ok: true, json: async () => ({ config: {} }) });
       if (url.includes('/metadata-dict')) return Promise.resolve({ ok: true, json: async () => metadata });
-      if (url.includes('/images?include_deleted=true&limit=5000')) return Promise.resolve({ ok: true, json: async () => assignedPt3Images });
+      if (url.includes('/images-page?')) return Promise.resolve({
+        ok: true,
+        json: async () => ({ items: assignedPt3Images, total: assignedPt3Images.length, next_cursor: null, has_more: false }),
+      });
       return Promise.resolve({ ok: true, json: async () => ({}) });
     });
 

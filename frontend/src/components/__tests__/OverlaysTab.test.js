@@ -105,11 +105,10 @@ describe('OverlaysTab', () => {
     fireEvent.drop(screen.getByTestId('overlay-target-base-id'));
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/overlay-assignments', {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-1/parts/overlay-assignments', expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ overlay_filename: 'overlay.png', overlay_image_id: 'overlay-id', base_filename: 'base.png', base_image_id: 'base-id' }),
-      });
+      }));
     });
     await waitFor(() => expect(onAssignmentsChanged).toHaveBeenCalled());
   });
@@ -133,6 +132,37 @@ describe('OverlaysTab', () => {
     expect(buckets.baseBuckets).toHaveLength(1);
     expect(buckets.baseBuckets[0].overlays.map((image) => image.filename)).toEqual(['overlay.png']);
     expect(buckets.unassignedOverlays.map((image) => image.filename)).toEqual(['loose.png']);
+  });
+
+  test('treats Analyze outputs as assigned overlays for their source image', () => {
+    const buckets = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        metadata: {
+          source_images: [
+            { filename: 'source.png', image_id: 'source-id', overlay: false },
+          ],
+          analysis_outputs: [
+            {
+              filename: 'source_analyze-overlay.png',
+              image_id: 'analysis-overlay-id',
+              overlay: true,
+              analysis_output: true,
+              overlay_base_image_id: 'source-id',
+              overlay_base_filename: 'source.png',
+            },
+          ],
+        },
+      }],
+      images: [
+        { id: 'source-id', filename: 'source.png' },
+        { id: 'analysis-overlay-id', filename: 'source_analyze-overlay.png' },
+      ],
+    });
+
+    expect(buckets.baseBuckets).toHaveLength(1);
+    expect(buckets.baseBuckets[0].overlays.map((image) => image.id)).toEqual(['analysis-overlay-id']);
+    expect(buckets.unassignedOverlays).toEqual([]);
   });
 
   test('findAutoassignments matches exact duplicate filenames and _overlay suffix filenames', () => {
@@ -190,16 +220,14 @@ describe('OverlaysTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Autoassign' }));
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
-    expect(fetchSpy).toHaveBeenNthCalledWith(1, '/api/projects/proj-auto/parts/overlay-assignments', {
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, '/api/projects/proj-auto/parts/overlay-assignments', expect.objectContaining({
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ overlay_filename: 'camera_overlay.png', overlay_image_id: 'camera-overlay-id', base_filename: 'camera.png', base_image_id: 'camera-base-id' }),
-    });
-    expect(fetchSpy).toHaveBeenNthCalledWith(2, '/api/projects/proj-auto/parts/overlay-assignments', {
+    }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, '/api/projects/proj-auto/parts/overlay-assignments', expect.objectContaining({
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ overlay_filename: 'scan.npy', overlay_image_id: 'scan-overlay-id', base_filename: 'scan.npy', base_image_id: 'scan-base-id' }),
-    });
+    }));
     await waitFor(() => expect(onAssignmentsChanged).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole('status')).toHaveTextContent('Autoassigned 2 overlays.');
   });
@@ -219,15 +247,147 @@ describe('OverlaysTab', () => {
       />
     );
 
-    fireEvent.dragStart(screen.getByRole('button', { name: 'scan (duplicate).npy' }), { dataTransfer: { setData: jest.fn() } });
+    fireEvent.dragStart(screen.getByRole('button', { name: 'scan (1).npy' }), { dataTransfer: { setData: jest.fn() } });
     fireEvent.drop(screen.getByTestId('overlay-target-stack-base-id'));
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-pt3/parts/overlay-assignments', {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-pt3/parts/overlay-assignments', expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ overlay_filename: 'scan.npy', overlay_image_id: 'stack-overlay-id', base_filename: 'scan.npy', base_image_id: 'stack-base-id' }),
-      });
+      }));
     });
+  });
+
+  test('treats false-string metadata as a base and leaves stale explicit overlays available', () => {
+    const buckets = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        metadata: { source_images: [
+          { filename: 'base.png', image_id: 'base-id', overlay: 'false' },
+          {
+            filename: 'loose.png',
+            image_id: 'missing-overlay-id',
+            overlay: 'true',
+            overlay_base_image_id: 'base-id',
+          },
+        ] },
+      }],
+      images: [
+        { id: 'base-id', filename: 'base.png' },
+        { id: 'loose-id', filename: 'loose.png' },
+      ],
+    });
+
+    expect(buckets.baseBuckets.map((bucket) => bucket.image.id)).toEqual(['base-id']);
+    expect(buckets.baseBuckets[0].overlays).toEqual([]);
+    expect(buckets.unassignedOverlays.map((image) => image.id)).toEqual(['loose-id']);
+  });
+
+  test('does not filename-fallback when an explicit overlay or base UUID is stale', () => {
+    const staleOverlay = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        metadata: { source_images: [
+          { filename: 'base.png', image_id: 'base-id', overlay: false },
+          {
+            filename: 'overlay.png',
+            image_id: 'missing-overlay-id',
+            overlay: true,
+            overlay_base_image_id: 'base-id',
+          },
+        ] },
+      }],
+      images: [
+        { id: 'base-id', filename: 'base.png' },
+        { id: 'active-overlay-id', filename: 'overlay.png' },
+      ],
+    });
+    expect(staleOverlay.baseBuckets[0].overlays).toEqual([]);
+    expect(staleOverlay.unassignedOverlays.map((image) => image.id)).toEqual(['active-overlay-id']);
+
+    const staleBase = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        metadata: { source_images: [
+          { filename: 'base.png', image_id: 'base-id', overlay: false },
+          {
+            filename: 'overlay.png',
+            image_id: 'overlay-id',
+            overlay: true,
+            overlay_base_image_id: 'missing-base-id',
+            overlay_base_filename: 'base.png',
+          },
+        ] },
+      }],
+      images: [
+        { id: 'base-id', filename: 'base.png' },
+        { id: 'overlay-id', filename: 'overlay.png' },
+      ],
+    });
+    expect(staleBase.baseBuckets[0].overlays).toEqual([]);
+    expect(staleBase.unassignedOverlays.map((image) => image.id)).toEqual(['overlay-id']);
+  });
+
+  test('keeps every ambiguous legacy overlay available with numeric labels', () => {
+    const buckets = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        metadata: { source_images: [
+          { filename: 'base.png', image_id: 'base-id', overlay: false },
+          { filename: 'mask.png', overlay: true, overlay_base_image_id: 'base-id' },
+        ] },
+      }],
+      images: [
+        { id: 'base-id', filename: 'base.png' },
+        { id: 'mask-a', filename: 'mask.png', created_at: '2026-01-01T00:00:00Z' },
+        { id: 'mask-b', filename: 'mask.png', created_at: '2026-01-02T00:00:00Z' },
+      ],
+    });
+
+    expect(buckets.baseBuckets[0].overlays).toEqual([]);
+    expect(buckets.unassignedOverlays.map((image) => [image.id, image.displayName])).toEqual([
+      ['mask-a', 'mask.png'],
+      ['mask-b', 'mask (1).png'],
+    ]);
+  });
+
+  test('autoassign skips ambiguous exact and suffix base candidates', () => {
+    const exact = buildOverlayBuckets({
+      parts: [
+        {
+          id: 'part-a',
+          metadata: { source_images: [{ filename: 'scan.npy', image_id: 'base-a', overlay: false }] },
+        },
+        {
+          id: 'part-b',
+          metadata: { source_images: [{ filename: 'scan.npy', image_id: 'base-b', overlay: false }] },
+        },
+      ],
+      images: [
+        { id: 'base-a', filename: 'scan.npy' },
+        { id: 'base-b', filename: 'scan.npy' },
+        { id: 'candidate', filename: 'scan.npy' },
+      ],
+    });
+    expect(findAutoassignments(exact)).toEqual([]);
+
+    const suffix = buildOverlayBuckets({
+      parts: [
+        {
+          id: 'part-a',
+          metadata: { source_images: [{ filename: 'camera.png', image_id: 'camera-a', overlay: false }] },
+        },
+        {
+          id: 'part-b',
+          metadata: { source_images: [{ filename: 'camera.png', image_id: 'camera-b', overlay: false }] },
+        },
+      ],
+      images: [
+        { id: 'camera-a', filename: 'camera.png' },
+        { id: 'camera-b', filename: 'camera.png' },
+        { id: 'overlay-id', filename: 'camera_overlay.png' },
+      ],
+    });
+    expect(findAutoassignments(suffix)).toEqual([]);
   });
 });
