@@ -19,35 +19,35 @@ Authentication:
     In debug mode (DEBUG=true on backend), no auth is needed.
 """
 
-import os
-import sys
 import argparse
-import json
-import requests
-from io import BytesIO
-from PIL import Image, ImageDraw
+import os
 import random
+import sys
+from io import BytesIO
 from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw
 
 # Load environment variables from .env file in project root
 project_root = Path(__file__).parent.parent
-load_dotenv(project_root / '.env')
+load_dotenv(project_root / ".env")
 
 
 def create_fake_heatmap(width=512, height=512) -> bytes:
     """Create a fake heatmap image (PNG) for testing."""
     # Create a simple gradient heatmap
-    img = Image.new('RGB', (width, height))
+    img = Image.new("RGB", (width, height))
     draw = ImageDraw.Draw(img)
 
     # Create a radial gradient effect
     center_x, center_y = width // 2, height // 2
-    max_distance = ((width/2)**2 + (height/2)**2) ** 0.5
+    max_distance = ((width / 2) ** 2 + (height / 2) ** 2) ** 0.5
 
     for y in range(height):
         for x in range(width):
-            distance = ((x - center_x)**2 + (y - center_y)**2) ** 0.5
+            distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
             intensity = int(255 * (1 - distance / max_distance))
             # Red-yellow gradient (heatmap style)
             r = min(255, intensity + 100)
@@ -57,12 +57,17 @@ def create_fake_heatmap(width=512, height=512) -> bytes:
 
     # Convert to bytes
     buffer = BytesIO()
-    img.save(buffer, format='PNG')
+    img.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
-def run_pipeline(base_url: str, image_id: str, session: requests.Session,
-                 model_name: str = "yolo_v8", model_version: str = "1.0.0"):
+def run_pipeline(
+    base_url: str,
+    image_id: str,
+    session: requests.Session,
+    model_name: str = "yolo_v8",
+    model_version: str = "1.0.0",
+):
     """
     Run a complete ML pipeline simulation.
 
@@ -88,13 +93,12 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
         "parameters": {
             "confidence_threshold": 0.5,
             "iou_threshold": 0.4,
-            "max_detections": 100
-        }
+            "max_detections": 100,
+        },
     }
 
     resp = session.post(
-        f"{base_url}/api/images/{image_id}/analyses",
-        json=create_payload
+        f"{base_url}/api/images/{image_id}/analyses", json=create_payload
     )
 
     if resp.status_code != 201:
@@ -102,7 +106,7 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
         return False
 
     analysis = resp.json()
-    analysis_id = analysis['id']
+    analysis_id = analysis["id"]
     print(f"  OK: Analysis created: {analysis_id}")
     print(f"   Status: {analysis['status']}")
     print()
@@ -112,8 +116,7 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
     status_payload = {"status": "processing"}
 
     resp = session.patch(
-        f"{base_url}/api/analyses/{analysis_id}/status",
-        json=status_payload
+        f"{base_url}/api/analyses/{analysis_id}/status", json=status_payload
     )
 
     if resp.status_code != 200:
@@ -125,14 +128,10 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
 
     # Step 3: Request presigned upload URL for heatmap
     print("Step 3: Requesting presigned upload URL for heatmap...")
-    presign_payload = {
-        "artifact_type": "heatmap",
-        "filename": "heatmap.png"
-    }
+    presign_payload = {"artifact_type": "heatmap", "filename": "heatmap.png"}
 
     resp = session.post(
-        f"{base_url}/api/analyses/{analysis_id}/artifacts/presign",
-        json=presign_payload
+        f"{base_url}/api/analyses/{analysis_id}/artifacts/presign", json=presign_payload
     )
 
     if resp.status_code != 200:
@@ -140,21 +139,19 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
         return False
 
     presign_data = resp.json()
-    upload_url = presign_data['upload_url']
-    storage_path = presign_data['storage_path']
+    upload_url = presign_data["upload_url"]
+    storage_path = presign_data["storage_path"]
     print("  OK: Presigned URL obtained")
     print(f"   Storage path: {storage_path}")
     print()
 
     # Step 4: Upload heatmap (only if not a mock URL)
     print("Step 4: Uploading heatmap image...")
-    if not upload_url.startswith('https://example.com'):
+    if not upload_url.startswith("https://example.com"):
         # Real S3 upload
         heatmap_bytes = create_fake_heatmap()
         upload_resp = requests.put(
-            upload_url,
-            data=heatmap_bytes,
-            headers={'Content-Type': 'image/png'}
+            upload_url, data=heatmap_bytes, headers={"Content-Type": "image/png"}
         )
 
         if upload_resp.status_code not in (200, 204):
@@ -185,56 +182,67 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
         x_max = min(x_min + box_width, image_width)
         y_max = min(y_min + box_height, image_height)
 
-        annotations.append({
-            "annotation_type": "bounding_box",
-            "class_name": random.choice(class_names),
-            "confidence": round(random.uniform(0.5, 0.99), 4),
-            "data": {
-                "x_min": x_min,
-                "y_min": y_min,
-                "x_max": x_max,
-                "y_max": y_max,
-                "image_width": image_width,
-                "image_height": image_height
-            },
-            "ordering": i
-        })
+        annotations.append(
+            {
+                "annotation_type": "bounding_box",
+                "class_name": random.choice(class_names),
+                "confidence": round(random.uniform(0.5, 0.99), 4),
+                "data": {
+                    "x_min": x_min,
+                    "y_min": y_min,
+                    "x_max": x_max,
+                    "y_max": y_max,
+                    "image_width": image_width,
+                    "image_height": image_height,
+                },
+                "ordering": i,
+            }
+        )
 
     # Add heatmap reference
-    annotations.append({
-        "annotation_type": "heatmap",
-        "class_name": None,
-        "confidence": None,
-        "data": {
-            "width": 512,
-            "height": 512,
-            "color_map": "viridis"
-        },
-        "storage_path": storage_path,
-        "ordering": len(annotations)
-    })
+    annotations.append(
+        {
+            "annotation_type": "heatmap",
+            "class_name": None,
+            "confidence": None,
+            "data": {"width": 512, "height": 512, "color_map": "viridis"},
+            "storage_path": storage_path,
+            "ordering": len(annotations),
+        }
+    )
 
     # Add overall classification
-    top_class = max(annotations[:-1], key=lambda a: a['confidence'])['class_name']
-    annotations.append({
-        "annotation_type": "classification",
-        "class_name": top_class,
-        "confidence": 0.95,
-        "data": {
-            "topk": [
-                {"class": top_class, "confidence": 0.95},
-                {"class": random.choice([c for c in class_names if c != top_class]), "confidence": 0.03},
-                {"class": random.choice([c for c in class_names if c != top_class]), "confidence": 0.02}
-            ]
-        },
-        "ordering": len(annotations)
-    })
+    top_class = max(annotations[:-1], key=lambda a: a["confidence"])["class_name"]
+    annotations.append(
+        {
+            "annotation_type": "classification",
+            "class_name": top_class,
+            "confidence": 0.95,
+            "data": {
+                "topk": [
+                    {"class": top_class, "confidence": 0.95},
+                    {
+                        "class": random.choice(
+                            [c for c in class_names if c != top_class]
+                        ),
+                        "confidence": 0.03,
+                    },
+                    {
+                        "class": random.choice(
+                            [c for c in class_names if c != top_class]
+                        ),
+                        "confidence": 0.02,
+                    },
+                ]
+            },
+            "ordering": len(annotations),
+        }
+    )
 
     bulk_payload = {"annotations": annotations}
 
     resp = session.post(
-        f"{base_url}/api/analyses/{analysis_id}/annotations:bulk",
-        json=bulk_payload
+        f"{base_url}/api/analyses/{analysis_id}/annotations:bulk", json=bulk_payload
     )
 
     if resp.status_code != 200:
@@ -245,8 +253,8 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
     print("  OK: Annotations posted successfully")
     print(f"   Total annotations: {result['total']}")
     print(f"   Bounding boxes: {num_boxes}")
-    print(f"   Heatmap: 1")
-    print(f"   Classification: 1")
+    print("   Heatmap: 1")
+    print("   Classification: 1")
     print()
 
     # Step 6: Finalize analysis
@@ -254,8 +262,7 @@ def run_pipeline(base_url: str, image_id: str, session: requests.Session,
     finalize_payload = {"status": "completed"}
 
     resp = session.post(
-        f"{base_url}/api/analyses/{analysis_id}/finalize",
-        json=finalize_payload
+        f"{base_url}/api/analyses/{analysis_id}/finalize", json=finalize_payload
     )
 
     if resp.status_code != 200:
@@ -284,29 +291,23 @@ def main():
         description="Simulate an external ML pipeline for testing"
     )
     parser.add_argument(
-        '--image-id',
-        required=True,
-        help='UUID of the image to analyze'
+        "--image-id", required=True, help="UUID of the image to analyze"
     )
     parser.add_argument(
-        '--base-url',
-        default=os.getenv('API_BASE_URL', 'http://localhost:8000'),
-        help='Base URL of the API (default: http://localhost:8000)'
+        "--base-url",
+        default=os.getenv("API_BASE_URL", "http://localhost:8000"),
+        help="Base URL of the API (default: http://localhost:8000)",
     )
     parser.add_argument(
-        '--api-key',
-        default=os.getenv('API_KEY'),
-        help='API key for Bearer token authentication'
+        "--api-key",
+        default=os.getenv("API_KEY"),
+        help="API key for Bearer token authentication",
     )
     parser.add_argument(
-        '--model-name',
-        default='yolo_v8',
-        help='Model name to use (default: yolo_v8)'
+        "--model-name", default="yolo_v8", help="Model name to use (default: yolo_v8)"
     )
     parser.add_argument(
-        '--model-version',
-        default='1.0.0',
-        help='Model version (default: 1.0.0)'
+        "--model-version", default="1.0.0", help="Model version (default: 1.0.0)"
     )
 
     args = parser.parse_args()
@@ -314,23 +315,23 @@ def main():
     # Set up authenticated session
     session = requests.Session()
     if args.api_key:
-        session.headers.update({'Authorization': f'Bearer {args.api_key}'})
-        print(f"Using API key authentication")
+        session.headers.update({"Authorization": f"Bearer {args.api_key}"})
+        print("Using API key authentication")
     else:
         print("No API key provided -- relying on debug mode (X-User-Email header)")
-        session.headers.update({'X-User-Email': 'test@example.com'})
+        session.headers.update({"X-User-Email": "test@example.com"})
 
     # Run the pipeline
     success = run_pipeline(
-        base_url=args.base_url.rstrip('/'),
+        base_url=args.base_url.rstrip("/"),
         image_id=args.image_id,
         session=session,
         model_name=args.model_name,
-        model_version=args.model_version
+        model_version=args.model_version,
     )
 
     sys.exit(0 if success else 1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

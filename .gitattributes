@@ -1,0 +1,16 @@
+# Keep Unix-executed scripts with LF endings even on Windows checkouts.
+*.sh text eol=lf
+backend/scripts/*.sh text eol=lf
+Dockerfile whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+scripts/*.sh text eol=lf
+
+# PowerShell scripts are Windows-friendly and may use CRLF locally.
+*.ps1 text eol=crlf
+
+# Preserve binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

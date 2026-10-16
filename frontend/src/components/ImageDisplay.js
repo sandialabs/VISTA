@@ -3,6 +3,11 @@ import BoundingBoxOverlay from './BoundingBoxOverlay';
 import HeatmapOverlay from './HeatmapOverlay';
 import MeasurementTool from './MeasurementTool';
 import MeasurementOverlay from './MeasurementOverlay';
+import {
+  deleteProjectImage,
+  fetchImageContentResponse,
+  fetchImageDownloadResponse,
+} from '../api/images';
 
 // Deleted image placeholder SVG for larger display
 const DELETED_IMAGE_DISPLAY_SVG = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgZmlsbD0iI2ZiZjVmNSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1kYXNoYXJyYXk9IjE1LDgiLz48dGV4dCB4PSI1MCUiIHk9IjM1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjM2IiBmb250LXdlaWdodD0iNjAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2M0MzAyYiI+SW1hZ2UgRGVsZXRlZDwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjY0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iI2Y1OWUwYiI+8J+XkeKcgO+4jzwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjY1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iIzk3OWNhMSI+VGhpcyBpbWFnZSBoYXMgYmVlbiBkZWxldGVkPC90ZXh0Pjx0ZXh0IHg9IjUwJSIgeT0iNzAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIiBmaWxsPSIjOTc5Y2ExIj5DaGVjayB0aGUgZGVsZXRpb24gY29udHJvbHMgYmVsb3cgZm9yIG1vcmUgaW5mbzwvdGV4dD48L3N2Zz4=';
@@ -95,16 +100,12 @@ function ImageDisplay({
     
     setSubmitting(true);
     try {
-      const resp = await fetch(`/api/projects/${projectId}/images/${image.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: reason.trim(), force })
-      });
-      if (!resp.ok) {
-        const detail = await resp.text();
-        throw new Error(`Delete failed (${resp.status}): ${detail}`);
-      }
-      const data = await resp.json();
+      const data = await deleteProjectImage(
+        projectId,
+        image.id,
+        { reason: reason.trim(), force },
+        { errorLabel: 'Delete failed' },
+      );
       setImage(data);
       if (refreshProjectImages) refreshProjectImages();
       setShowDeleteModal(false);
@@ -121,40 +122,30 @@ function ImageDisplay({
   // Handle download
   const handleDownload = async () => {
     if (!image) return;
-    
+
     try {
-      console.log('Starting download for image %s...', imageId);
-      
       // Try multiple endpoints to find the working one
-      const endpoints = [
-        `/api/images/${imageId}/content`,
-        `/api/images/${imageId}/download`,
-      ];
+      const endpoints = [fetchImageContentResponse, fetchImageDownloadResponse];
       
       let imageBlob = null;
       let filename = image.filename || `image-${imageId}`;
-      
-      for (const endpoint of endpoints) {
+
+      for (const fetchImageResponse of endpoints) {
         try {
-          console.log('Trying endpoint: %s', endpoint);
-          const response = await fetch(endpoint);
-          
+          const response = await fetchImageResponse(imageId);
+
           if (!response.ok) {
-            console.log('Endpoint %s failed: %s %s', endpoint, response.status, response.statusText);
             continue;
           }
-          
+
           const contentType = response.headers.get('content-type');
-          console.log('Endpoint %s - Content-Type: %s', endpoint, contentType);
-          
+
           if (contentType && contentType.includes('application/json')) {
             // This might be a redirect URL response
             const jsonData = await response.json();
-            console.log('Got JSON response:', jsonData);
-            
+
             if (jsonData.url) {
               // Try to fetch from the provided URL
-              console.log('Fetching from provided URL: %s', jsonData.url);
               const imageResponse = await fetch(jsonData.url);
               
               if (imageResponse.ok) {
@@ -169,11 +160,8 @@ function ImageDisplay({
             // Direct image response
             imageBlob = await response.blob();
             break;
-          } else {
-            console.log('Unexpected content type: %s', contentType);
           }
         } catch (endpointError) {
-          console.error('Error with endpoint %s:', endpoint, endpointError);
           continue;
         }
       }
@@ -181,12 +169,7 @@ function ImageDisplay({
       if (!imageBlob) {
         throw new Error('Unable to download image from any available endpoint');
       }
-      
-      console.log('Successfully got image blob:', {
-        size: imageBlob.size,
-        type: imageBlob.type
-      });
-      
+
       // Ensure we have the right file extension
       if (!filename.includes('.') && imageBlob.type) {
         const extension = imageBlob.type.split('/')[1];
@@ -211,11 +194,8 @@ function ImageDisplay({
       
       // Clean up the blob URL
       window.URL.revokeObjectURL(blobUrl);
-      
-      console.log('Download completed successfully: %s', filename);
-      
+
     } catch (error) {
-      console.error('Error downloading image:', error);
       alert(`Download failed: ${error.message}`);
     }
   };
@@ -323,25 +303,10 @@ function ImageDisplay({
         height: imgRef.current.naturalHeight
       };
 
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[ImageDisplay] Measured display size:', {
-          displaySize: measuredSize,
-          naturalSize: naturalDimensions,
-          naturalWidth: imgRef.current.naturalWidth,
-          naturalHeight: imgRef.current.naturalHeight,
-          offsetWidth: imgRef.current.offsetWidth,
-          offsetHeight: imgRef.current.offsetHeight,
-          clientWidth: imgRef.current.clientWidth,
-          clientHeight: imgRef.current.clientHeight,
-          zoomLevel,
-          imageId
-        });
-      }
-
       setDisplaySize(measuredSize);
       setNaturalSize(naturalDimensions);
     }
-  }, [zoomLevel, imageId]);
+  }, []);
 
   // Reset display size, zoom, and pan when imageId changes to prevent stale dimensions
   useEffect(() => {
@@ -365,6 +330,14 @@ function ImageDisplay({
   const renderImageView = (showOverlays = true, containerStyle = {}, attachRef = true) => (
     <div style={{ position: 'relative', ...containerStyle }}>
       <div style={{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)`, position: 'relative' }}>
+        <div
+          data-testid="image-anchored-layer"
+          style={{
+            position: 'relative',
+            transform: `scale(${zoomLevel})`,
+            transformOrigin: 'top left'
+          }}
+        >
       {!image ? (
         <div className="loading-container">
           <div className="loading"></div>
@@ -375,7 +348,6 @@ function ImageDisplay({
           src={DELETED_IMAGE_DISPLAY_SVG}
           alt="Deleted"
           className="view-image deleted-image"
-          style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
           ref={attachRef ? imgRef : null}
         />
       ) : (
@@ -383,10 +355,8 @@ function ImageDisplay({
           src={`/api/images/${imageId}/content`}
           alt={image.filename || ''}
           className="view-image"
-          style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
           onLoad={measure}
           onError={(e) => {
-            console.error('Failed to load image with ID: %s', imageId, e);
             if (!e.target.src.includes('thumbnail')) {
               e.target.src = `/api/images/${imageId}/thumbnail?width=800&height=600`;
             }
@@ -394,26 +364,18 @@ function ImageDisplay({
           ref={attachRef ? imgRef : null}
         />
       )}
-      {showOverlays && image && overlayOptions?.showBoxes && annotations?.length > 0 && displaySize.width > 0 && (() => {
-        console.log('[ImageDisplay] Rendering BoundingBoxOverlay:', {
-          imageMetadata: { width: image.width, height: image.height },
-          displaySize,
-          zoomLevel,
-          annotationCount: annotations.length
-        });
-        return (
-          <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
-            <BoundingBoxOverlay
-              annotations={annotations}
-              naturalSize={naturalSize}
-              containerSize={displaySize}
-              opacity={overlayOptions.opacity}
-            />
-          </div>
-        );
-      })()}
+      {showOverlays && image && overlayOptions?.showBoxes && annotations?.length > 0 && displaySize.width > 0 && (
+        <div style={{ position: 'absolute', top: 0, left: 0 }}>
+          <BoundingBoxOverlay
+            annotations={annotations}
+            naturalSize={naturalSize}
+            containerSize={displaySize}
+            opacity={overlayOptions.opacity}
+          />
+        </div>
+      )}
       {showOverlays && image && overlayOptions?.showHeatmap && annotations?.length > 0 && displaySize.width > 0 && (
-        <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
+        <div style={{ position: 'absolute', top: 0, left: 0 }}>
           <HeatmapOverlay
             annotations={annotations}
             containerSize={displaySize}
@@ -422,7 +384,7 @@ function ImageDisplay({
         </div>
       )}
       {showOverlays && image && measurements && measurements.length > 0 && displaySize.width > 0 && naturalSize.width > 0 && (
-        <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
+        <div style={{ position: 'absolute', top: 0, left: 0 }}>
           <MeasurementOverlay
             measurements={measurements}
             naturalSize={naturalSize}
@@ -446,6 +408,7 @@ function ImageDisplay({
           leftClickEnabled={!!measurementActive}
         />
       )}
+        </div>
       </div>
     </div>
   );
@@ -507,11 +470,9 @@ function ImageDisplay({
             {measurementActive ? 'Done Measuring' : 'Measure'}
           </button>
         )}
-        {measurementActive && (
-          <span className="measure-hint">
-            Left-click to draw. Right-click also works.
-          </span>
-        )}
+        <span className="measure-hint" aria-hidden={!measurementActive} style={{ visibility: measurementActive ? 'visible' : 'hidden' }}>
+          Left-click to draw. Right-click also works.
+        </span>
         <button
           className="btn btn-success control-btn"
           onClick={handleDownload}

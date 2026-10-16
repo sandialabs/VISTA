@@ -1,4 +1,5 @@
 import io
+
 from PIL import Image
 
 
@@ -13,7 +14,10 @@ def _make_png_bytes(size=(10, 10), color=(0, 128, 255)):
 def test_comment_response_includes_author(client):
     """Comments returned by the API must include the author object with email."""
     # Setup: project + image
-    pr = client.post("/api/projects/", json={"name": "CmtTest", "description": None, "meta_group_id": "g"})
+    pr = client.post(
+        "/api/projects/",
+        json={"name": "CmtTest", "description": None, "meta_group_id": "g"},
+    )
     assert pr.status_code == 201
     pid = pr.json()["id"]
 
@@ -31,7 +35,9 @@ def test_comment_response_includes_author(client):
 
     # The create response must include the author
     assert body.get("author") is not None, "author missing from create response"
-    assert body["author"].get("email") is not None, "author.email missing from create response"
+    assert body["author"].get("email") is not None, (
+        "author.email missing from create response"
+    )
 
     # List comments -- author must also be present
     lr = client.get(f"/api/images/{image_id}/comments")
@@ -40,4 +46,6 @@ def test_comment_response_includes_author(client):
     assert len(comments) >= 1
     for comment in comments:
         assert comment.get("author") is not None, "author missing from list response"
-        assert comment["author"].get("email") is not None, "author.email missing from list response"
+        assert comment["author"].get("email") is not None, (
+            "author.email missing from list response"
+        )

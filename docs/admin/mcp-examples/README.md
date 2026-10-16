@@ -23,10 +23,10 @@ To actually connect to a running VISTA MCP server from Atlas-UI-3 or another MCP
 1. Start the VISTA MCP server:
    ```bash
    cd backend
-   
+
    # Set API key
    export MCP_API_KEY="your-secure-api-key"
-   
+
    # Start server
    python mcp_server.py
    ```
@@ -35,19 +35,19 @@ To actually connect to a running VISTA MCP server from Atlas-UI-3 or another MCP
    ```python
    from mcp import ClientSession
    from mcp.client.sse import sse_client
-   
+
    # Connect via HTTP/SSE with API key authentication
    async with sse_client(
        url="http://localhost:8001/sse",
-       headers={"Authorization": "Bearer your-secure-api-key"}
+       headers={"Authorization": "Bearer your-secure-api-key"},
    ) as (read, write):
        async with ClientSession(read, write) as session:
            await session.initialize()
-           
+
            # Call tools
            result = await session.call_tool(
                "get_projects",
-               arguments={"username": "alice@example.com", "skip": 0, "limit": 10}
+               arguments={"username": "alice@example.com", "skip": 0, "limit": 10},
            )
    ```
 

@@ -62,6 +62,7 @@ services:
       - DEBUG=false
       - PYTHONUNBUFFERED=1
       - DISABLE_FILE_LOGGING=true
+      - CACHE_DIR=/app/.cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,7 +72,7 @@ services:
       - ./backend:/app/backend:ro
       - ./test:/app/test:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
-      - ./uv.lock:/app/uv.lock:ro
+      #- ./uv.lock:/app/uv.lock:ro
     working_dir: /app/backend
     command: >
       bash -c "
@@ -99,7 +100,7 @@ services:
     working_dir: /app/frontend
     environment:
       - CI=true
-    command: npm test -- --watchAll=false
+    command: npm test -- --watchAll=false --runInBand
     networks:
       - vista-test
 

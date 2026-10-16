@@ -1,7 +1,6 @@
 import pytest
 from core.config import settings
 from core.group_auth_helper import is_user_in_group
-from core import schemas
 
 
 def test_is_user_in_group_debug(monkeypatch):

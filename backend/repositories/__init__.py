@@ -1,0 +1,1 @@
+"""Domain-oriented database repositories."""

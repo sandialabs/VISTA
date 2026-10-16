@@ -1,6 +1,6 @@
 import io
 import uuid
-import pytest
+
 from PIL import Image
 
 
@@ -14,7 +14,9 @@ def _make_png_bytes(size=(10, 10), color=(0, 128, 255)):
 
 def test_create_and_list_image_classifications(client):
     # Create project
-    pr = client.post("/api/projects/", json={"name": "P5", "description": None, "meta_group_id": "g"})
+    pr = client.post(
+        "/api/projects/", json={"name": "P5", "description": None, "meta_group_id": "g"}
+    )
     assert pr.status_code == 201
     pid = pr.json()["id"]
 
@@ -54,20 +56,31 @@ def test_create_and_list_image_classifications(client):
 def test_delete_classification(client):
     """Any project member can delete a classification via the API."""
     # Setup: project, image, class, classification
-    pr = client.post("/api/projects/", json={"name": "DelTest", "description": None, "meta_group_id": "g"})
+    pr = client.post(
+        "/api/projects/",
+        json={"name": "DelTest", "description": None, "meta_group_id": "g"},
+    )
     assert pr.status_code == 201
     pid = pr.json()["id"]
 
     img_bytes = _make_png_bytes()
-    ur = client.post(f"/api/projects/{pid}/images", files={"file": ("d.png", img_bytes, "image/png")})
+    ur = client.post(
+        f"/api/projects/{pid}/images", files={"file": ("d.png", img_bytes, "image/png")}
+    )
     assert ur.status_code == 201
     image_id = ur.json()["id"]
 
-    cr = client.post(f"/api/projects/{pid}/classes", json={"name": "label", "description": None, "project_id": pid})
+    cr = client.post(
+        f"/api/projects/{pid}/classes",
+        json={"name": "label", "description": None, "project_id": pid},
+    )
     assert cr.status_code == 201
     class_id = cr.json()["id"]
 
-    clr = client.post(f"/api/images/{image_id}/classifications", json={"image_id": image_id, "class_id": class_id})
+    clr = client.post(
+        f"/api/images/{image_id}/classifications",
+        json={"image_id": image_id, "class_id": class_id},
+    )
     assert clr.status_code == 201
     classification_id = clr.json()["id"]
 

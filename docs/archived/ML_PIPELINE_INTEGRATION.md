@@ -106,30 +106,28 @@ import time
 import json
 import requests
 
+
 def generate_hmac_headers(body_dict: dict, secret: str) -> dict:
     """Generate HMAC headers for pipeline API requests."""
     # Serialize body to JSON bytes
-    body_bytes = json.dumps(body_dict).encode('utf-8')
+    body_bytes = json.dumps(body_dict).encode("utf-8")
 
     # Current timestamp
     timestamp = str(int(time.time()))
 
     # Construct message: timestamp + '.' + body
-    message = timestamp.encode('utf-8') + b'.' + body_bytes
+    message = timestamp.encode("utf-8") + b"." + body_bytes
 
     # Compute HMAC-SHA256
-    mac = hmac.new(
-        secret.encode('utf-8'),
-        msg=message,
-        digestmod=hashlib.sha256
-    )
+    mac = hmac.new(secret.encode("utf-8"), msg=message, digestmod=hashlib.sha256)
 
     # Return headers
     return {
-        'X-ML-Signature': f'sha256={mac.hexdigest()}',
-        'X-ML-Timestamp': timestamp,
-        'Content-Type': 'application/json'
+        "X-ML-Signature": f"sha256={mac.hexdigest()}",
+        "X-ML-Timestamp": timestamp,
+        "Content-Type": "application/json",
     }
+
 
 # Usage
 secret = "your_secret_key"
@@ -137,9 +135,7 @@ payload = {"status": "completed"}
 headers = generate_hmac_headers(payload, secret)
 
 response = requests.post(
-    'http://localhost:8000/api/analyses/{id}/finalize',
-    json=payload,
-    headers=headers
+    "http://localhost:8000/api/analyses/{id}/finalize", json=payload, headers=headers
 )
 ```
 
@@ -269,9 +265,7 @@ payload = {"status": "processing"}
 headers = generate_hmac_headers(payload, secret)
 
 response = requests.patch(
-    f'{API_BASE_URL}/api/analyses/{analysis_id}/status',
-    json=payload,
-    headers=headers
+    f"{API_BASE_URL}/api/analyses/{analysis_id}/status", json=payload, headers=headers
 )
 ```
 
@@ -312,18 +306,16 @@ response = requests.patch(
 payload = {"artifact_type": "heatmap", "filename": "heatmap.png"}
 headers = generate_hmac_headers(payload, secret)
 resp = requests.post(
-    f'{API_BASE_URL}/api/analyses/{analysis_id}/artifacts/presign',
+    f"{API_BASE_URL}/api/analyses/{analysis_id}/artifacts/presign",
     json=payload,
-    headers=headers
+    headers=headers,
 )
 presign_data = resp.json()
 
 # Upload artifact directly to S3
-with open('heatmap.png', 'rb') as f:
+with open("heatmap.png", "rb") as f:
     requests.put(
-        presign_data['upload_url'],
-        data=f,
-        headers={'Content-Type': 'image/png'}
+        presign_data["upload_url"], data=f, headers={"Content-Type": "image/png"}
     )
 ```
 
@@ -585,6 +577,7 @@ import time
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
+
 def requests_retry_session(
     retries=3,
     backoff_factor=0.3,
@@ -599,9 +592,10 @@ def requests_retry_session(
         status_forcelist=status_forcelist,
     )
     adapter = HTTPAdapter(max_retries=retry)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
     return session
+
 
 # Usage
 session = requests_retry_session()

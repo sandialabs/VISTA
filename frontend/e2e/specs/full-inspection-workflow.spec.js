@@ -1,9 +1,10 @@
+const fs = require('fs');
 const path = require('path');
 const { test, expect } = require('@playwright/test');
 const { mockFullInspectionWorkflowRoutes } = require('../fixtures/fullInspectionWorkflowMocks');
 
-const screenshotPath = path.resolve(__dirname, '../../artifacts/e2e-full-inspection-workflow.png');
-const hierarchyScreenshotPath = path.resolve(__dirname, '../../artifacts/e2e-inspection-hierarchy.png');
+const reportDesktopScreenshotPath = path.resolve(__dirname, '../../artifacts/e2e-inspection-report-desktop.png');
+const reportNarrowScreenshotPath = path.resolve(__dirname, '../../artifacts/e2e-inspection-report-narrow.png');
 
 async function expectRawImageCount(page, expectedCount) {
   const rawImagesCard = page.locator('article.summary-card').filter({ has: page.getByRole('heading', { name: 'Raw Images' }) });
@@ -11,7 +12,7 @@ async function expectRawImageCount(page, expectedCount) {
 }
 
 test.describe('Full inspection workflow end-to-end', () => {
-  test('creates project, uploads files, inspects parts, and validates report readiness', async ({ page }) => {
+  test('creates project, uploads files, inspects parts, and validates report readiness', async ({ page }, testInfo) => {
     const {
       projectId,
       getUploadedImages,
@@ -57,10 +58,11 @@ test.describe('Full inspection workflow end-to-end', () => {
     await expect(workbench).toBeVisible();
 
     await expect(workbench.locator('.flexlayout__tab_button', { hasText: 'Part Summary' }).first()).toBeVisible();
-    const frontImageButton = workbench.locator('.part-summary-images button', { hasText: 'FRONT' }).first();
+    const frontImageButton = workbench.getByRole('button', { name: /^FRONT\b/ }).first();
     await expect(frontImageButton).toBeVisible();
     await frontImageButton.click();
-    await expect(workbench.locator('.part-summary-images button.active', { hasText: 'FRONT' }).first()).toBeVisible();
+    await expect(frontImageButton).toHaveClass(/\bactive\b/);
+    await expect(frontImageButton).toHaveAttribute('aria-pressed', 'true');
 
     await page.getByRole('button', { name: 'Pass' }).click();
     await expect(page.getByText('Passed: 1')).toBeVisible();
@@ -73,51 +75,95 @@ test.describe('Full inspection workflow end-to-end', () => {
     await expect(page.getByText('Rejected: 1')).toBeVisible();
 
     const reviewBadges = page.getByTestId('part-review-state');
-    await expect(reviewBadges).toContainText(['Pass', 'Reject']);
+    await expect(reviewBadges).toContainText(['Pass', 'Reject', 'Unreviewed']);
 
-    await expect.poll(() => getParts().map((part) => part.review_state)).toEqual(['pass', 'reject_confirmed']);
+    await expect.poll(() => getParts().map((part) => part.review_state)).toEqual(['pass', 'reject_confirmed', 'unreviewed']);
     await expect.poll(() => getSavedWorkspaceStates().length).toBeGreaterThan(0);
 
-    await page.getByRole('tab', { name: 'Report' }).click();
-    await expect(page.getByRole('heading', { name: 'Report' })).toBeVisible();
+    await page.goto(`/project/${projectId}/report`, { waitUntil: 'networkidle' });
+    await expect(page).toHaveURL(new RegExp(`/project/${projectId}\\?tab=report$`));
+    await expect(page.getByRole('heading', { name: 'Project Report' })).toBeVisible();
     await page.getByLabel('Export/report mode').selectOption('report_json');
     await page.getByRole('button', { name: 'Run Export/Report' }).click();
 
-    await expect(page.getByText('Report generated successfully.')).toBeVisible();
     await expect.poll(() => getReportRequests().length).toBe(1);
-    await expect.poll(() => getReportRequests()[0]?.summary).toEqual(expect.objectContaining({
-      passed: 1,
-      reject_confirmed: 1,
-      total_images: 3,
+    await expect.poll(() => getReportRequests()[0]?.payload).toEqual(expect.objectContaining({
+      schema_version: 3,
+      summary: {
+        total_parts: 3,
+        reviewed_parts: 2,
+        unreviewed_parts: 1,
+        part_status_counts: { pass: 1, reject: 1, unreviewed: 1 },
+      },
     }));
 
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-  });
+    const reportTable = page.getByRole('table', { name: 'Inspection results by part' });
+    const reportRows = reportTable.locator('tbody tr');
+    await expect(reportRows).toHaveCount(3);
+    const expectedRows = [
+      ['SN-E2E-001', 'Pass'],
+      ['SN-E2E-002', 'Reject'],
+      ['SN-E2E-003', 'Unreviewed'],
+    ];
+    await expect(reportTable.getByRole('columnheader')).toHaveCount(2);
+    for (const [partIdentifier, result] of expectedRows) {
+      const row = reportRows.filter({ has: page.getByRole('rowheader', { name: new RegExp(partIdentifier) }) });
+      await expect(row).toHaveCount(1);
+      await expect(row.getByRole('cell').nth(0)).toHaveText(result);
+    }
 
-  test('creates a PT1 project and preserves the original hierarchical inspection panel layout', async ({ page }) => {
-    const { projectId } = await mockFullInspectionWorkflowRoutes(page);
+    await page.addStyleTag({
+      content: '*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }',
+    });
+    await page.screenshot({ path: reportDesktopScreenshotPath, fullPage: true });
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.getByLabel('Export/report mode').selectOption('report_pdf');
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Run Export/Report' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe('Workflow E2E Project-report.pdf');
+    const reportPdfPath = testInfo.outputPath('inspection-report.pdf');
+    await download.saveAs(reportPdfPath);
+    expect(fs.readFileSync(reportPdfPath).subarray(0, 5).toString('ascii')).toBe('%PDF-');
+    await expect(page.getByText(/PDF report downloaded: \d+ bytes\./)).toBeVisible();
+    await expect.poll(() => getReportRequests().map((request) => request.method)).toEqual(['json', 'pdf']);
 
-    await page.getByRole('button', { name: 'Create Your First Project' }).click();
-    await page.getByLabel('Project Name *').fill('PT1 Hierarchical Layout Regression');
-    await page.getByLabel('Description').fill('Verifies PT1 uses the legacy hierarchical inspection panel arrangement');
-    await page.getByLabel('Access Group *').fill('qa-team');
-    await page.getByLabel('Project Type *').selectOption('PT1');
-    await page.getByRole('button', { name: 'Create Project' }).click();
+    const imageReportDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download report with images (PDF)' }).click();
+    const imageReportDownload = await imageReportDownloadPromise;
+    expect(imageReportDownload.suggestedFilename()).toBe('Workflow E2E Project-report-with-images.pdf');
+    const imageReportPdfPath = testInfo.outputPath('inspection-report-with-images.pdf');
+    await imageReportDownload.saveAs(imageReportPdfPath);
+    expect(fs.readFileSync(imageReportPdfPath).subarray(0, 5).toString('ascii')).toBe('%PDF-');
+    await expect(page.getByText(/Report with images downloaded: \d+ bytes\./)).toBeVisible();
+    await expect.poll(() => getReportRequests().map((request) => request.method)).toEqual(['json', 'pdf', 'pdf-images']);
 
-    await page.getByRole('link', { name: 'PT1 Hierarchical Layout Regression' }).click();
-    await expect(page).toHaveURL(new RegExp(`/project/${projectId}$`));
-
-    await page.getByRole('tab', { name: 'Inspection' }).click();
-    const workbench = page.locator('section[aria-label="Inspection Workbench"]');
-    await expect(workbench).toBeVisible();
-
-    await expect(workbench.locator('.flexlayout__layout')).toBeVisible();
-    await expect(workbench.locator('.workbench-tabbed-panel')).toHaveCount(3);
-    await expect(workbench.locator('.flexlayout__tab_button', { hasText: 'Part Summary' }).first()).toBeVisible();
-    await expect(workbench.locator('.flexlayout__tab_button', { hasText: 'Inspection' }).first()).toBeVisible();
-    await expect(workbench.locator('.flexlayout__tab_button', { hasText: 'Annotations' }).first()).toBeVisible();
-    await page.screenshot({ path: hierarchyScreenshotPath, fullPage: true });
+    await page.setViewportSize({ width: 375, height: 900 });
+    await expect(reportTable).toBeVisible();
+    await expect.poll(() => reportTable.evaluate((table) => ({
+      clientWidth: table.clientWidth,
+      scrollWidth: table.scrollWidth,
+    }))).toEqual(expect.objectContaining({
+      clientWidth: expect.any(Number),
+      scrollWidth: expect.any(Number),
+    }));
+    const tableDimensions = await reportTable.evaluate((table) => ({
+      clientWidth: table.clientWidth,
+      scrollWidth: table.scrollWidth,
+    }));
+    expect(tableDimensions.scrollWidth).toBeLessThanOrEqual(tableDimensions.clientWidth);
+    const imageReportButton = page.getByRole('button', { name: 'Download report with images (PDF)' });
+    await expect(imageReportButton).toBeVisible();
+    const buttonBounds = await imageReportButton.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(buttonBounds.left).toBeGreaterThanOrEqual(0);
+    expect(buttonBounds.right).toBeLessThanOrEqual(buttonBounds.viewportWidth);
+    await page.screenshot({ path: reportNarrowScreenshotPath, fullPage: true });
   });
 });

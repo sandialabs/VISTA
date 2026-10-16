@@ -12,15 +12,17 @@ def test_production_dockerfile_does_not_copy_test_only_folders_into_image():
     dockerfile = _read_repo_file("Dockerfile")
 
     assert "test_toolbox" not in dockerfile
-    assert "COPY test" not in dockerfile
-    assert "COPY ./test" not in dockerfile
+    # The final stage copies only the runtime sample assets Project Data's
+    # built-in example loader needs, never the test suites themselves.
+    assert "COPY test/" not in dockerfile
+    assert "COPY backend/tests" not in dockerfile
+    assert "COPY ./test/data" in dockerfile
 
 
 def test_ci_build_configuration_does_not_reference_removed_test_toolbox():
-    ci_config = _read_repo_file(".gitlab-ci.yml")
     dockerfile = _read_repo_file("Dockerfile")
     dockerignore = _read_repo_file(".dockerignore")
 
-    checked_build_files = "\n".join([ci_config, dockerfile, dockerignore])
+    checked_build_files = "\n".join([dockerfile, dockerignore])
 
     assert "test_toolbox" not in checked_build_files

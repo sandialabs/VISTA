@@ -17,7 +17,7 @@ Minimal Kubernetes manifests for testing deployment on minikube.
 minikube start
 
 # Build and load image
-podman build -t vista:latest .
+podman build --ignorefile Dockerfile.dockerignore -t vista:latest .
 minikube image load vista:latest
 
 # Deploy all components
@@ -39,4 +39,4 @@ kubectl delete -f deployment-test/
 - Uses emptyDir volumes (data will not persist)
 - Default credentials for testing only
 - NodePort service for easy access
-- Health checks assume `/health` endpoint exists
+- Health checks use the backend `/api/health` endpoint

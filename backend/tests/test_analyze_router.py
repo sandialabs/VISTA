@@ -3,6 +3,7 @@ import io
 
 import pytest
 from PIL import Image
+
 from core.config import settings
 
 
@@ -22,8 +23,15 @@ def _overlay_png_base64():
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def _without_native_segmentation_runtime(monkeypatch):
+    monkeypatch.setattr(settings, "VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME", True)
+
+
 def _create_project_with_part_image(client):
-    headers = {"X-User-Id": "analyze-user@example.com", "X-User-Groups": '["analyze-group"]'}
+    headers = {
+        "X-User-Id": "analyze-user@example.com",
+        "X-User-Groups": '["analyze-group"]',
+    }
     project_resp = client.post(
         "/api/projects/",
         json={
@@ -40,7 +48,11 @@ def _create_project_with_part_image(client):
     image_resp = client.post(
         f"/api/projects/{project_id}/images",
         files={"file": ("slice-002.png", _png_bytes(), "image/png")},
-        data={"metadata": '{"modality":"ct","slice_index":2,"slice_axis":"axial","analysis_inline_image_base64":"' + base64.b64encode(_png_bytes().getvalue()).decode("ascii") + '"}'},
+        data={
+            "metadata": '{"modality":"ct","slice_index":2,"slice_axis":"axial","analysis_inline_image_base64":"'
+            + base64.b64encode(_png_bytes().getvalue()).decode("ascii")
+            + '"}'
+        },
         headers=headers,
     )
     assert image_resp.status_code == 201, image_resp.text
@@ -69,7 +81,9 @@ def _create_project_with_part_image(client):
     return headers, project_id, image
 
 
-def test_analyze_toolbox_manifest_contains_segmentation_placeholders_and_core_image_methods(client):
+def test_analyze_toolbox_manifest_contains_segmentation_placeholders_and_core_image_methods(
+    client,
+):
     resp = client.get("/api/analyze/toolbox")
     assert resp.status_code == 200, resp.text
     payload = resp.json()
@@ -79,6 +93,29 @@ def test_analyze_toolbox_manifest_contains_segmentation_placeholders_and_core_im
     assert "segmentation.anomalib.placeholder" in method_ids
     assert "segmentation.sam.placeholder" in method_ids
     assert "segmentation.opencv.placeholder" in method_ids
+    for method_id, model_family in (
+        ("segmentation.yolo.placeholder", "yolo"),
+        ("segmentation.anomalib.placeholder", "anomalib"),
+        ("segmentation.sam.placeholder", "sam"),
+    ):
+        method = next(
+            method for method in payload["methods"] if method["id"] == method_id
+        )
+        checkpoints = method["available_checkpoints"]
+        assert len(checkpoints) == 1
+        assert checkpoints[0]["model_family"] == model_family
+        assert checkpoints[0]["available"] is True
+    opencv_method = next(
+        method
+        for method in payload["methods"]
+        if method["id"] == "segmentation.opencv.placeholder"
+    )
+    opencv_options = next(
+        parameter
+        for parameter in opencv_method["parameters"]
+        if parameter["name"] == "options"
+    )
+    assert opencv_options["default"] == {"min_peak_distance_px": 1}
     assert "ml.yolov8.detect" not in method_ids
     assert "ml.yolov8.segment" not in method_ids
     assert "ml.yolo.ultralytics" not in method_ids
@@ -88,7 +125,11 @@ def test_analyze_toolbox_manifest_contains_segmentation_placeholders_and_core_im
     assert "output.versioned_image_artifact" in method_ids
     assert "preprocess.window_level_normalization" in method_ids
     assert "segmentation.watershed_seeds" not in method_ids
-    region_method = next(method for method in payload["methods"] if method["id"] == "measure.region_properties")
+    region_method = next(
+        method
+        for method in payload["methods"]
+        if method["id"] == "measure.region_properties"
+    )
     assert region_method["name"] == "Region Properties (placeholder)"
     assert "filter.gaussian_blur" not in method_ids
     assert "filter.median" not in method_ids
@@ -99,7 +140,9 @@ def test_analyze_toolbox_manifest_contains_segmentation_placeholders_and_core_im
 def test_analyze_input_source_defaults_to_loaded_part_images(client):
     headers, project_id, image = _create_project_with_part_image(client)
 
-    resp = client.get(f"/api/projects/{project_id}/analyze/input-source", headers=headers)
+    resp = client.get(
+        f"/api/projects/{project_id}/analyze/input-source", headers=headers
+    )
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["source"]["kind"] == "project_parts"
@@ -110,15 +153,26 @@ def test_analyze_input_source_defaults_to_loaded_part_images(client):
     assert payload["images"][0]["slice_index"] == 2
 
 
-def test_analyze_workflow_validation_and_execution_use_pydantic_contract(client):
+@pytest.mark.smoke
+def test_analyze_workflow_validation_and_execution_use_pydantic_contract(
+    client, monkeypatch
+):
+    _without_native_segmentation_runtime(monkeypatch)
     headers, project_id, _image = _create_project_with_part_image(client)
-    source_resp = client.get(f"/api/projects/{project_id}/analyze/input-source", headers=headers)
+    source_resp = client.get(
+        f"/api/projects/{project_id}/analyze/input-source", headers=headers
+    )
     source = source_resp.json()["source"]
     workflow = {
         "name": "QA workflow",
         "source": source,
         "nodes": [
-            {"id": "input", "method_id": "source.project_part_images", "label": "Input", "parameters": {}},
+            {
+                "id": "input",
+                "method_id": "source.project_part_images",
+                "label": "Input",
+                "parameters": {},
+            },
             {
                 "id": "window",
                 "method_id": "preprocess.window_level_normalization",
@@ -164,31 +218,53 @@ def test_analyze_workflow_validation_and_execution_use_pydantic_contract(client)
         },
     }
 
-    validate_resp = client.post(f"/api/projects/{project_id}/analyze/workflows/validate", json=workflow, headers=headers)
+    validate_resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/validate",
+        json=workflow,
+        headers=headers,
+    )
     assert validate_resp.status_code == 200, validate_resp.text
     assert validate_resp.json()["status"] == "validated"
     assert len(validate_resp.json()["node_results"]) == 4
 
-    execute_resp = client.post(f"/api/projects/{project_id}/analyze/workflows/execute", json=workflow, headers=headers)
+    execute_resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/execute",
+        json=workflow,
+        headers=headers,
+    )
     assert execute_resp.status_code == 200, execute_resp.text
     assert execute_resp.json()["status"] == "completed"
     assert execute_resp.json()["execution_mode"] == "execution"
     assert execute_resp.json()["image_count"] == 1
-    assert any("YOLO model 'yolov8n.pt' was not used" in warning for warning in execute_resp.json()["warnings"])
-    yolo_node = next(node for node in execute_resp.json()["node_results"] if node["node_id"] == "yolo")
+    assert any(
+        "YOLO model 'yolov8n.pt' was not used" in warning
+        for warning in execute_resp.json()["warnings"]
+    )
+    yolo_node = next(
+        node
+        for node in execute_resp.json()["node_results"]
+        if node["node_id"] == "yolo"
+    )
     assert yolo_node["status"] == "skipped"
     assert yolo_node["summary"]["runtime"] == "unavailable"
     assert yolo_node["summary"]["detection_count"] == 0
 
     workflow["nodes"][1]["method_id"] = "missing.method"
-    reject_resp = client.post(f"/api/projects/{project_id}/analyze/workflows/validate", json=workflow, headers=headers)
+    reject_resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/validate",
+        json=workflow,
+        headers=headers,
+    )
     assert reject_resp.status_code == 400
     detail = reject_resp.json()["detail"]
     message = detail.get("message") if isinstance(detail, dict) else detail
     assert "Unknown toolbox method" in message
 
 
-def test_analyze_workflow_yolov8_detection_suppresses_overlay_when_runtime_unavailable(client):
+def test_analyze_workflow_yolov8_detection_suppresses_overlay_when_runtime_unavailable(
+    client, monkeypatch
+):
+    _without_native_segmentation_runtime(monkeypatch)
     headers, project_id, image = _create_project_with_part_image(client)
     workflow = {
         "name": "YOLO detection overlay regression",
@@ -203,7 +279,12 @@ def test_analyze_workflow_yolov8_detection_suppresses_overlay_when_runtime_unava
             "part_count": 1,
         },
         "nodes": [
-            {"id": "input", "method_id": "source.project_part_images", "label": "Input", "parameters": {}},
+            {
+                "id": "input",
+                "method_id": "source.project_part_images",
+                "label": "Input",
+                "parameters": {},
+            },
             {
                 "id": "yolo",
                 "method_id": "ml.yolov8.detect",
@@ -224,17 +305,31 @@ def test_analyze_workflow_yolov8_detection_suppresses_overlay_when_runtime_unava
         "output": {"mode": "overlay_artifact", "version_strategy": "recipe_metadata"},
     }
 
-    resp = client.post(f"/api/projects/{project_id}/analyze/workflows/execute", json=workflow, headers=headers)
+    resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/execute",
+        json=workflow,
+        headers=headers,
+    )
 
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["status"] == "completed"
-    assert any("Ultralytics runtime is unavailable" in warning for warning in payload["warnings"])
-    assert not any("Attached 1 Analyze overlay output" in warning for warning in payload["warnings"])
-    yolo_node = next(node for node in payload["node_results"] if node["node_id"] == "yolo")
+    assert any(
+        "Ultralytics runtime is unavailable" in warning
+        for warning in payload["warnings"]
+    )
+    assert not any(
+        "Attached 1 Analyze overlay output" in warning
+        for warning in payload["warnings"]
+    )
+    yolo_node = next(
+        node for node in payload["node_results"] if node["node_id"] == "yolo"
+    )
     assert yolo_node["status"] == "skipped"
     assert yolo_node["summary"]["runtime"] == "unavailable"
-    output_node = next(node for node in payload["node_results"] if node["node_id"] == "output")
+    output_node = next(
+        node for node in payload["node_results"] if node["node_id"] == "output"
+    )
     assert output_node["status"] == "skipped"
     assert output_node["summary"]["artifact_count"] == 0
     assert output_node["artifacts"] == []
@@ -246,16 +341,26 @@ def test_analyze_workflow_yolov8_detection_suppresses_overlay_when_runtime_unava
 
 
 @pytest.mark.asyncio
-async def test_analyze_workflow_uses_configured_model_service_and_preserves_yolo_labels(monkeypatch):
-    from routers import analyze as analyze_router
+async def test_analyze_workflow_uses_configured_model_service_and_preserves_yolo_labels(
+    monkeypatch,
+):
     from backend.analyze_toolbox import WorkflowGraph, WorkflowImageInput
+
+    from routers import analyze as analyze_router
 
     image_id = "11111111-1111-4111-8111-111111111111"
     detection = {
         "class_id": 0,
         "class_name": "person",
         "confidence": 0.93,
-        "bbox": {"x": 1, "y": 1, "width": 4, "height": 5, "image_width": 12, "image_height": 12},
+        "bbox": {
+            "x": 1,
+            "y": 1,
+            "width": 4,
+            "height": 5,
+            "image_width": 12,
+            "image_height": 12,
+        },
     }
     captured_payload = {}
 
@@ -337,14 +442,28 @@ async def test_analyze_workflow_uses_configured_model_service_and_preserves_yolo
             captured_payload["json"] = json
             return FakeResponse()
 
-    monkeypatch.setattr(analyze_router, "settings", settings.patch({"TOOLBOX_MODEL_SERVICE_URL": "http://toolbox-models:8010"}))
+    monkeypatch.setattr(
+        analyze_router,
+        "settings",
+        settings.patch({"TOOLBOX_MODEL_SERVICE_URL": "http://toolbox-models:8010"}),
+    )
     monkeypatch.setattr(analyze_router.httpx, "AsyncClient", FakeAsyncClient)
 
     workflow = WorkflowGraph(
         name="YOLO detection via model service",
-        source={"kind": "manual_selection", "selected_image_ids": [image_id], "image_count": 1, "part_count": 1},
+        source={
+            "kind": "manual_selection",
+            "selected_image_ids": [image_id],
+            "image_count": 1,
+            "part_count": 1,
+        },
         nodes=[
-            {"id": "input", "method_id": "source.project_part_images", "label": "Input", "parameters": {}},
+            {
+                "id": "input",
+                "method_id": "source.project_part_images",
+                "label": "Input",
+                "parameters": {},
+            },
             {
                 "id": "yolo",
                 "method_id": "ml.yolov8.detect",
@@ -354,12 +473,21 @@ async def test_analyze_workflow_uses_configured_model_service_and_preserves_yolo
         ],
         edges=[{"source_node": "input", "target_node": "yolo"}],
     )
-    result = await analyze_router._execute_workflow_via_model_service(
+    result = await analyze_router._execute_workflow_with_fallback(
         workflow,
-        [WorkflowImageInput(image_id=image_id, filename="slice.png", content_type="image/png", data=_png_bytes().getvalue())],
+        [
+            WorkflowImageInput(
+                image_id=image_id,
+                filename="slice.png",
+                content_type="image/png",
+                data=_png_bytes().getvalue(),
+            )
+        ],
+        cancel_check=None,
+        remote_job_callback=None,
     )
 
-    assert result is not None
+    assert not result.warnings
     assert captured_payload["url"] == "http://toolbox-models:8010/workflows/execute"
     assert captured_payload["json"]["images"][0]["data_base64"]
     yolo_node = next(node for node in result.node_results if node.node_id == "yolo")
@@ -399,13 +527,20 @@ def test_analyze_workflow_manual_selection_counts_selected_images(client):
         "edges": [{"source_node": "input", "target_node": "output"}],
         "output": {"mode": "overlay_artifact", "version_strategy": "recipe_metadata"},
     }
-    resp = client.post(f"/api/projects/{project_id}/analyze/workflows/execute", json=workflow, headers=headers)
+    resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/execute",
+        json=workflow,
+        headers=headers,
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "completed"
     assert resp.json()["image_count"] == 1
 
 
-def test_analyze_workflow_yolov8_instance_segmentation_suppresses_overlay_when_runtime_unavailable(client):
+def test_analyze_workflow_yolov8_instance_segmentation_suppresses_overlay_when_runtime_unavailable(
+    client, monkeypatch
+):
+    _without_native_segmentation_runtime(monkeypatch)
     headers, project_id, image = _create_project_with_part_image(client)
     workflow = {
         "name": "YOLOv8 instance segmentation",
@@ -420,7 +555,12 @@ def test_analyze_workflow_yolov8_instance_segmentation_suppresses_overlay_when_r
             "part_count": 1,
         },
         "nodes": [
-            {"id": "input", "method_id": "source.project_part_images", "label": "Input", "parameters": {}},
+            {
+                "id": "input",
+                "method_id": "source.project_part_images",
+                "label": "Input",
+                "parameters": {},
+            },
             {
                 "id": "segment",
                 "method_id": "ml.yolov8.segment",
@@ -441,23 +581,39 @@ def test_analyze_workflow_yolov8_instance_segmentation_suppresses_overlay_when_r
         "output": {"mode": "overlay_artifact", "version_strategy": "recipe_metadata"},
     }
 
-    resp = client.post(f"/api/projects/{project_id}/analyze/workflows/execute", json=workflow, headers=headers)
+    resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/execute",
+        json=workflow,
+        headers=headers,
+    )
 
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["status"] == "completed"
-    assert any("YOLO model 'yolov8n-seg.pt' was not used" in warning for warning in payload["warnings"])
-    assert not any("Attached 1 Analyze overlay output" in warning for warning in payload["warnings"])
-    segment_node = next(node for node in payload["node_results"] if node["node_id"] == "segment")
+    assert any(
+        "YOLO model 'yolov8n-seg.pt' was not used" in warning
+        for warning in payload["warnings"]
+    )
+    assert not any(
+        "Attached 1 Analyze overlay output" in warning
+        for warning in payload["warnings"]
+    )
+    segment_node = next(
+        node for node in payload["node_results"] if node["node_id"] == "segment"
+    )
     assert segment_node["status"] == "skipped"
     assert segment_node["summary"]["runtime"] == "unavailable"
-    output_node = next(node for node in payload["node_results"] if node["node_id"] == "output")
+    output_node = next(
+        node for node in payload["node_results"] if node["node_id"] == "output"
+    )
     assert output_node["status"] == "skipped"
     assert output_node["summary"]["artifact_count"] == 0
     assert output_node["artifacts"] == []
 
 
-def test_analyze_workflow_uses_server_source_counts_and_rejects_cross_project_source(client):
+def test_analyze_workflow_uses_server_source_counts_and_rejects_cross_project_source(
+    client,
+):
     headers, project_id, _image = _create_project_with_part_image(client)
     workflow = {
         "name": "Mismatched source workflow",
@@ -469,15 +625,30 @@ def test_analyze_workflow_uses_server_source_counts_and_rejects_cross_project_so
             "image_count": 9999,
             "part_count": 9999,
         },
-        "nodes": [{"id": "input", "method_id": "source.project_part_images", "label": "Input", "parameters": {}}],
+        "nodes": [
+            {
+                "id": "input",
+                "method_id": "source.project_part_images",
+                "label": "Input",
+                "parameters": {},
+            }
+        ],
         "edges": [],
     }
-    resp = client.post(f"/api/projects/{project_id}/analyze/workflows/validate", json=workflow, headers=headers)
+    resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/validate",
+        json=workflow,
+        headers=headers,
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json()["image_count"] == 1
 
     workflow["source"]["project_id"] = "00000000-0000-0000-0000-000000000000"
-    mismatch_resp = client.post(f"/api/projects/{project_id}/analyze/workflows/validate", json=workflow, headers=headers)
+    mismatch_resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/validate",
+        json=workflow,
+        headers=headers,
+    )
     assert mismatch_resp.status_code == 400
     detail = mismatch_resp.json()["detail"]
     message = detail.get("message") if isinstance(detail, dict) else detail
@@ -532,7 +703,9 @@ def test_delete_and_restore_analyze_overlay_accept_non_uuid_overlay_image_ids(cl
     )
     assert delete_resp.status_code == 200, delete_resp.text
     deleted_overlay = next(
-        record for record in delete_resp.json()["metadata"]["analysis_outputs"] if record.get("image_id") == "overlay-image-1"
+        record
+        for record in delete_resp.json()["metadata"]["analysis_outputs"]
+        if record.get("image_id") == "overlay-image-1"
     )
     assert deleted_overlay["overlay_delete_candidate"] is True
 
@@ -542,7 +715,9 @@ def test_delete_and_restore_analyze_overlay_accept_non_uuid_overlay_image_ids(cl
     )
     assert restore_resp.status_code == 200, restore_resp.text
     restored_overlay = next(
-        record for record in restore_resp.json()["metadata"]["analysis_outputs"] if record.get("image_id") == "overlay-image-1"
+        record
+        for record in restore_resp.json()["metadata"]["analysis_outputs"]
+        if record.get("image_id") == "overlay-image-1"
     )
     assert "overlay_delete_candidate" not in restored_overlay
 
@@ -562,13 +737,21 @@ def test_delete_analyze_overlay_rejects_original_project_images(client):
 
 def test_analyze_workflow_allows_multiple_input_rooted_processing_chains(client):
     headers, project_id, _image = _create_project_with_part_image(client)
-    source_resp = client.get(f"/api/projects/{project_id}/analyze/input-source", headers=headers)
+    source_resp = client.get(
+        f"/api/projects/{project_id}/analyze/input-source", headers=headers
+    )
     source = source_resp.json()["source"]
     workflow = {
         "name": "Parallel chains",
         "source": source,
         "nodes": [
-            {"id": "input-1", "method_id": "source.project_part_images", "label": "Input", "chain_id": "chain-1", "parameters": {}},
+            {
+                "id": "input-1",
+                "method_id": "source.project_part_images",
+                "label": "Input",
+                "chain_id": "chain-1",
+                "parameters": {},
+            },
             {
                 "id": "yolo",
                 "method_id": "ml.yolov8.detect",
@@ -576,7 +759,13 @@ def test_analyze_workflow_allows_multiple_input_rooted_processing_chains(client)
                 "chain_id": "chain-1",
                 "parameters": {"model": "yolov8n.pt", "confidence": 0.25},
             },
-            {"id": "input-2", "method_id": "source.project_part_images", "label": "Input 2", "chain_id": "chain-2", "parameters": {}},
+            {
+                "id": "input-2",
+                "method_id": "source.project_part_images",
+                "label": "Input 2",
+                "chain_id": "chain-2",
+                "parameters": {},
+            },
             {
                 "id": "segment",
                 "method_id": "segmentation.watershed_seeds",
@@ -592,14 +781,21 @@ def test_analyze_workflow_allows_multiple_input_rooted_processing_chains(client)
         "output": {"mode": "processing_sequence"},
     }
 
-    validate_resp = client.post(f"/api/projects/{project_id}/analyze/workflows/validate", json=workflow, headers=headers)
+    validate_resp = client.post(
+        f"/api/projects/{project_id}/analyze/workflows/validate",
+        json=workflow,
+        headers=headers,
+    )
     assert validate_resp.status_code == 200, validate_resp.text
     assert validate_resp.json()["status"] == "validated"
     assert len(validate_resp.json()["node_results"]) == 4
 
 
 def test_analyze_input_source_skips_stale_filename_only_sources(client):
-    headers = {"X-User-Id": "analyze-stale@example.com", "X-User-Groups": '["analyze-stale"]'}
+    headers = {
+        "X-User-Id": "analyze-stale@example.com",
+        "X-User-Groups": '["analyze-stale"]',
+    }
     project_resp = client.post(
         "/api/projects/",
         json={
@@ -616,13 +812,17 @@ def test_analyze_input_source_skips_stale_filename_only_sources(client):
         f"/api/projects/{project_id}/parts",
         json={
             "serial_number": "STALE-001",
-            "metadata": {"source_images": [{"filename": "missing.png", "modality": "visible"}]},
+            "metadata": {
+                "source_images": [{"filename": "missing.png", "modality": "visible"}]
+            },
         },
         headers=headers,
     )
     assert part_resp.status_code == 201, part_resp.text
 
-    source_resp = client.get(f"/api/projects/{project_id}/analyze/input-source", headers=headers)
+    source_resp = client.get(
+        f"/api/projects/{project_id}/analyze/input-source", headers=headers
+    )
     assert source_resp.status_code == 200, source_resp.text
     assert source_resp.json()["source"]["part_count"] == 1
     assert source_resp.json()["source"]["image_count"] == 0

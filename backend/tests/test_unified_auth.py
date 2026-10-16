@@ -3,33 +3,33 @@ Tests for the unified authentication system introduced by the unified-auth branc
 
 Covers:
 - API key authentication flow (valid key, invalid key, deactivated key)
-- require_proxy_user rejecting Bearer tokens on sensitive endpoints
+- require_authenticated_user rejecting Bearer tokens on sensitive endpoints
 - Production mode proxy header validation
 - Auth method tracking on request.state
-- Log injection sanitization in crud._sanitize_log_value
+- Log injection sanitization in repositories.audit._sanitize_log_value
 - Error message consistency
 """
 
 import uuid
-import pytest
 from types import SimpleNamespace
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 from fastapi.security import HTTPAuthorizationCredentials
 
+from repositories.audit import _sanitize_log_value, log_db_operation
 from utils.dependencies import (
-    get_current_user,
-    require_proxy_user,
-    verify_api_key,
-    hash_api_key,
     generate_api_key,
+    get_current_user,
+    hash_api_key,
+    require_authenticated_user,
+    verify_api_key,
 )
-from utils.crud import _sanitize_log_value, log_db_operation
-from core.config import settings
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_request(headers=None):
     """Build a minimal mock Request."""
@@ -66,6 +66,7 @@ def _make_api_key_record(user, key_hash, active=True):
 # API key authentication flow
 # ---------------------------------------------------------------------------
 
+
 class TestApiKeyAuth:
     """Test Bearer-token (API key) authentication through get_current_user."""
 
@@ -81,14 +82,18 @@ class TestApiKeyAuth:
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=raw_key)
         mock_db = AsyncMock()
 
-        with patch("utils.dependencies.crud") as mock_crud:
-            mock_crud.get_all_active_api_keys = AsyncMock(return_value=[api_key_record])
-            mock_crud.update_api_key_last_used = AsyncMock()
+        with patch("utils.dependencies.api_key_repository") as mock_api_key_repository:
+            mock_api_key_repository.get_all_active_api_keys = AsyncMock(
+                return_value=[api_key_record]
+            )
+            mock_api_key_repository.update_api_key_last_used = AsyncMock()
             user = await get_current_user(request, mock_db, credentials=creds)
 
         assert user.email == "apiuser@example.com"
         assert request.state.auth_method == "api_key"
-        mock_crud.update_api_key_last_used.assert_called_once_with(mock_db, api_key_record.id)
+        mock_api_key_repository.update_api_key_last_used.assert_called_once_with(
+            mock_db, api_key_record.id
+        )
 
     @pytest.mark.asyncio
     async def test_invalid_api_key_raises_401(self):
@@ -97,8 +102,8 @@ class TestApiKeyAuth:
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="bogus-key")
         mock_db = AsyncMock()
 
-        with patch("utils.dependencies.crud") as mock_crud:
-            mock_crud.get_all_active_api_keys = AsyncMock(return_value=[])
+        with patch("utils.dependencies.api_key_repository") as mock_api_key_repository:
+            mock_api_key_repository.get_all_active_api_keys = AsyncMock(return_value=[])
             with pytest.raises(Exception) as exc_info:
                 await get_current_user(request, mock_db, credentials=creds)
             assert exc_info.value.status_code == 401
@@ -116,8 +121,10 @@ class TestApiKeyAuth:
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong-key")
         mock_db = AsyncMock()
 
-        with patch("utils.dependencies.crud") as mock_crud:
-            mock_crud.get_all_active_api_keys = AsyncMock(return_value=[record])
+        with patch("utils.dependencies.api_key_repository") as mock_api_key_repository:
+            mock_api_key_repository.get_all_active_api_keys = AsyncMock(
+                return_value=[record]
+            )
             with pytest.raises(Exception) as exc_info:
                 await get_current_user(request, mock_db, credentials=creds)
             assert exc_info.value.status_code == 401
@@ -134,9 +141,11 @@ class TestApiKeyAuth:
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=raw_key)
         mock_db = AsyncMock()
 
-        with patch("utils.dependencies.crud") as mock_crud:
-            mock_crud.get_all_active_api_keys = AsyncMock(return_value=[record])
-            mock_crud.update_api_key_last_used = AsyncMock()
+        with patch("utils.dependencies.api_key_repository") as mock_api_key_repository:
+            mock_api_key_repository.get_all_active_api_keys = AsyncMock(
+                return_value=[record]
+            )
+            mock_api_key_repository.update_api_key_last_used = AsyncMock()
             user = await get_current_user(request, mock_db, credentials=creds)
 
         assert user.email == "apiuser@example.com"
@@ -144,11 +153,12 @@ class TestApiKeyAuth:
 
 
 # ---------------------------------------------------------------------------
-# require_proxy_user blocks API keys on sensitive endpoints
+# require_authenticated_user blocks API keys on sensitive endpoints
 # ---------------------------------------------------------------------------
 
-class TestRequireProxyUser:
-    """Sensitive endpoints reject API key auth via require_proxy_user."""
+
+class TestRequireAuthenticatedUser:
+    """Sensitive endpoints reject API key auth via require_authenticated_user."""
 
     @pytest.mark.asyncio
     async def test_bearer_token_rejected_with_403(self):
@@ -158,13 +168,13 @@ class TestRequireProxyUser:
         mock_db = AsyncMock()
 
         with pytest.raises(Exception) as exc_info:
-            await require_proxy_user(request, mock_db, credentials=creds)
+            await require_authenticated_user(request, mock_db, credentials=creds)
         assert exc_info.value.status_code == 403
-        assert "proxy authentication" in exc_info.value.detail.lower()
+        assert "authenticated user context" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_proxy_user_allowed_without_bearer(self):
-        """Without Bearer token, require_proxy_user falls through to get_current_user."""
+        """Without Bearer token, require_authenticated_user falls through to get_current_user."""
         request = _make_request({"x-user-email": "admin@example.com"})
         mock_db = AsyncMock()
         db_user = _make_db_user("admin@example.com")
@@ -174,13 +184,17 @@ class TestRequireProxyUser:
             mock_settings.SKIP_HEADER_CHECK = False
             mock_settings.MOCK_USER_EMAIL = "mock@example.com"
             mock_settings.X_USER_ID_HEADER = "X-User-Email"
-            with patch("utils.dependencies.crud") as mock_crud:
-                mock_crud.get_user_by_email = AsyncMock(return_value=db_user)
-                user = await require_proxy_user(request, mock_db, credentials=None)
+            with patch("utils.dependencies.user_repository") as mock_user_repository:
+                mock_user_repository.get_user_by_email = AsyncMock(return_value=db_user)
+                user = await require_authenticated_user(
+                    request, mock_db, credentials=None
+                )
 
         assert user.email == "admin@example.com"
 
-    def test_api_key_create_rejected_with_bearer(self, client):
+    def test_api_key_create_rejected_with_bearer(
+        self, client
+    ):  # smoke-selected in conftest.py
         """POST /api/api-keys with Bearer token returns 403."""
         resp = client.post(
             "/api/api-keys",
@@ -229,6 +243,7 @@ class TestRequireProxyUser:
 # Production mode proxy header validation
 # ---------------------------------------------------------------------------
 
+
 class TestProductionProxyAuth:
     """Test proxy header auth in production mode (DEBUG=false)."""
 
@@ -252,10 +267,12 @@ class TestProductionProxyAuth:
     @pytest.mark.asyncio
     async def test_wrong_proxy_secret_rejects(self):
         """Wrong X-Proxy-Secret in production mode returns 401."""
-        request = _make_request({
-            "x-user-email": "user@example.com",
-            "x-proxy-secret": "wrong-secret",
-        })
+        request = _make_request(
+            {
+                "x-user-email": "user@example.com",
+                "x-proxy-secret": "wrong-secret",
+            }
+        )
         mock_db = AsyncMock()
 
         with patch("utils.dependencies.settings") as s:
@@ -271,10 +288,12 @@ class TestProductionProxyAuth:
     @pytest.mark.asyncio
     async def test_valid_proxy_headers_succeed(self):
         """Correct proxy secret + valid email resolves user."""
-        request = _make_request({
-            "x-user-email": "user@example.com",
-            "x-proxy-secret": "real-secret",
-        })
+        request = _make_request(
+            {
+                "x-user-email": "user@example.com",
+                "x-proxy-secret": "real-secret",
+            }
+        )
         mock_db = AsyncMock()
         db_user = _make_db_user("user@example.com")
 
@@ -284,8 +303,8 @@ class TestProductionProxyAuth:
             s.PROXY_SHARED_SECRET = "real-secret"
             s.X_PROXY_SECRET_HEADER = "X-Proxy-Secret"
             s.X_USER_ID_HEADER = "X-User-Email"
-            with patch("utils.dependencies.crud") as mock_crud:
-                mock_crud.get_user_by_email = AsyncMock(return_value=db_user)
+            with patch("utils.dependencies.user_repository") as mock_user_repository:
+                mock_user_repository.get_user_by_email = AsyncMock(return_value=db_user)
                 user = await get_current_user(request, mock_db, credentials=None)
 
         assert user.email == "user@example.com"
@@ -313,6 +332,7 @@ class TestProductionProxyAuth:
 # Auth method tracking
 # ---------------------------------------------------------------------------
 
+
 class TestAuthMethodTracking:
     """Verify request.state.auth_method is set correctly."""
 
@@ -328,8 +348,8 @@ class TestAuthMethodTracking:
             s.SKIP_HEADER_CHECK = False
             s.MOCK_USER_EMAIL = "mock@example.com"
             s.X_USER_ID_HEADER = "X-User-Email"
-            with patch("utils.dependencies.crud") as mock_crud:
-                mock_crud.get_user_by_email = AsyncMock(return_value=db_user)
+            with patch("utils.dependencies.user_repository") as mock_user_repository:
+                mock_user_repository.get_user_by_email = AsyncMock(return_value=db_user)
                 await get_current_user(request, mock_db, credentials=None)
 
         assert request.state.auth_method == "debug"
@@ -346,9 +366,11 @@ class TestAuthMethodTracking:
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=raw_key)
         mock_db = AsyncMock()
 
-        with patch("utils.dependencies.crud") as mock_crud:
-            mock_crud.get_all_active_api_keys = AsyncMock(return_value=[record])
-            mock_crud.update_api_key_last_used = AsyncMock()
+        with patch("utils.dependencies.api_key_repository") as mock_api_key_repository:
+            mock_api_key_repository.get_all_active_api_keys = AsyncMock(
+                return_value=[record]
+            )
+            mock_api_key_repository.update_api_key_last_used = AsyncMock()
             await get_current_user(request, mock_db, credentials=creds)
 
         assert request.state.auth_method == "api_key"
@@ -357,6 +379,7 @@ class TestAuthMethodTracking:
 # ---------------------------------------------------------------------------
 # Log injection sanitization
 # ---------------------------------------------------------------------------
+
 
 class TestLogSanitization:
     """Test _sanitize_log_value prevents log forging."""
@@ -390,9 +413,11 @@ class TestLogSanitization:
     def test_log_db_operation_sanitizes_additional_info(self):
         """log_db_operation passes additional_info through sanitization."""
         record_id = uuid.uuid4()
-        with patch("utils.crud.logger") as mock_logger:
+        with patch("repositories.audit.logger") as mock_logger:
             log_db_operation(
-                "CREATE", "api_keys", record_id,
+                "CREATE",
+                "api_keys",
+                record_id,
                 "user@example.com",
                 {"name": "my-key\nINJECTED_LINE", "user_id": "abc"},
             )
@@ -405,6 +430,7 @@ class TestLogSanitization:
 # ---------------------------------------------------------------------------
 # API key verify / hash edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestApiKeyHashing:
     """Edge cases for API key hashing and verification."""
@@ -447,6 +473,7 @@ class TestApiKeyHashing:
 # Integration: /api/me endpoint with different auth modes
 # ---------------------------------------------------------------------------
 
+
 class TestMeEndpoint:
     """Integration tests for GET /api/users/me."""
 
@@ -479,10 +506,13 @@ class TestMeEndpoint:
 # Integration: end-to-end API key auth via /api/users/me
 # ---------------------------------------------------------------------------
 
+
 class TestApiKeyEndToEnd:
     """Create an API key via proxy auth, then use it as Bearer token."""
 
-    def test_api_key_authenticates_to_me_endpoint(self, client):
+    def test_api_key_authenticates_to_me_endpoint(
+        self, client
+    ):  # smoke-selected in conftest.py
         """Full flow: create key, then use it to call /api/users/me."""
         # Step 1: create key (proxy auth in debug mode)
         create_resp = client.post("/api/api-keys", json={"name": "e2e-key"})

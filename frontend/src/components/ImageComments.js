@@ -1,9 +1,71 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  createImageComment,
+  deleteImageComment,
+  fetchImageComments,
+  updateImageComment,
+} from '../api/images';
+import useRouteRequestOwnership, { isAbortError } from '../utils/useRouteRequestOwnership';
 
 function ImageComments({ imageId, loading, setLoading, setError, readOnly = false }) {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [editingComment, setEditingComment] = useState(null);
+  const imageIdStr = imageId == null ? '' : String(imageId);
+  const commentsRef = useRef([]);
+  const pendingMutationsRef = useRef(new Map());
+  const setLoadingRef = useRef(setLoading);
+  const setErrorRef = useRef(setError);
+  const {
+    beginRequest,
+    isCurrent,
+    releaseRequest
+  } = useRouteRequestOwnership(`image:${imageIdStr}`);
+
+  setLoadingRef.current = setLoading;
+  setErrorRef.current = setError;
+
+  const updateComments = useCallback((updater, owner) => {
+    if (owner && !isCurrent(owner)) {
+      return;
+    }
+
+    const nextComments = typeof updater === 'function'
+      ? updater(commentsRef.current)
+      : updater;
+    commentsRef.current = nextComments;
+    setComments(nextComments);
+  }, [isCurrent]);
+
+  const beginMutation = useCallback(() => {
+    const request = beginRequest();
+    pendingMutationsRef.current.forEach((_, generation) => {
+      if (generation !== request.generation) {
+        pendingMutationsRef.current.delete(generation);
+      }
+    });
+    const pendingCount = pendingMutationsRef.current.get(request.generation) || 0;
+    pendingMutationsRef.current.set(request.generation, pendingCount + 1);
+    if (isCurrent(request)) {
+      setLoadingRef.current?.(true);
+    }
+    return request;
+  }, [beginRequest, isCurrent]);
+
+  const finishMutation = useCallback((request) => {
+    const pendingCount = pendingMutationsRef.current.get(request.generation) || 0;
+    const nextCount = Math.max(0, pendingCount - 1);
+    if (nextCount === 0) {
+      pendingMutationsRef.current.delete(request.generation);
+    } else {
+      pendingMutationsRef.current.set(request.generation, nextCount);
+    }
+
+    if (isCurrent(request) && nextCount === 0) {
+      setLoadingRef.current?.(false);
+    }
+    releaseRequest(request);
+  }, [isCurrent, releaseRequest]);
 
   // Helper function to format date
   const formatDate = (dateString) => {
@@ -15,79 +77,81 @@ function ImageComments({ imageId, loading, setLoading, setError, readOnly = fals
 
   // Load comments for the image
   useEffect(() => {
+    commentsRef.current = [];
+    setComments([]);
+    setNewComment('');
+    setEditingComment(null);
+
+    if (!imageIdStr) {
+      return undefined;
+    }
+
+    const request = beginRequest();
+
     const loadComments = async () => {
       try {
-        const response = await fetch(`/api/images/${imageId}/comments`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
+        const commentsData = await fetchImageComments(imageIdStr, {
+          signal: request.controller.signal
+        });
+
+        if (!Array.isArray(commentsData)) {
+          throw new Error('Invalid comments response');
         }
-        
-        const commentsData = await response.json();
-        setComments(commentsData);
+        if (!isCurrent(request)) {
+          return;
+        }
+        updateComments(commentsData, request);
         
       } catch (error) {
-        console.error('Error loading comments:', error);
-        setError('Failed to load comments. Please try again later.');
+        if (!isCurrent(request) || isAbortError(error, request)) {
+          return;
+        }
+        setErrorRef.current?.('Failed to load comments. Please try again later.');
+      } finally {
+        releaseRequest(request);
       }
     };
 
-    if (imageId) {
-      loadComments();
-    }
-  }, [imageId, setError]);
+    loadComments();
+
+    return () => {
+      request.controller.abort();
+    };
+  }, [beginRequest, imageIdStr, isCurrent, releaseRequest, updateComments]);
 
   // Handle adding a comment
   const handleAddComment = async (e) => {
     e.preventDefault();
     
     if (newComment.trim() === '') {
-      setError('Comment text cannot be empty');
+      setErrorRef.current?.('Comment text cannot be empty');
       return;
     }
     
+    const request = beginMutation();
     try {
-      setLoading(true);
-      
-      console.log("Adding comment for image ID:", imageId);
-      
-      // Create the request payload
-      const payload = {
-        text: newComment,
-      };
-      
-      console.log("Comment request payload:", JSON.stringify(payload, null, 2));
-      
-      const response = await fetch(`/api/images/${imageId}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+      const newCommentData = await createImageComment(imageIdStr, newComment, {
+        signal: request.controller.signal,
       });
-      
-      console.log("Comment response status:", response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Comment error response:", errorText);
-        throw new Error(`HTTP error! Status: ${response.status}, Details: ${errorText}`);
+
+      if (!isCurrent(request)) {
+        return;
       }
       
-      const newCommentData = await response.json();
-      
       // Add the new comment to the list
-      setComments(prev => [...prev, newCommentData]);
+      updateComments(prev => [...prev, newCommentData], request);
       
       // Reset form
       setNewComment('');
-      setError(null);
+      setErrorRef.current?.(null);
       
     } catch (error) {
-      console.error('Error creating comment:', error);
-      setError('Failed to add comment. Please try again later.');
+      if (!isCurrent(request) || isAbortError(error, request)) {
+        return;
+      }
+      setErrorRef.current?.('Failed to add comment. Please try again later.');
     } finally {
-      setLoading(false);
+      finishMutation(request);
     }
   };
 
@@ -95,41 +159,37 @@ function ImageComments({ imageId, loading, setLoading, setError, readOnly = fals
   const handleUpdateComment = async () => {
     if (!editingComment) return;
 
-    try {
-      setLoading(true);
+    const commentToUpdate = { ...editingComment };
+    const request = beginMutation();
 
-      const response = await fetch(`/api/comments/${editingComment.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: editingComment.text,
-        }),
+    try {
+      const updatedComment = await updateImageComment(commentToUpdate.id, commentToUpdate.text, {
+        signal: request.controller.signal,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
+      if (!isCurrent(request)) {
+        return;
       }
 
-      const updatedComment = await response.json();
-
       // Update the comment in the list
-      setComments(prev =>
+      updateComments(prev =>
         prev.map(comment =>
-          comment.id === editingComment.id ? updatedComment : comment
-        )
+          String(comment.id) === String(commentToUpdate.id) ? updatedComment : comment
+        ),
+        request
       );
 
       // Exit inline editing
       setEditingComment(null);
-      setError(null);
+      setErrorRef.current?.(null);
 
     } catch (error) {
-      console.error('Error updating comment:', error);
-      setError('Failed to update comment. Please try again later.');
+      if (!isCurrent(request) || isAbortError(error, request)) {
+        return;
+      }
+      setErrorRef.current?.('Failed to update comment. Please try again later.');
     } finally {
-      setLoading(false);
+      finishMutation(request);
     }
   };
 
@@ -139,26 +199,30 @@ function ImageComments({ imageId, loading, setLoading, setError, readOnly = fals
       return;
     }
     
+    const request = beginMutation();
     try {
-      setLoading(true);
-      
-      const response = await fetch(`/api/comments/${id}`, {
-        method: 'DELETE',
+      await deleteImageComment(id, {
+        signal: request.controller.signal,
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
+
+      if (!isCurrent(request)) {
+        return;
       }
       
       // Remove the comment from the list
-      setComments(prev => prev.filter(comment => comment.id !== id));
-      setError(null);
+      updateComments(
+        prev => prev.filter(comment => String(comment.id) !== String(id)),
+        request
+      );
+      setErrorRef.current?.(null);
       
     } catch (error) {
-      console.error('Error deleting comment:', error);
-      setError('Failed to delete comment. Please try again later.');
+      if (!isCurrent(request) || isAbortError(error, request)) {
+        return;
+      }
+      setErrorRef.current?.('Failed to delete comment. Please try again later.');
     } finally {
-      setLoading(false);
+      finishMutation(request);
     }
   };
 

@@ -1,4 +1,12 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  estimateProjectExportBundle,
+  exportProjectBundleToS3,
+  fetchProjectExportBundleResponse,
+  importProjectBundle,
+  importProjectBundleFromS3,
+} from '../api/exports';
+import { readResponseBlobWithProgress } from '../api/progress';
 
 const EXPORT_OPTIONS = [
   {
@@ -37,6 +45,25 @@ function formatProgressBytes(bytes) {
   return `${(safeBytes / mb).toFixed(2)} MB`;
 }
 
+function formatBundleSize(bytes) {
+  const safeBytes = Math.max(0, Number(bytes) || 0);
+  const gb = 1024 * 1024 * 1024;
+  const mb = 1024 * 1024;
+  const kb = 1024;
+  if (safeBytes >= gb) return `${(safeBytes / gb).toFixed(2)} GB`;
+  if (safeBytes >= mb) return `${(safeBytes / mb).toFixed(2)} MB`;
+  if (safeBytes >= kb) return `${(safeBytes / kb).toFixed(1)} KB`;
+  return `${safeBytes} bytes`;
+}
+
+function buildExportParams(options) {
+  const params = new URLSearchParams();
+  EXPORT_OPTIONS.forEach((option) => {
+    params.set(option.key, options[option.key] ? 'true' : 'false');
+  });
+  return params;
+}
+
 function progressLabel(progress) {
   if (!progress) return '';
   const loaded = Math.max(0, progress.loaded || 0);
@@ -51,30 +78,10 @@ function progressPercent(progress) {
   return Math.max(0, Math.min(100, (loaded / total) * 100));
 }
 
-async function readStreamingBlobWithProgress(response, onProgress) {
-  const total = Number(response.headers.get('X-VISTA-Backup-Estimated-Bytes')) || 0;
-  let loaded = 0;
-  onProgress?.({ loaded: 0, total });
-
-  if (!response.body || typeof response.body.getReader !== 'function') {
-    const blob = await response.blob();
-    loaded = blob.size;
-    onProgress?.({ loaded, total: Math.max(total, loaded) });
-    return blob;
-  }
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      loaded += value.byteLength || value.length || 0;
-      onProgress?.({ loaded, total: Math.max(total, loaded) });
-    }
-  }
-  return new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
+function readStreamingBlobWithProgress(response, onProgress) {
+  return readResponseBlobWithProgress(response, onProgress, {
+    totalHeader: 'X-VISTA-Backup-Estimated-Bytes',
+  });
 }
 
 function filenameFromDisposition(disposition, fallback) {
@@ -88,6 +95,9 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
     EXPORT_OPTIONS.reduce((acc, option) => ({ ...acc, [option.key]: true }), {})
   ));
   const [exportState, setExportState] = useState({ loading: false, detail: null, progress: null });
+  const [estimateState, setEstimateState] = useState({ loading: false, bytes: null, error: null });
+  const [s3Url, setS3Url] = useState('');
+  const [s3ImportUrl, setS3ImportUrl] = useState('');
   const [importState, setImportState] = useState({ loading: false, detail: null, file: null, mode: null, modalOpen: false });
   const importInputRef = useRef(null);
 
@@ -101,6 +111,29 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
     || (counts.annotations || 0) > 0
     || (counts.partsLoaded || 0) > 0
     || (counts.imageMetadata || 0) > 0;
+
+  const exportParams = useMemo(() => buildExportParams(options), [options]);
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    const controller = new AbortController();
+    setEstimateState((prev) => ({ ...prev, loading: true, error: null }));
+    estimateProjectExportBundle(projectId, Object.fromEntries(exportParams), {
+      signal: controller.signal,
+    })
+      .then((payload) => {
+        setEstimateState({
+          loading: false,
+          bytes: Number(payload.estimated_bytes) || 0,
+          error: null,
+        });
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') return;
+        setEstimateState({ loading: false, bytes: null, error: 'Unable to estimate bundle size' });
+      });
+    return () => controller.abort();
+  }, [projectId, exportParams]);
 
   const updateOption = (key, checked) => {
     setOptions((prev) => ({ ...prev, [key]: checked }));
@@ -119,14 +152,7 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
 
     try {
       setImportState((prev) => ({ ...prev, loading: true, detail: null, modalOpen: false, mode }));
-      const response = await fetch(`/api/projects/${projectId}/import`, {
-        method: 'POST',
-        body: formData,
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.detail || `Import failed (${response.status})`);
-      }
+      const payload = await importProjectBundle(projectId, formData);
       const projectResult = payload.project || {};
       setImportState({
         loading: false,
@@ -137,7 +163,7 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
       });
       if (importInputRef.current) importInputRef.current.value = '';
       if (setError) setError(null);
-      onImportComplete?.(payload);
+      await onImportComplete?.(payload);
     } catch (err) {
       setImportState((prev) => ({ ...prev, loading: false, detail: null, modalOpen: false }));
       if (setError) setError(err.message || 'Failed to import project data');
@@ -160,14 +186,9 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
   };
 
   const exportProjectData = async () => {
-    const params = new URLSearchParams();
-    EXPORT_OPTIONS.forEach((option) => {
-      params.set(option.key, options[option.key] ? 'true' : 'false');
-    });
-
     try {
       setExportState({ loading: true, detail: null, progress: { loaded: 0, total: 0 } });
-      const response = await fetch(`/api/projects/${projectId}/export-bundle?${params.toString()}`);
+      const response = await fetchProjectExportBundleResponse(projectId, Object.fromEntries(exportParams));
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.detail || `Export failed (${response.status})`);
@@ -185,7 +206,7 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000);
       setExportState({
         loading: false,
         detail: `${selectedCount} export sections packaged as TOML manifests and project artifacts.`,
@@ -195,6 +216,47 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
     } catch (err) {
       setExportState({ loading: false, detail: null, progress: null });
       if (setError) setError(err.message || 'Failed to export project data');
+    }
+  };
+
+
+
+  const exportProjectDataToS3 = async () => {
+    const trimmed = s3Url.trim();
+    if (!trimmed) {
+      if (setError) setError('Enter an S3 URL before exporting.');
+      return;
+    }
+    try {
+      setExportState({ loading: true, detail: null, progress: null });
+      const payload = await exportProjectBundleToS3(projectId, {
+        s3_url: trimmed,
+        ...options,
+      });
+      setExportState({ loading: false, detail: `Project bundle exported to ${payload.s3_url || trimmed}.`, progress: null });
+      if (setError) setError(null);
+    } catch (err) {
+      setExportState({ loading: false, detail: null, progress: null });
+      if (setError) setError(err.message || 'Failed to export project bundle to S3');
+    }
+  };
+
+  const importProjectDataFromS3 = async (mode) => {
+    const trimmed = s3ImportUrl.trim();
+    if (!trimmed) {
+      if (setError) setError('Enter an S3 URL before importing.');
+      return;
+    }
+    try {
+      setImportState((prev) => ({ ...prev, loading: true, detail: null, modalOpen: false, mode }));
+      const payload = await importProjectBundleFromS3(projectId, { s3_url: trimmed, mode, confirmation: 'IMPORT' });
+      const projectResult = payload.project || {};
+      setImportState({ loading: false, detail: `${mode === 'overwrite_active' ? 'Overwrote' : 'Appended'} S3 project bundle: ${projectResult.images_created || 0} images imported.`, file: null, mode, modalOpen: false });
+      if (setError) setError(null);
+      await onImportComplete?.(payload);
+    } catch (err) {
+      setImportState((prev) => ({ ...prev, loading: false, detail: null, modalOpen: false }));
+      if (setError) setError(err.message || 'Failed to import project bundle from S3');
     }
   };
 
@@ -235,6 +297,16 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
           ))}
         </div>
 
+        <div className="export-size-estimate" aria-live="polite">
+          <span>Estimated bundle size</span>
+          <strong>
+            {estimateState.loading && estimateState.bytes === null
+              ? 'Calculating...'
+              : estimateState.error || formatBundleSize(estimateState.bytes)}
+          </strong>
+          <small>Actual ZIP size may be smaller after compression.</small>
+        </div>
+
         <button
           type="button"
           className="btn btn-primary export-data-button"
@@ -243,6 +315,21 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
         >
           {exportState.loading ? 'Exporting Project...' : 'Export Project Bundle'}
         </button>
+
+        <div className="form-group project-data-s3-section">
+          <label htmlFor="project-export-s3-url">Export bundle to S3</label>
+          <input
+            id="project-export-s3-url"
+            type="text"
+            className="form-control"
+            value={s3Url}
+            onChange={(event) => setS3Url(event.target.value)}
+            placeholder="s3://bucket/path/project.vistabundle"
+          />
+          <button type="button" className="btn btn-secondary" disabled={exportState.loading || !s3Url.trim()} onClick={exportProjectDataToS3}>
+            Export to S3
+          </button>
+        </div>
 
         {exportState.loading && exportState.progress && (
           <div
@@ -300,6 +387,20 @@ function ProjectDataExportPanel({ projectId, projectName, counts = {}, setError,
             disabled={importState.loading}
           />
           <small>Supported formats: project export .zip or VISTA .vistabundle with one project.</small>
+          <div className="form-group project-data-s3-section">
+            <label htmlFor="project-import-s3-url">Import project bundle from S3</label>
+            <input
+              id="project-import-s3-url"
+              type="text"
+              className="form-control"
+              value={s3ImportUrl}
+              onChange={(event) => setS3ImportUrl(event.target.value)}
+              placeholder="s3://bucket/path/project.vistabundle"
+            />
+            <button type="button" className="btn btn-secondary" disabled={importState.loading || !s3ImportUrl.trim()} onClick={() => importProjectDataFromS3(hasProjectData ? 'append_active' : 'append_active')}>
+              Import from S3
+            </button>
+          </div>
           {importState.loading && (
             <div role="status" className="export-data-status">Importing project bundle...</div>
           )}

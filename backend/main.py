@@ -1,25 +1,44 @@
-import os
 import json
 import logging
-from datetime import datetime
+import os
+import tempfile
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status, HTTPException
+from datetime import datetime
+from pathlib import Path
+
+import swagger_ui_bundle
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from pydantic import ValidationError
 
 from core.config import settings
-import swagger_ui_bundle
-from pathlib import Path
-from core.database import create_db_and_tables
-from core.migrations import run_migrations  # legacy no-op
 from core.config import settings as _app_settings
-from utils.boto3_client import boto3_client, ensure_bucket_exists
+from core.database import create_db_and_tables
+from core.group_auth import run_auth_startup_self_test
+from core.migrations import run_migrations  # legacy no-op
 from middleware.cors_debug import add_cors_middleware, debug_exception_middleware
+from middleware.request_body_limits import InspectionAnnotationBodyLimitMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
-from routers import projects, images, users, image_classes, comments, project_metadata, api_keys, ml_analyses, reviews, export, groups, inspection_workbench, analyze, dashboard_settings
-
+from routers import (
+    analyze,
+    api_keys,
+    comments,
+    dashboard_settings,
+    export,
+    groups,
+    image_classes,
+    images,
+    inspection_workbench,
+    ml_analyses,
+    project_metadata,
+    projects,
+    reviews,
+    users,
+)
+from services.errors import ServiceError
+from utils.boto3_client import boto3_client, ensure_bucket_exists
 
 """
 FastAPI application with modular structure.
@@ -28,25 +47,65 @@ Separates app creation from runtime configuration.
 
 
 # Configure logging
+NOISY_THIRD_PARTY_LOGGERS = (
+    "PIL",
+    "Pillow",
+    "boto3",
+    "botocore",
+    "s3transfer",
+    "urllib3",
+    "python_multipart",
+    "multipart",
+)
+HIGH_VOLUME_APPLICATION_LOGGERS = (
+    "utils.boto3_client",
+    "boto3_client",
+)
+
+_STANDARD_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
+    "message",
+    "asctime",
+}
+
+
+def _json_log_value(value):
+    """Return a JSON-safe structured logging value without hiding context."""
+
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError, OverflowError):
+        return str(value)
+
+
+class JSONFormatter(logging.Formatter):
+    """Format application logs as JSON while retaining intentional extras."""
+
+    def format(self, record):
+        log_entry = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+        }
+        for key, value in record.__dict__.items():
+            if (
+                key not in _STANDARD_LOG_RECORD_FIELDS
+                and key not in log_entry
+                and not key.startswith("_")
+            ):
+                log_entry[key] = _json_log_value(value)
+        if record.exc_info:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_entry)
+
+
 def setup_logging():
     """Configure structured logging for the application."""
     log_level = logging.DEBUG if settings.DEBUG else logging.INFO
-
-    # JSON formatter for structured logging
-    class JSONFormatter(logging.Formatter):
-        def format(self, record):
-            log_entry = {
-                'timestamp': self.formatTime(record, self.datefmt),
-                'level': record.levelname,
-                'logger': record.name,
-                'message': record.getMessage(),
-                'module': record.module,
-                'function': record.funcName,
-                'line': record.lineno
-            }
-            if record.exc_info:
-                log_entry['exception'] = self.formatException(record.exc_info)
-            return json.dumps(log_entry)
 
     # Setup root logger
     root_logger = logging.getLogger()
@@ -65,12 +124,22 @@ def setup_logging():
     root_logger.addHandler(console_handler)
 
     # Add file handler for app.json (unless disabled for Docker)
-    if not os.getenv('DISABLE_FILE_LOGGING'):
+    if not settings.DISABLE_FILE_LOGGING:
         log_file_path = os.path.join(os.getcwd(), "logs", "app.json")
         os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
         file_handler = logging.FileHandler(log_file_path)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
+
+    # Application DEBUG logging is useful during development, but DEBUG output
+    # from image and object-storage dependencies is extremely chatty during
+    # large imports and can dominate terminal and Docker logging overhead.
+    for logger_name in NOISY_THIRD_PARTY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+    # Keep useful object-storage startup/error records in development while
+    # suppressing one DEBUG success record for every uploaded/copied object.
+    for logger_name in HIGH_VOLUME_APPLICATION_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.INFO)
 
     return logging.getLogger(__name__)
 
@@ -83,16 +152,28 @@ logger = setup_logging()
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     logger.info("Application startup...")
+    # Fail closed on unsafe production config and on an unconfigured or
+    # stub group-auth backend. Runs unconditionally (including under
+    # FAST_TEST_MODE) so a production deployment cannot silently skip the
+    # guards by flipping FAST_TEST_MODE=true.
+    settings.validate_production_safety()
+    run_auth_startup_self_test()
     if settings.FAST_TEST_MODE:
-        logger.info("FAST_TEST_MODE enabled: skipping DB table creation and S3 bucket checks.")
+        logger.info(
+            "FAST_TEST_MODE enabled: skipping DB table creation and S3 bucket checks."
+        )
     else:
-        # NOTE: Database migrations are NOT run automatically on startup.
-        # Run migrations manually using: ./start.sh -m or alembic upgrade head
-        logger.info("Database migrations should be run manually via './start.sh -m' or 'alembic upgrade head'")
+        # The app never migrates on startup; production containers migrate in
+        # scripts/start_production_server.sh before uvicorn starts.
+        logger.info(
+            "Database migrations are applied by 'alembic upgrade head' or scripts/start_production_server.sh, not at app startup"
+        )
 
         # Only create tables if not using Alembic (legacy fallback)
         if not _app_settings.USE_ALEMBIC_MIGRATIONS:
-            logger.info("USE_ALEMBIC_MIGRATIONS disabled: using fallback create_all path")
+            logger.info(
+                "USE_ALEMBIC_MIGRATIONS disabled: using fallback create_all path"
+            )
             await create_db_and_tables()
             await run_migrations()  # legacy no-op
 
@@ -100,21 +181,27 @@ async def lifespan(app: FastAPI):
         if boto3_client:
             bucket_exists = ensure_bucket_exists(boto3_client, settings.S3_BUCKET)
             if not bucket_exists:
-                logger.error(f"FATAL: Could not ensure S3 bucket '{settings.S3_BUCKET}' exists. Uploads/Downloads will fail.")
+                logger.error(
+                    f"FATAL: Could not ensure S3 bucket '{settings.S3_BUCKET}' exists. Uploads/Downloads will fail."
+                )
             else:
                 logger.info(f"S3 bucket '{settings.S3_BUCKET}' is ready.")
         else:
-            logger.warning("WARNING: Boto3 S3 client not initialized. Object storage operations will fail.")
+            logger.warning(
+                "WARNING: Boto3 S3 client not initialized. Object storage operations will fail."
+            )
     # Ensure a writable tmp dir exists for any runtime needs
     # Use /tmp for Docker environments where cwd may be read-only
-    tmp_dir = "/tmp" if os.getenv('DISABLE_FILE_LOGGING', '').lower() == 'true' else os.path.join(os.getcwd(), "tmp")
+    tmp_dir = (
+        tempfile.gettempdir()
+        if settings.DISABLE_FILE_LOGGING
+        else os.path.join(os.getcwd(), "tmp")
+    )
     os.makedirs(tmp_dir, exist_ok=True)
     logger.info("Application startup complete.")
     yield
     logger.info("Application shutdown...")
     logger.info("Application shutdown complete.")
-
-
 
 
 def _build_error_detail(*, request: Request, status_code: int):
@@ -129,6 +216,7 @@ def _build_error_detail(*, request: Request, status_code: int):
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "hint": "Check server logs with request_id, verify auth headers, and validate payload fields.",
     }
+
 
 # Custom JSON encoder to handle MetaData objects
 class CustomJSONEncoder(json.JSONEncoder):
@@ -161,12 +249,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
-        openapi_url="/openapi.json"
+        openapi_url="/openapi.json",
     )
 
     # Add CORS middleware
-    cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+    cors_origins = settings.CORS_ORIGINS.split(",")
     add_cors_middleware(app, cors_origins)
+
+    # Protect metadata-backed annotation parsing with a route-scoped byte cap.
+    # Register this before security headers so the outer security middleware
+    # also decorates early 413 responses.
+    app.add_middleware(InspectionAnnotationBodyLimitMiddleware)
 
     # Add security headers middleware
     app.add_middleware(SecurityHeadersMiddleware)
@@ -178,18 +271,21 @@ def create_app() -> FastAPI:
     # Global exception handler for Pydantic ValidationError
     @app.exception_handler(ValidationError)
     async def validation_exception_handler(request: Request, exc: ValidationError):
-        logger.error(f"ValidationError: {str(exc)}", extra={
-            'error_details': exc.errors(),
-            'request_path': request.url.path,
-            'request_method': request.method
-        })
+        logger.error(
+            f"ValidationError: {str(exc)}",
+            extra={
+                "error_details": exc.errors(),
+                "request_path": request.url.path,
+                "request_method": request.method,
+            },
+        )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "detail": "Validation failed for one or more fields.",
                 "error_context": _build_error_detail(
                     request=request,
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 ),
                 "validation_errors": exc.errors(),
             },
@@ -197,6 +293,20 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": exc.detail,
+                "error_context": _build_error_detail(
+                    request=request,
+                    status_code=exc.status_code,
+                ),
+            },
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(ServiceError)
+    async def service_error_handler(request: Request, exc: ServiceError):
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -248,7 +358,7 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health_check():
         """Health check endpoint for container monitoring."""
-        return {"status": "healthy", "timestamp": datetime.utcnow().isoformat() + 'Z'}
+        return {"status": "healthy", "timestamp": datetime.utcnow().isoformat() + "Z"}
 
     app.include_router(api_router)
 
@@ -265,7 +375,9 @@ def setup_static_files(app: FastAPI):
     """Configure static file serving for the frontend."""
     # Skip static file serving in debug mode (use npm run dev instead)
     if settings.DEBUG:
-        logger.info("DEBUG mode enabled - skipping static file setup (use npm run dev for frontend)")
+        logger.info(
+            "DEBUG mode enabled - skipping static file setup (use npm run dev for frontend)"
+        )
         return
 
     # Get frontend build path from settings
@@ -281,23 +393,21 @@ def setup_static_files(app: FastAPI):
     # Serve the static files from the build directory if it exists
     static_dir = os.path.join(front_end_build_path, "static")
     if os.path.isdir(static_dir):
-        app.mount(
-            "/static",
-            StaticFiles(directory=static_dir),
-            name="static_files"
-        )
+        app.mount("/static", StaticFiles(directory=static_dir), name="static_files")
     else:
-        logger.warning(f"\n{'='*80}\n"
-                      f"DEVELOPMENT MODE - Frontend build not found\n"
-                      f"{'='*80}\n"
-                      f"Static directory not found at: {static_dir}\n"
-                      f"\n"
-                      f"To run the frontend in development mode:\n"
-                      f"  cd /workspaces/VISTA/frontend\n"
-                      f"  npm run dev\n"
-                      f"\n"
-                      f"The frontend dev server will run on http://localhost:3000\n"
-                      f"{'='*80}\n")
+        logger.warning(
+            f"\n{'=' * 80}\n"
+            f"DEVELOPMENT MODE - Frontend build not found\n"
+            f"{'=' * 80}\n"
+            f"Static directory not found at: {static_dir}\n"
+            f"\n"
+            f"To run the frontend in development mode:\n"
+            f"  cd /workspaces/VISTA/frontend\n"
+            f"  npm run dev\n"
+            f"\n"
+            f"The frontend dev server will run on http://localhost:3000\n"
+            f"{'=' * 80}\n"
+        )
 
     # Mount individual files using separate handlers
     @app.get("/favicon.ico")
@@ -333,7 +443,7 @@ def setup_static_files(app: FastAPI):
             # Frontend not built - return a simple message instead of crashing
             return JSONResponse(
                 content={"message": "Backend API is running. Frontend not built."},
-                status_code=200
+                status_code=200,
             )
 
     # Catch-all route for React Router - this must be last

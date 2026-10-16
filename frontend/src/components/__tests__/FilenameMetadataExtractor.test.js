@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import FilenameMetadataExtractor, { applyOverlayIndicatorMetadata, buildConfiguredFilenameFields } from '../FilenameMetadataExtractor';
+import FilenameMetadataExtractor, { applyOverlayIndicatorMetadata, buildConfiguredFilenameFields, isFilenameConventionEnabled } from '../FilenameMetadataExtractor';
 
 const makeFile = (name) => new File([''], name, { type: 'image/png' });
 
@@ -35,6 +35,17 @@ describe('filename configuration helpers', () => {
       'image_identifier',
       'overlay',
     ]);
+  });
+
+  test('returns no configured fields when filename convention is disabled', () => {
+    const fields = buildConfiguredFilenameFields({
+      use_filename_convention: false,
+      hierarchy_levels: [{ id: 'drawing_number', label: 'Drawing', abbreviation: 'D' }],
+      image_descriptors: [{ id: 'modality', label: 'Modality', abbreviation: 'M' }],
+    });
+
+    expect(isFilenameConventionEnabled({ use_filename_convention: false })).toBe(false);
+    expect(fields).toEqual([]);
   });
 
   test('derives overlay truth and base filename from configured overlay specifier', () => {
@@ -136,6 +147,19 @@ describe('FilenameMetadataExtractor', () => {
         modality: 'visual',
         overlay: 'false',
       });
+    });
+
+    test('does not auto-apply VISTA hierarchy preset when filename convention is disabled', async () => {
+      const onConfigChange = jest.fn();
+      const files = [makeFile('D1001_LOT01_SET01_SN0001_front_visual_false.jpg')];
+      renderExtractor({ files, onConfigChange, fileNamingScheme: { use_filename_convention: false } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Delimiter')).toHaveValue('');
+      });
+      expect(screen.queryByLabelText('Keys (comma-separated)')).not.toBeInTheDocument();
+      const lastCall = onConfigChange.mock.calls[onConfigChange.mock.calls.length - 1][0];
+      expect(lastCall.extractMetadata('D1001_LOT01_SET01_SN0001_front_visual_false.jpg')).toBeNull();
     });
 
     test('keeps legacy batch number preset for matching batch filenames', async () => {

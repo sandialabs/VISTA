@@ -37,10 +37,13 @@ test('shows Autoassign on the Overlays tab and assigns filename matches', async 
 
   const overlaysPanel = page.getByRole('tabpanel', { name: 'Overlays' });
   await expect(overlaysPanel.getByRole('button', { name: 'Autoassign' })).toBeVisible();
-  await expect(overlaysPanel).toContainText('scan (duplicate).npy');
+  await expect(overlaysPanel).toContainText('scan (1).npy');
   await expect(overlaysPanel).toContainText('camera_overlay.png');
 
   await overlaysPanel.getByRole('button', { name: 'Autoassign' }).click();
   await expect(overlaysPanel.getByRole('status')).toContainText('Autoassigned 2 overlays.');
+  await expect(overlaysPanel.getByTestId('overlay-target-camera-base-id').getByRole('button', { name: 'camera_overlay.png' })).toBeVisible();
+  await expect(overlaysPanel.getByTestId('overlay-target-scan-base-id').getByRole('button', { name: 'scan (1).npy' })).toBeVisible();
+  await expect(overlaysPanel.getByTestId('overlays-unassigned-target')).toContainText('No available overlay images.');
   await overlaysPanel.screenshot({ path: screenshotPath });
 });

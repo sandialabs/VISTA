@@ -1,0 +1,1 @@
+^(?P<design_number>[^_]+)_(?P<lot_number>[^_]+)_(?P<set_number>[^_]+)_(?P<serial_number>[^_]+)_(?P<side>[^_]+)_(?P<modality>[^_]+)_(?P<overlay>[^_]+)$

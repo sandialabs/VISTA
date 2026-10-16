@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -22,9 +21,9 @@ if str(BACKEND_DIR) not in sys.path:
 from core.config import settings  # noqa: E402
 from core.models import Base  # noqa: E402
 
-DEFAULT_ATTEMPTS = 15
-DEFAULT_DELAY_SECONDS = 2.0
-MISSING_REVISION_RE = re.compile(r"Can't locate revision identified by ['\"](?P<revision>[^'\"]+)['\"]")
+MISSING_REVISION_RE = re.compile(
+    r"Can't locate revision identified by ['\"](?P<revision>[^'\"]+)['\"]"
+)
 
 
 def _run_alembic_command(*args: str) -> subprocess.CompletedProcess[str]:
@@ -115,14 +114,18 @@ def _stamp_database_versions(revisions: Sequence[str]) -> None:
             connection.execute(text("DELETE FROM alembic_version"))
             for revision in revisions:
                 connection.execute(
-                    text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
+                    text(
+                        "INSERT INTO alembic_version (version_num) VALUES (:revision)"
+                    ),
                     {"revision": revision},
                 )
     finally:
         engine.dispose()
 
 
-def _repair_missing_metadata_only_revision(missing_revision: str, local_heads: Sequence[str]) -> bool:
+def _repair_missing_metadata_only_revision(
+    missing_revision: str, local_heads: Sequence[str]
+) -> bool:
     """
     Revert an Alembic metadata-only artifact to local heads when schema is unchanged.
 
@@ -168,8 +171,8 @@ def _is_connection_error(stderr: str) -> bool:
 
 
 def run() -> int:
-    attempts = int(os.getenv("MIGRATION_RETRY_ATTEMPTS", str(DEFAULT_ATTEMPTS)))
-    delay_seconds = float(os.getenv("MIGRATION_RETRY_DELAY_SECONDS", str(DEFAULT_DELAY_SECONDS)))
+    attempts = settings.MIGRATION_RETRY_ATTEMPTS
+    delay_seconds = settings.MIGRATION_RETRY_DELAY_SECONDS
     repaired_missing_revision = False
 
     for attempt in range(1, attempts + 1):

@@ -1,4 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import {
+  deleteProjectMetadata,
+  updateProjectMetadata,
+  updateProjectMetadataDictionary,
+} from '../api/projects';
 
 function getJsonType(value) {
   if (value === null) return 'null';
@@ -216,32 +221,19 @@ function MetadataManager({
     
     try {
       setLoading(true);
-      
-      const response = await fetch(`/api/projects/${projectId}/metadata/${newMetadata.key}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          key: newMetadata.key,
-          value: parseMetadataValue(newMetadata.value),
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
+      const parsedValue = parseMetadataValue(newMetadata.value);
+      await updateProjectMetadata(projectId, newMetadata.key, parsedValue);
+
       // Update the metadata state
       setMetadata(prevMetadata => ({
         ...prevMetadata,
-        [newMetadata.key]: parseMetadataValue(newMetadata.value)
+        [newMetadata.key]: parsedValue
       }));
       
       // Update bulk metadata
       setBulkMetadata(JSON.stringify({
         ...metadata,
-        [newMetadata.key]: parseMetadataValue(newMetadata.value)
+        [newMetadata.key]: parsedValue
       }, null, 2));
       
       // Reset form
@@ -262,20 +254,7 @@ function MetadataManager({
       // const metadataObj = JSON.parse(bulkMetadata); // Commented out - not currently used
       
       setLoading(true);
-      
-      const response = await fetch(`/api/projects/${projectId}/metadata-dict`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: bulkMetadata,
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const updatedMetadata = await response.json();
+      const updatedMetadata = await updateProjectMetadataDictionary(projectId, bulkMetadata);
       setMetadata(updatedMetadata);
       setError(null);
     } catch (err) {
@@ -289,32 +268,19 @@ function MetadataManager({
   const handleEditMetadata = async () => {
     try {
       setLoading(true);
-      
-      const response = await fetch(`/api/projects/${projectId}/metadata/${editingMetadata.key}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          key: editingMetadata.key,
-          value: parseMetadataValue(editingMetadata.value),
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
+      const parsedValue = parseMetadataValue(editingMetadata.value);
+      await updateProjectMetadata(projectId, editingMetadata.key, parsedValue);
+
       // Update the metadata state
       setMetadata(prevMetadata => ({
         ...prevMetadata,
-        [editingMetadata.key]: parseMetadataValue(editingMetadata.value)
+        [editingMetadata.key]: parsedValue
       }));
       
       // Update bulk metadata
       setBulkMetadata(JSON.stringify({
         ...metadata,
-        [editingMetadata.key]: parseMetadataValue(editingMetadata.value)
+        [editingMetadata.key]: parsedValue
       }, null, 2));
       
       // Close modal
@@ -335,14 +301,7 @@ function MetadataManager({
     
     try {
       setLoading(true);
-      
-      const response = await fetch(`/api/projects/${projectId}/metadata/${key}`, {
-        method: 'DELETE',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      await deleteProjectMetadata(projectId, key);
       
       // Update the metadata state
       const newMetadata = { ...metadata };

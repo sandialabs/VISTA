@@ -38,6 +38,12 @@ else
   done
 fi
 
+# Output-only options do not change suite selection.
+if [ "$RUN_BACKEND" = false ] && [ "$RUN_FRONTEND" = false ]; then
+  RUN_BACKEND=true
+  RUN_FRONTEND=true
+fi
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(dirname "$0")"
 

@@ -2,24 +2,26 @@
 """
 Debug script to check heatmap annotations in the database
 """
+
 import asyncio
-import sys
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 # Load environment variables from .env file in project root
 project_root = Path(__file__).parent.parent
-load_dotenv(project_root / '.env')
+load_dotenv(project_root / ".env")
 
 # Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from sqlalchemy import select
-from core.database import async_engine, AsyncSession
-from core.models import MLAnalysis, MLAnnotation
 from sqlalchemy.orm import selectinload
+
+from core.database import AsyncSession, async_engine
+from core.models import MLAnalysis
 
 
 async def check_annotations():
@@ -46,7 +48,7 @@ async def check_annotations():
                 print(f"    Storage Path: {ann.storage_path}")
                 print(f"    Data: {ann.data}")
 
-            print("\n" + "="*70 + "\n")
+            print("\n" + "=" * 70 + "\n")
 
 
 async def main():

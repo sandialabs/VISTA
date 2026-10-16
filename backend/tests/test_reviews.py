@@ -1,23 +1,29 @@
 """Tests for the review verification workflow."""
-import pytest
+
 import uuid
+
+import pytest
 
 
 @pytest.fixture
 def _setup_project_and_image(client):
     """Create a project, then upload an image, returning both IDs."""
     # Create project
-    resp = client.post("/api/projects", json={
-        "name": "Review Test Project",
-        "description": "Project for review tests",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects",
+        json={
+            "name": "Review Test Project",
+            "description": "Project for review tests",
+            "meta_group_id": "test-group",
+        },
+    )
     assert resp.status_code == 200 or resp.status_code == 201
     project = resp.json()
     project_id = project["id"]
 
     # Upload a minimal image
     import io
+
     fake_image = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
     resp = client.post(
         f"/api/projects/{project_id}/images",
@@ -35,9 +41,12 @@ class TestReviewAPI:
 
     def test_create_review_pass(self, client, _setup_project_and_image):
         project_id, image_id = _setup_project_and_image
-        resp = client.post(f"/api/images/{image_id}/reviews", json={
-            "status": "pass",
-        })
+        resp = client.post(
+            f"/api/images/{image_id}/reviews",
+            json={
+                "status": "pass",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["status"] == "pass"
@@ -48,10 +57,13 @@ class TestReviewAPI:
 
     def test_create_review_reject_pending(self, client, _setup_project_and_image):
         project_id, image_id = _setup_project_and_image
-        resp = client.post(f"/api/images/{image_id}/reviews", json={
-            "status": "reject_pending",
-            "notes": "Bounding boxes are inaccurate",
-        })
+        resp = client.post(
+            f"/api/images/{image_id}/reviews",
+            json={
+                "status": "reject_pending",
+                "notes": "Bounding boxes are inaccurate",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["status"] == "reject_pending"
@@ -59,24 +71,32 @@ class TestReviewAPI:
 
     def test_create_review_reject_confirmed(self, client, _setup_project_and_image):
         _project_id, image_id = _setup_project_and_image
-        resp = client.post(f"/api/images/{image_id}/reviews", json={
-            "status": "reject_confirmed",
-        })
+        resp = client.post(
+            f"/api/images/{image_id}/reviews",
+            json={
+                "status": "reject_confirmed",
+            },
+        )
         assert resp.status_code == 201
         assert resp.json()["status"] == "reject_confirmed"
 
     def test_create_review_invalid_status(self, client, _setup_project_and_image):
         _project_id, image_id = _setup_project_and_image
-        resp = client.post(f"/api/images/{image_id}/reviews", json={
-            "status": "invalid_status",
-        })
+        resp = client.post(
+            f"/api/images/{image_id}/reviews",
+            json={
+                "status": "invalid_status",
+            },
+        )
         assert resp.status_code == 422
 
     def test_list_reviews(self, client, _setup_project_and_image):
         _project_id, image_id = _setup_project_and_image
         # Create two reviews
         client.post(f"/api/images/{image_id}/reviews", json={"status": "pass"})
-        client.post(f"/api/images/{image_id}/reviews", json={"status": "reject_pending"})
+        client.post(
+            f"/api/images/{image_id}/reviews", json={"status": "reject_pending"}
+        )
 
         resp = client.get(f"/api/images/{image_id}/reviews")
         assert resp.status_code == 200
@@ -108,7 +128,9 @@ class TestReviewAPI:
         _project_id, image_id = _setup_project_and_image
 
         # Create a review
-        create_resp = client.post(f"/api/images/{image_id}/reviews", json={"status": "pass"})
+        create_resp = client.post(
+            f"/api/images/{image_id}/reviews", json={"status": "pass"}
+        )
         review_id = create_resp.json()["id"]
 
         # Delete it
@@ -160,7 +182,9 @@ class TestReviewAPI:
         resp = client.post(f"/api/images/{fake_id}/reviews", json={"status": "pass"})
         assert resp.status_code == 404
 
-    def test_create_review_blocked_on_archived_project(self, client, _setup_project_and_image):
+    def test_create_review_blocked_on_archived_project(
+        self, client, _setup_project_and_image
+    ):
         """Creating a review should be rejected when the project is archived."""
         project_id, image_id = _setup_project_and_image
         client.patch(f"/api/projects/{project_id}/archive")
@@ -168,7 +192,9 @@ class TestReviewAPI:
         assert resp.status_code == 403
         assert "archived" in resp.json()["detail"].lower()
 
-    def test_delete_review_blocked_on_archived_project(self, client, _setup_project_and_image):
+    def test_delete_review_blocked_on_archived_project(
+        self, client, _setup_project_and_image
+    ):
         """Deleting a review should be rejected when the project is archived."""
         project_id, image_id = _setup_project_and_image
         # Create a review while project is still active
@@ -182,7 +208,9 @@ class TestReviewAPI:
         assert resp.status_code == 403
         assert "archived" in resp.json()["detail"].lower()
 
-    def test_read_reviews_allowed_on_archived_project(self, client, _setup_project_and_image):
+    def test_read_reviews_allowed_on_archived_project(
+        self, client, _setup_project_and_image
+    ):
         """Reading reviews should still work when the project is archived."""
         project_id, image_id = _setup_project_and_image
         client.post(f"/api/images/{image_id}/reviews", json={"status": "pass"})

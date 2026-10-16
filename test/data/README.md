@@ -1,6 +1,6 @@
 # VISTA hierarchy upload fixtures
 
-This directory contains test upload images sourced from the Hugging Face dataset
+The `PT1/` directory contains test upload images sourced from the Hugging Face dataset
 `Ryukijano/Pothole-detection-Yolov8`, starting with the upstream image whose
 filename begins with `0001`.
 
@@ -16,8 +16,10 @@ Example:
 D1001_LOT01_SET01_SN0001_front_visual_false.jpg
 ```
 
-When these files are selected in the image uploader, the filename metadata
-extractor should auto-apply the delimiter `_` with keys:
+The PT1 Load Test Data flow reads `PT1/regex.txt` and applies it while
+recursively loading files from `test/data/PT1`, matching the regular filename
+metadata extraction path. When these files are selected in the image uploader,
+the filename metadata extractor should auto-apply the delimiter `_` with keys:
 
 ```text
 design_number, lot_number, set_number, serial_number, side, modality, overlay
@@ -29,6 +31,6 @@ inspection batches; `batch_number` remains available for filenames that should
 create internal VISTA batch groupings.
 
 
-Additional `*_segmentation_true.txt` files are compact text overlay fixtures loaded by
+Additional `PT1/*_segmentation_true.txt` files are compact text overlay fixtures loaded by
 the PT1 and PT2 Load Test Data flows alongside the existing visual and heatmap
 modalities.

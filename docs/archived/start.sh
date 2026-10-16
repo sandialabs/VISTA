@@ -382,7 +382,7 @@ start_postgres() {
     local POSTGRES_USER="${POSTGRES_USER:-postgres}"
     local POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
     local POSTGRES_DB="${POSTGRES_DB:-postgres}"
-    local POSTGRES_PORT_HOST="${POSTGRES_PORT:-5433}"
+    local POSTGRES_PORT_HOST="${POSTGRES_PORT:-5432}"
 
     if container_running "$PG_CONTAINER"; then
         success "PostgreSQL already running ($PG_CONTAINER)"
@@ -467,7 +467,7 @@ start_minio() {
 test_connectivity() {
     say "Testing connectivity to services..."
 
-    local POSTGRES_PORT_HOST="${POSTGRES_PORT:-5433}"
+    local POSTGRES_PORT_HOST="${POSTGRES_PORT:-5432}"
     local all_ok=true
 
     # Test PostgreSQL
@@ -656,7 +656,7 @@ display_status() {
     fi
 
     if container_running "$PG_CONTAINER"; then
-        success "PostgreSQL: localhost:${POSTGRES_PORT:-5433}"
+        success "PostgreSQL: localhost:${POSTGRES_PORT:-5432}"
     fi
 
     if container_running "$MINIO_CONTAINER"; then

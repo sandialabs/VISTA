@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { fetchProjectClasses } from '../api/classes';
+import { fetchImageClassifications, fetchImageComments, fetchProjectImages } from '../api/images';
+import { fetchProject } from '../api/projects';
+import { fetchCurrentUser } from '../api/users';
 import { downloadExcel } from '../utils/downloadExcel';
 
 function ProjectReport() {
@@ -26,39 +30,28 @@ function ProjectReport() {
       try {
         setLoading(true);
 
-        // Load current user
-        const userResponse = await fetch('/api/users/me');
-        if (userResponse.ok) {
-          const userData = await userResponse.json();
-          setCurrentUser(userData);
+        try {
+          setCurrentUser(await fetchCurrentUser());
+        } catch {
+          setCurrentUser(null);
         }
 
         // Load project
-        const projectResponse = await fetch(`/api/projects/${id}`);
-        if (!projectResponse.ok) {
-          throw new Error('Failed to fetch project');
-        }
-        const projectData = await projectResponse.json();
+        const projectData = await fetchProject(id);
         setProject(projectData);
 
         // Load all images with full metadata and comments
-        const imagesResponse = await fetch(`/api/projects/${id}/images?include_deleted=true`);
-        if (!imagesResponse.ok) {
-          throw new Error('Failed to fetch images');
-        }
-        const imagesData = await imagesResponse.json();
+        const imagesData = await fetchProjectImages(id, { include_deleted: true });
 
         // Load detailed data for each image (comments, full metadata)
         const detailedImages = await Promise.all(
           imagesData.map(async (image) => {
             try {
               // Get comments
-              const commentsResponse = await fetch(`/api/images/${image.id}/comments`);
-              const comments = commentsResponse.ok ? await commentsResponse.json() : [];
+              const comments = await fetchImageComments(image.id).catch(() => []);
 
               // Get classifications
-              const classificationsResponse = await fetch(`/api/images/${image.id}/classifications`);
-              const classifications = classificationsResponse.ok ? await classificationsResponse.json() : [];
+              const classifications = await fetchImageClassifications(image.id).catch(() => []);
 
               return {
                 ...image,
@@ -79,10 +72,10 @@ function ProjectReport() {
         setImages(detailedImages);
 
         // Load classes
-        const classesResponse = await fetch(`/api/projects/${id}/classes`);
-        if (classesResponse.ok) {
-          const classesData = await classesResponse.json();
-          setClasses(classesData);
+        try {
+          setClasses(await fetchProjectClasses(id));
+        } catch {
+          setClasses([]);
         }
 
       } catch (error) {

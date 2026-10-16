@@ -182,6 +182,10 @@ cython_debug/
 # Podman
 .podman/
 
+# Local GitLab/OpenShift parity checks
+.local-ci/
+build-image.tar
+
 # Docker compose local overrides
 docker-compose.override.yml
 
@@ -217,3 +221,12 @@ yarn-error.log*
 pids
 logs
 yolov8n.pt
+
+# Downloaded model checkpoints (fetched at container build time or on first
+# use; never committed to the repository)
+/checkpoints/*
+!/checkpoints/.gitkeep
+
+*.endpointdlp
+*Zone.Identifier
+.claude/settings.local.json

@@ -8,14 +8,13 @@ and the existing /analyses/{id}/status endpoint, not the
 /api-ml HMAC pipeline paths.
 """
 
+import argparse
 import os
 import sys
-import argparse
 import uuid
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
-
 from pathlib import Path
+from typing import Any
 
 import requests
 from dotenv import load_dotenv
@@ -85,7 +84,9 @@ def build_session(api_key: str | None) -> requests.Session:
         session.headers.update({"Authorization": f"Bearer {api_key}"})
     # For dev/testing, allow X-User-Email header when no API key
     elif os.environ.get("DEBUG", "").lower() in {"1", "true", "yes"}:
-        session.headers.update({"X-User-Email": os.environ.get("ML_QUEUE_USER_EMAIL", "test@example.com")})
+        session.headers.update(
+            {"X-User-Email": os.environ.get("ML_QUEUE_USER_EMAIL", "test@example.com")}
+        )
     return session
 
 
@@ -96,8 +97,10 @@ def get_api_url(api_base: str, path: str) -> str:
     return f"{api_base.rstrip('/')}/{prefix}/{path}"
 
 
-def list_project_images(session: requests.Session, api_base: str, project_id: str, limit: int = 1000) -> List[Dict[str, Any]]:
-    images: List[Dict[str, Any]] = []
+def list_project_images(
+    session: requests.Session, api_base: str, project_id: str, limit: int = 1000
+) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
     skip = 0
     page_size = min(limit, 100)
 
@@ -117,7 +120,9 @@ def list_project_images(session: requests.Session, api_base: str, project_id: st
     return images[:limit]
 
 
-def list_image_analyses(session: requests.Session, api_base: str, image_id: str) -> List[Dict[str, Any]]:
+def list_image_analyses(
+    session: requests.Session, api_base: str, image_id: str
+) -> list[dict[str, Any]]:
     url = get_api_url(api_base, f"images/{image_id}/analyses")
     resp = session.get(url)
     resp.raise_for_status()
@@ -142,14 +147,19 @@ def main() -> int:
     try:
         uuid.UUID(args.project_id)
     except ValueError:
-        print("[ml-queue-clear] Error: project_id must be a valid UUID", file=sys.stderr)
+        print(
+            "[ml-queue-clear] Error: project_id must be a valid UUID", file=sys.stderr
+        )
         return 1
 
     api_base = args.api_url
     api_key = args.api_key
 
     if not api_key and os.environ.get("DEBUG", "").lower() not in {"1", "true", "yes"}:
-        print("[ml-queue-clear] Warning: no API key provided; this may fail in non-debug environments", file=sys.stderr)
+        print(
+            "[ml-queue-clear] Warning: no API key provided; this may fail in non-debug environments",
+            file=sys.stderr,
+        )
 
     # Safety: require explicit confirmation for write operations
     if not args.dry_run and not args.confirm:
@@ -174,7 +184,9 @@ def main() -> int:
 
     older_than_cutoff: datetime | None = None
     if args.older_than_seconds is not None:
-        older_than_cutoff = datetime.utcnow() - timedelta(seconds=args.older_than_seconds)
+        older_than_cutoff = datetime.utcnow() - timedelta(
+            seconds=args.older_than_seconds
+        )
 
     print("[ml-queue-clear] Configuration:")
     print(f"  Project ID:   {args.project_id}")
@@ -194,7 +206,7 @@ def main() -> int:
     images = list_project_images(session, api_base, args.project_id, limit=1000)
     print(f"[ml-queue-clear] Found {len(images)} images in project")
 
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
 
     # Step 2: collect candidate analyses
     for img in images:
@@ -244,7 +256,9 @@ def main() -> int:
             resp = session.patch(url, json=payload)
             if resp.ok:
                 updated += 1
-                print(f"[ml-queue-clear] Updated {analysis_id}: {status_from}->{status_to}")
+                print(
+                    f"[ml-queue-clear] Updated {analysis_id}: {status_from}->{status_to}"
+                )
             else:
                 failed += 1
                 print(
@@ -260,7 +274,9 @@ def main() -> int:
             )
 
     print("")
-    print(f"[ml-queue-clear] Done. Updated={updated}, Failed={failed}, Total candidates={len(candidates)}")
+    print(
+        f"[ml-queue-clear] Done. Updated={updated}, Failed={failed}, Total candidates={len(candidates)}"
+    )
 
     return 0 if failed == 0 else 1
 

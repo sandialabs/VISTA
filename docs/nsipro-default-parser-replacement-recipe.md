@@ -26,6 +26,12 @@ Use this recipe when a deployment has one custom `.nsipro` format and VISTA shou
   - `warnings`
 - The frontend still parses `.nsipro` files during associated metadata upload.
 - The backend is still authoritative during ingest and normalizes stored `.nsipro` metadata before it is persisted on inspection parts.
+- Ingest also replaces the associated part's typed rows in
+  `inspection_part_metadata_fields`. Each scalar or empty-container leaf uses
+  an RFC 6901 path relative to the parsed `metadata` object; the nested JSON
+  payload remains unchanged. The schema migration does not infer historical
+  rows from combined legacy JSON; existing parts are indexed when they are
+  re-ingested or their metadata-source associations are saved again.
 
 ## Step 1: replace the frontend default parser
 
@@ -137,5 +143,8 @@ At minimum, update these tests:
 - Frontend and backend produce equivalent metadata for the same `.nsipro` fixture.
 - `.nsipro` associated metadata uploads still succeed with `parser_id: "default"`.
 - Backend ingest persists the normalized `.nsipro` metadata on inspection parts.
+- Backend ingest materializes the same parsed leaves in
+  `inspection_part_metadata_fields`, with strings, numbers, and booleans in
+  separate query columns.
 - Strict mode succeeds with the new default parser contract and fails for stale hashes or versions.
 - Tests pass after updating expected metadata and hashes.

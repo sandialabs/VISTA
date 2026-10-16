@@ -31,7 +31,6 @@ export default function HeatmapOverlay({ annotations, containerSize, opacity }) 
 
     // Load heatmap directly - rely on image onError for handling failures
     const proxyUrl = `/api/ml/artifacts/content?path=${encodeURIComponent(heatmapAnnotation.storage_path)}`;
-    console.log('[HeatmapOverlay] Loading heatmap for storage_path:', heatmapAnnotation.storage_path);
     setHeatmapUrl(proxyUrl);
   }, [annotations]);
 
@@ -82,11 +81,9 @@ export default function HeatmapOverlay({ annotations, containerSize, opacity }) 
           display: imageLoaded ? 'block' : 'none'
         }}
         onLoad={() => {
-          console.log('[HeatmapOverlay] Heatmap loaded successfully');
           setImageLoaded(true);
         }}
         onError={(e) => {
-          console.error('[HeatmapOverlay] Failed to load heatmap image:', e);
           setError('Failed to load heatmap image');
         }}
       />

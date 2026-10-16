@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  deleteGroup,
+  fetchProjectGroups,
+  fetchProjectUngroupedCount,
+} from '../api/groups';
 
 const PAGE_SIZE = 200;
 
@@ -23,11 +28,11 @@ function GroupedImagesPage({ projectId, projectName, onBack, search }) {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ limit: String(PAGE_SIZE), skip: '0' });
-      if (searchVal) params.set('search', searchVal);
-      const resp = await fetch(`/api/projects/${projectId}/groups?${params}`);
-      if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
-      const data = await resp.json();
+      const data = await fetchProjectGroups(projectId, {
+        limit: PAGE_SIZE,
+        skip: 0,
+        search: searchVal,
+      });
       setGroups(data.groups || []);
       setTotal(data.total || 0);
     } catch (err) {
@@ -40,14 +45,11 @@ function GroupedImagesPage({ projectId, projectName, onBack, search }) {
   const loadMore = useCallback(async () => {
     setLoadingMore(true);
     try {
-      const params = new URLSearchParams({
-        limit: String(PAGE_SIZE),
-        skip: String(groups.length),
+      const data = await fetchProjectGroups(projectId, {
+        limit: PAGE_SIZE,
+        skip: groups.length,
+        search: debouncedSearch,
       });
-      if (debouncedSearch) params.set('search', debouncedSearch);
-      const resp = await fetch(`/api/projects/${projectId}/groups?${params}`);
-      if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
-      const data = await resp.json();
       setGroups(prev => [...prev, ...(data.groups || [])]);
     } catch (err) {
       setError(err.message);
@@ -58,11 +60,8 @@ function GroupedImagesPage({ projectId, projectName, onBack, search }) {
 
   const fetchUngroupedCount = useCallback(async () => {
     try {
-      const countResp = await fetch(`/api/projects/${projectId}/ungrouped-count`);
-      if (countResp.ok) {
-        const data = await countResp.json();
-        setUngroupedCount(data.count || 0);
-      }
+      const data = await fetchProjectUngroupedCount(projectId);
+      setUngroupedCount(data.count || 0);
     } catch (_) {}
   }, [projectId]);
 
@@ -90,8 +89,7 @@ function GroupedImagesPage({ projectId, projectName, onBack, search }) {
     }
     setDeletingGroupId(group.id);
     try {
-      const resp = await fetch(`/api/groups/${group.id}`, { method: 'DELETE' });
-      if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
+      await deleteGroup(group.id);
       setGroups(prev => prev.filter(g => g.id !== group.id));
       setTotal(prev => prev - 1);
     } catch (err) {

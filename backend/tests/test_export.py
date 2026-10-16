@@ -1,42 +1,60 @@
 """Tests for the Excel export endpoint."""
+
 import io
-import uuid
 import json as _json
+import re
+import uuid
 import zipfile
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch
 
-from routers.export import _build_workbook
-
+from services.export.excel import build_workbook
+from services.export.report_pdf import (
+    build_legacy_simple_report_pdf,
+    build_simple_report_pdf,
+)
+from utils import boto3_client as object_storage
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def _seed_project_with_images(client):
     """Create a project with images, classifications, and comments for export testing."""
-    resp = client.post("/api/projects/", json={
-        "name": "Export Test Project",
-        "description": "Project for testing Excel export",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Export Test Project",
+            "description": "Project for testing Excel export",
+            "meta_group_id": "test-group",
+        },
+    )
     assert resp.status_code == 201, resp.text
     project = resp.json()
 
-    class_resp = client.post(f"/api/projects/{project['id']}/classes", json={
-        "name": "Defect",
-        "description": "Visual defect detected",
-        "project_id": project["id"],
-    })
+    class_resp = client.post(
+        f"/api/projects/{project['id']}/classes",
+        json={
+            "name": "Defect",
+            "description": "Visual defect detected",
+            "project_id": project["id"],
+        },
+    )
     assert class_resp.status_code == 201, class_resp.text
     defect_class = class_resp.json()
 
-    class_resp2 = client.post(f"/api/projects/{project['id']}/classes", json={
-        "name": "Scratch",
-        "description": "Surface scratch",
-        "project_id": project["id"],
-    })
+    class_resp2 = client.post(
+        f"/api/projects/{project['id']}/classes",
+        json={
+            "name": "Scratch",
+            "description": "Surface scratch",
+            "project_id": project["id"],
+        },
+    )
     assert class_resp2.status_code == 201, class_resp2.text
     scratch_class = class_resp2.json()
 
@@ -60,23 +78,32 @@ def _seed_project_with_images(client):
         image_ids.append(img_resp.json()["id"])
 
     for img_id in image_ids[:2]:
-        cl_resp = client.post(f"/api/images/{img_id}/classifications", json={
-            "image_id": img_id,
-            "class_id": defect_class["id"],
-        })
+        cl_resp = client.post(
+            f"/api/images/{img_id}/classifications",
+            json={
+                "image_id": img_id,
+                "class_id": defect_class["id"],
+            },
+        )
         assert cl_resp.status_code == 201, cl_resp.text
 
-    cl_resp2 = client.post(f"/api/images/{image_ids[1]}/classifications", json={
-        "image_id": image_ids[1],
-        "class_id": scratch_class["id"],
-    })
+    cl_resp2 = client.post(
+        f"/api/images/{image_ids[1]}/classifications",
+        json={
+            "image_id": image_ids[1],
+            "class_id": scratch_class["id"],
+        },
+    )
     assert cl_resp2.status_code == 201, cl_resp2.text
 
     for idx, img_id in enumerate(image_ids):
-        cmt_resp = client.post(f"/api/images/{img_id}/comments", json={
-            "image_id": img_id,
-            "text": f"Test comment for image {idx}",
-        })
+        cmt_resp = client.post(
+            f"/api/images/{img_id}/comments",
+            json={
+                "image_id": img_id,
+                "text": f"Test comment for image {idx}",
+            },
+        )
         assert cmt_resp.status_code == 201, cmt_resp.text
 
     return {
@@ -90,6 +117,7 @@ def _seed_project_with_images(client):
 # Endpoint integration tests
 # ---------------------------------------------------------------------------
 
+
 def test_export_excel_returns_xlsx(client, _seed_project_with_images):
     """Verify the export endpoint returns a valid Excel file."""
     project = _seed_project_with_images["project"]
@@ -100,6 +128,7 @@ def test_export_excel_returns_xlsx(client, _seed_project_with_images):
     assert ".xlsx" in resp.headers["content-disposition"]
 
     from openpyxl import load_workbook
+
     wb = load_workbook(io.BytesIO(resp.content))
     ws = wb.active
     assert ws.title == "Image Data"
@@ -128,6 +157,7 @@ def test_export_excel_data_content(client, _seed_project_with_images):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     wb = load_workbook(io.BytesIO(resp.content))
     ws = wb.active
 
@@ -160,11 +190,14 @@ def test_export_excel_project_not_found(client):
 
 def test_export_excel_empty_project(client):
     """Verify export works for a project with no images."""
-    resp = client.post("/api/projects/", json={
-        "name": "Empty Project",
-        "description": "No images",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Empty Project",
+            "description": "No images",
+            "meta_group_id": "test-group",
+        },
+    )
     assert resp.status_code == 201
     project = resp.json()
 
@@ -172,6 +205,7 @@ def test_export_excel_empty_project(client):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     wb = load_workbook(io.BytesIO(resp.content))
     ws = wb.active
     assert ws.max_row == 1
@@ -183,16 +217,20 @@ def test_export_excel_comments_concatenated(client, _seed_project_with_images):
     img_id = _seed_project_with_images["image_ids"][0]
 
     # Add a second comment to the first image
-    cmt_resp = client.post(f"/api/images/{img_id}/comments", json={
-        "image_id": img_id,
-        "text": "Second comment on image 0",
-    })
+    cmt_resp = client.post(
+        f"/api/images/{img_id}/comments",
+        json={
+            "image_id": img_id,
+            "text": "Second comment on image 0",
+        },
+    )
     assert cmt_resp.status_code == 201
 
     resp = client.get(f"/api/projects/{project['id']}/export-excel")
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
 
     headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
@@ -204,11 +242,14 @@ def test_export_excel_comments_concatenated(client, _seed_project_with_images):
 
 def test_export_excel_deleted_images_excluded(client):
     """Verify that soft-deleted images are not included in the export."""
-    resp = client.post("/api/projects/", json={
-        "name": "Deletion Test",
-        "description": "Test deleted images",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Deletion Test",
+            "description": "Test deleted images",
+            "meta_group_id": "test-group",
+        },
+    )
     project = resp.json()
     pid = project["id"]
 
@@ -234,17 +275,21 @@ def test_export_excel_deleted_images_excluded(client):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
     assert ws.max_row == 2  # 1 header + 1 data row
 
 
 def test_export_excel_no_metadata_defaults(client):
     """Verify images with no metadata export only fixed columns."""
-    resp = client.post("/api/projects/", json={
-        "name": "No Metadata",
-        "description": "Images without metadata",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "No Metadata",
+            "description": "Images without metadata",
+            "meta_group_id": "test-group",
+        },
+    )
     project = resp.json()
 
     files = {"file": ("bare_image.png", b"data", "image/png")}
@@ -254,6 +299,7 @@ def test_export_excel_no_metadata_defaults(client):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
 
     # With no metadata, 6 columns: Filename, Review Status, Reviewer, Review Date,
@@ -273,11 +319,14 @@ def test_export_excel_no_metadata_defaults(client):
 
 def test_export_excel_filename_sanitization(client):
     """Verify special characters in project name are sanitized in the filename."""
-    resp = client.post("/api/projects/", json={
-        "name": "Test/Project <with> special&chars!",
-        "description": "Special chars test",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Test/Project <with> special&chars!",
+            "description": "Special chars test",
+            "meta_group_id": "test-group",
+        },
+    )
     project = resp.json()
 
     resp = client.get(f"/api/projects/{project['id']}/export-excel")
@@ -293,11 +342,14 @@ def test_export_excel_filename_sanitization(client):
 
 def test_export_excel_image_no_classifications(client):
     """Verify images with no classifications have empty Image Classes column."""
-    resp = client.post("/api/projects/", json={
-        "name": "No Classes Assigned",
-        "description": "Test",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "No Classes Assigned",
+            "description": "Test",
+            "meta_group_id": "test-group",
+        },
+    )
     project = resp.json()
 
     files = {"file": ("unclassified.png", b"data", "image/png")}
@@ -306,6 +358,7 @@ def test_export_excel_image_no_classifications(client):
     resp = client.get(f"/api/projects/{project['id']}/export-excel")
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
     headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
     classes_val = ws.cell(row=2, column=headers["Image Classes"]).value
@@ -314,11 +367,14 @@ def test_export_excel_image_no_classifications(client):
 
 def test_export_excel_image_no_comments(client):
     """Verify images with no comments have empty Comment column."""
-    resp = client.post("/api/projects/", json={
-        "name": "No Comments",
-        "description": "Test",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "No Comments",
+            "description": "Test",
+            "meta_group_id": "test-group",
+        },
+    )
     project = resp.json()
 
     files = {"file": ("silent.png", b"data", "image/png")}
@@ -327,6 +383,7 @@ def test_export_excel_image_no_comments(client):
     resp = client.get(f"/api/projects/{project['id']}/export-excel")
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
     headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
     comment_val = ws.cell(row=2, column=headers["Comment"]).value
@@ -335,15 +392,18 @@ def test_export_excel_image_no_comments(client):
 
 def test_export_excel_forbidden_for_non_group_member(client):
     """Verify 403 when user is not a member of the project's group."""
-    resp = client.post("/api/projects/", json={
-        "name": "Restricted Project",
-        "description": "Not for everyone",
-        "meta_group_id": "restricted-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Restricted Project",
+            "description": "Not for everyone",
+            "meta_group_id": "restricted-group",
+        },
+    )
     assert resp.status_code == 201
     project = resp.json()
 
-    with patch("routers.export.is_user_in_group", return_value=False):
+    with patch("utils.dependencies.is_user_in_group", return_value=False):
         resp = client.get(f"/api/projects/{project['id']}/export-excel")
 
     assert resp.status_code == 403
@@ -352,11 +412,14 @@ def test_export_excel_forbidden_for_non_group_member(client):
 
 def test_export_excel_alternate_metadata_keys(client):
     """Verify that all metadata keys become their own columns in the export."""
-    resp = client.post("/api/projects/", json={
-        "name": "Alternate Keys",
-        "description": "Test alternate metadata key names",
-        "meta_group_id": "test-group",
-    })
+    resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Alternate Keys",
+            "description": "Test alternate metadata key names",
+            "meta_group_id": "test-group",
+        },
+    )
     project = resp.json()
 
     # Use arbitrary key names - each should become its own column
@@ -375,6 +438,7 @@ def test_export_excel_alternate_metadata_keys(client):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
 
     # Build a header -> column map
@@ -392,17 +456,23 @@ def test_export_excel_alternate_metadata_keys(client):
     assert ws.cell(row=2, column=headers["serial"]).value == "ALT-SN-1"
     assert ws.cell(row=2, column=headers["inspectionStatus"]).value == "Pass"
     assert ws.cell(row=2, column=headers["inspectorName"]).value == "Alt Inspector"
-    assert ws.cell(row=2, column=headers["secondaryInspectorName"]).value == "Alt Secondary"
+    assert (
+        ws.cell(row=2, column=headers["secondaryInspectorName"]).value
+        == "Alt Secondary"
+    )
 
 
 def test_export_excel_includes_review_data(client):
     """Verify review status, reviewer, and review date appear in the export."""
     # Create a project and image
-    proj_resp = client.post("/api/projects/", json={
-        "name": "Review Data Test",
-        "description": "Test review columns in export",
-        "meta_group_id": "test-group",
-    })
+    proj_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Review Data Test",
+            "description": "Test review columns in export",
+            "meta_group_id": "test-group",
+        },
+    )
     assert proj_resp.status_code == 201
     project = proj_resp.json()
 
@@ -422,6 +492,7 @@ def test_export_excel_includes_review_data(client):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
     headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
 
@@ -438,11 +509,14 @@ def test_export_excel_includes_review_data(client):
 
 def test_export_excel_no_review_shows_empty(client):
     """Verify images with no review have empty review columns."""
-    proj_resp = client.post("/api/projects/", json={
-        "name": "No Review Test",
-        "description": "Test empty review columns",
-        "meta_group_id": "test-group",
-    })
+    proj_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "No Review Test",
+            "description": "Test empty review columns",
+            "meta_group_id": "test-group",
+        },
+    )
     assert proj_resp.status_code == 201
     project = proj_resp.json()
 
@@ -455,6 +529,7 @@ def test_export_excel_no_review_shows_empty(client):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
     headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
 
@@ -467,11 +542,14 @@ def test_export_excel_excludes_measurements_metadata(client):
     """Verify the 'measurements' metadata key is not exported as a column."""
     import json as _json
 
-    proj_resp = client.post("/api/projects/", json={
-        "name": "Measurements Excluded",
-        "description": "Test that measurements key is excluded",
-        "meta_group_id": "test-group",
-    })
+    proj_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Measurements Excluded",
+            "description": "Test that measurements key is excluded",
+            "meta_group_id": "test-group",
+        },
+    )
     assert proj_resp.status_code == 201
     project = proj_resp.json()
 
@@ -492,6 +570,7 @@ def test_export_excel_excludes_measurements_metadata(client):
     assert resp.status_code == 200
 
     from openpyxl import load_workbook
+
     ws = load_workbook(io.BytesIO(resp.content)).active
     headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
 
@@ -499,92 +578,174 @@ def test_export_excel_excludes_measurements_metadata(client):
     assert "lot_number" in headers
 
 
-@pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
-def test_project_json_report_supports_three_progressive_users(client, project_type):
-    scenarios = [
-        {"user": "report-basic", "level": 1, "batch_count": 1, "part_count": 1, "review_state": "unreviewed"},
-        {"user": "report-intermediate", "level": 2, "batch_count": 2, "part_count": 2, "review_state": "reject_pending"},
-        {"user": "report-advanced", "level": 3, "batch_count": 3, "part_count": 3, "review_state": "pass"},
-    ]
+@pytest.mark.smoke
+def test_project_json_report_v3_has_one_ordered_row_per_part_and_explicit_v2_compatibility(
+    client,
+):
+    headers = {
+        "X-User-Id": "report-v2@example.com",
+        "X-User-Groups": '["report-v2-group"]',
+    }
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Concise Inspection Report",
+            "description": "v3 report contract",
+            "meta_group_id": "report-v2-group",
+            "project_type": "PT2",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project = project_resp.json()
 
-    for scenario in scenarios:
-        group = f"{project_type.lower()}-{scenario['user']}"
-        headers = {
-            "X-User-Id": f"{scenario['user']}-{project_type.lower()}@example.com",
-            "X-User-Groups": f"[\"{group}\"]",
-        }
-        project_resp = client.post(
-            "/api/projects/",
+    raw_parts = (
+        ("SERIAL-Z", "unreviewed", "unreviewed", False),
+        ("SERIAL-A", "in_review", "unreviewed", False),
+        ("SERIAL-M", "pass", "pass", True),
+        ("SERIAL-B", "reject_pending", "reject", True),
+        ("SERIAL-C", "reject_confirmed", "reject", True),
+    )
+    created_parts = {}
+    for serial_number, review_state, _inspection_result, _reviewed in raw_parts:
+        part_resp = client.post(
+            f"/api/projects/{project['id']}/parts",
             json={
-                "name": f"{project_type} {scenario['user']} project",
-                "description": "json report scenario",
-                "meta_group_id": group,
-                "project_type": project_type,
+                "serial_number": serial_number,
+                "display_name": serial_number,
+                "review_state": review_state,
             },
             headers=headers,
         )
-        assert project_resp.status_code == 201, project_resp.text
-        project_id = project_resp.json()["id"]
+        assert part_resp.status_code == 201, part_resp.text
+        created_parts[serial_number] = part_resp.json()
 
-        for batch_idx in range(scenario["batch_count"]):
-            batch_resp = client.post(
-                f"/api/projects/{project_id}/batches",
-                json={
-                    "name": f"batch-{batch_idx}",
-                    "description": f"scenario {scenario['user']} batch {batch_idx}",
-                },
-                headers=headers,
-            )
-            assert batch_resp.status_code == 201, batch_resp.text
-            batch_id = batch_resp.json()["id"]
+    # Multiple images for one part must not duplicate that part's report row.
+    pass_part_id = created_parts["SERIAL-M"]["id"]
+    for index in range(2):
+        image_resp = client.post(
+            f"/api/projects/{project['id']}/images",
+            files={
+                "file": (f"duplicate-source-{index}.png", b"image-bytes", "image/png")
+            },
+            data={"metadata": _json.dumps({"part_id": pass_part_id})},
+            headers=headers,
+        )
+        assert image_resp.status_code == 201, image_resp.text
 
-            part_resp = client.post(
-                f"/api/projects/{project_id}/parts",
-                json={
-                    "serial_number": f"{project_type}-{scenario['level']}-{batch_idx}",
-                    "display_name": f"part-{batch_idx}",
-                    "batch_id": batch_id,
-                    "review_state": scenario["review_state"] if batch_idx % 2 == 0 else "unreviewed",
-                    "metadata": {"synthetic_level": scenario["level"], "workflow_step": batch_idx + 1},
-                },
-                headers=headers,
-            )
-            assert part_resp.status_code == 201, part_resp.text
+    report_resp = client.get(
+        f"/api/projects/{project['id']}/report-json", headers=headers
+    )
+    assert report_resp.status_code == 200, report_resp.text
+    payload = report_resp.json()
 
-        for image_idx in range(scenario["part_count"]):
-            files = {"file": (f"{project_type}_{scenario['user']}_{image_idx}.png", b"fake-png-data", "image/png")}
-            image_resp = client.post(
-                f"/api/projects/{project_id}/images",
-                files=files,
-                data={"metadata": _json.dumps({"synthetic_level": scenario["level"], "slot": image_idx})},
-                headers=headers,
-            )
-            assert image_resp.status_code == 201, image_resp.text
+    assert set(payload) == {"schema_version", "project", "summary", "parts"}
+    assert payload["schema_version"] == 3
+    assert set(payload["project"]) == {"id", "name", "project_type", "meta_group_id"}
+    assert payload["project"] == {
+        "id": project["id"],
+        "name": "Concise Inspection Report",
+        "project_type": "PT2",
+        "meta_group_id": "report-v2-group",
+    }
+    assert set(payload["summary"]) == {
+        "total_parts",
+        "reviewed_parts",
+        "unreviewed_parts",
+        "part_status_counts",
+    }
+    assert payload["summary"] == {
+        "total_parts": 5,
+        "reviewed_parts": 3,
+        "unreviewed_parts": 2,
+        "part_status_counts": {"pass": 1, "reject": 2, "unreviewed": 2},
+    }
 
-        report_resp = client.get(f"/api/projects/{project_id}/report-json", headers=headers)
-        assert report_resp.status_code == 200, report_resp.text
-        payload = report_resp.json()
-        assert payload["project"]["project_type"] == project_type
-        assert payload["summary"]["total_batches"] == scenario["batch_count"]
-        assert payload["summary"]["total_parts"] == scenario["batch_count"]
-        assert payload["summary"]["total_images"] == scenario["part_count"]
-        assert payload["summary"]["reviewed_parts"] >= 0
-        assert payload["summary"]["unreviewed_parts"] >= 0
-        assert payload["summary"]["part_status_counts"]["unreviewed"] >= 0
-        assert "part_assignments" in payload
-        assert "part_review_summary" in payload
-        assert "image_part_mappings" in payload
-        assert isinstance(payload["part_assignments"], list)
-        assert isinstance(payload["part_review_summary"], list)
-        assert isinstance(payload["image_part_mappings"], list)
-        assert {entry["review_status"] for entry in payload["part_review_summary"]}.issubset({"pass", "reject", "unreviewed"})
-        if payload["part_assignments"]:
-            assignment = payload["part_assignments"][0]
-            assert "part_identifier" in assignment
-            assert "pass_fail" in assignment
-            assert "username" in assignment
-            assert "batch_owner" in assignment
-            assert "assigned_at" in assignment
+    expected_by_serial = {
+        serial_number: inspection_result
+        for serial_number, _review_state, inspection_result, _reviewed in raw_parts
+    }
+    assert [row["part_identifier"] for row in payload["parts"]] == [
+        "SERIAL-A",
+        "SERIAL-B",
+        "SERIAL-C",
+        "SERIAL-M",
+        "SERIAL-Z",
+    ]
+    assert len(payload["parts"]) == len(created_parts)
+    assert len({row["part_id"] for row in payload["parts"]}) == len(created_parts)
+    for row in payload["parts"]:
+        assert set(row) == {"part_id", "part_identifier", "inspection_result"}
+        assert row["part_id"] == created_parts[row["part_identifier"]]["id"]
+        assert row["inspection_result"] == expected_by_serial[row["part_identifier"]]
+
+    v2_resp = client.get(
+        f"/api/projects/{project['id']}/report-json?schema_version=2",
+        headers=headers,
+    )
+    assert v2_resp.status_code == 200, v2_resp.text
+    v2_payload = v2_resp.json()
+    assert set(v2_payload) == {
+        "project",
+        "summary",
+        "part_assignments",
+        "part_review_summary",
+        "image_part_mappings",
+    }
+    assert v2_payload["summary"]["total_images"] == 2
+    assert v2_payload["summary"]["total_batches"] == 0
+    assert v2_payload["summary"]["total_parts"] == 5
+    assert v2_payload["summary"]["reviewed_parts"] == 3
+    assert v2_payload["summary"]["metadata_normalization"] == {
+        "dropped_non_object_items": {
+            "annotations": 0,
+            "overlay_layers": 0,
+            "segmentation_runs": 0,
+            "measurement_runs": 0,
+        }
+    }
+    assert len(v2_payload["part_assignments"]) == 5
+    assert len(v2_payload["part_review_summary"]) == 5
+    assert len(v2_payload["image_part_mappings"]) == 2
+    assert {row["filename"] for row in v2_payload["image_part_mappings"]} == {
+        "duplicate-source-0.png",
+        "duplicate-source-1.png",
+    }
+
+
+def test_project_json_report_v3_empty_project(client):
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Empty Inspection Report",
+            "description": "no parts",
+            "meta_group_id": "test-group",
+            "project_type": "PT3",
+        },
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project = project_resp.json()
+
+    report_resp = client.get(f"/api/projects/{project['id']}/report-json")
+    assert report_resp.status_code == 200, report_resp.text
+    payload = report_resp.json()
+
+    assert payload == {
+        "schema_version": 3,
+        "project": {
+            "id": project["id"],
+            "name": "Empty Inspection Report",
+            "project_type": "PT3",
+            "meta_group_id": "test-group",
+        },
+        "summary": {
+            "total_parts": 0,
+            "reviewed_parts": 0,
+            "unreviewed_parts": 0,
+            "part_status_counts": {"pass": 0, "reject": 0, "unreviewed": 0},
+        },
+        "parts": [],
+    }
 
 
 def test_project_json_report_forbidden_for_non_group_member(client):
@@ -600,16 +761,241 @@ def test_project_json_report_forbidden_for_non_group_member(client):
     assert project_resp.status_code == 201
     project_id = project_resp.json()["id"]
 
-    with patch("routers.export.is_user_in_group", return_value=False):
+    with patch("utils.dependencies.is_user_in_group", return_value=False):
         report_resp = client.get(f"/api/projects/{project_id}/report-json")
 
     assert report_resp.status_code == 403
 
 
+def _make_report_payload(part_rows, schema_version=3):
+    parts = [
+        {
+            "part_id": str(uuid.uuid4()),
+            "part_identifier": identifier,
+            "inspection_result": inspection_result,
+        }
+        for identifier, inspection_result in part_rows
+    ]
+    if schema_version == 2:
+        for part in parts:
+            part["reviewed"] = part["inspection_result"] != "unreviewed"
+    status_counts = {
+        status: sum(part["inspection_result"] == status for part in parts)
+        for status in ("pass", "reject", "unreviewed")
+    }
+    return {
+        "schema_version": schema_version,
+        "project": {
+            "id": str(uuid.uuid4()),
+            "name": "PDF Contract Project",
+            "project_type": "PT1",
+            "meta_group_id": "pdf-report-group",
+        },
+        "summary": {
+            "total_parts": len(parts),
+            "reviewed_parts": status_counts["pass"] + status_counts["reject"],
+            "unreviewed_parts": status_counts["unreviewed"],
+            "part_status_counts": status_counts,
+        },
+        "parts": parts,
+    }
+
+
+def _pdf_page_count(pdf_bytes):
+    return len(re.findall(rb"/Type /Page\b", pdf_bytes))
+
+
+def _pdf_content_streams(pdf_bytes):
+    return re.findall(rb"stream\n(.*?)\nendstream", pdf_bytes, flags=re.DOTALL)
+
+
+def _pdf_extracted_lines(pdf_bytes):
+    lines = []
+    for stream in _pdf_content_streams(pdf_bytes):
+        for encoded_line in re.findall(rb"^\((.*)\) Tj$", stream, flags=re.MULTILINE):
+            line = (
+                encoded_line.replace(rb"\\(", b"(")
+                .replace(rb"\\)", b")")
+                .replace(b"\\\\", b"\\")
+            )
+            lines.append(line.decode("latin-1"))
+    return lines
+
+
+def test_simple_pdf_report_renders_canonical_mixed_part_rows_once():
+    pdf_bytes = build_simple_report_pdf(
+        _make_report_payload(
+            [
+                ("PART-PASS", "pass"),
+                ("PART-REJECT", "reject"),
+                ("PART-UNREVIEWED", "unreviewed"),
+            ]
+        )
+    )
+
+    assert _pdf_page_count(pdf_bytes) == 1
+    assert b"Part" in pdf_bytes
+    assert b"Result" in pdf_bytes
+    table_headers = [
+        line for line in _pdf_extracted_lines(pdf_bytes) if line.startswith("Part ")
+    ]
+    assert len(table_headers) == 1
+    assert "Reviewed" not in table_headers[0]
+    assert pdf_bytes.count(b"PART-PASS") == 1
+    assert pdf_bytes.count(b"PART-REJECT") == 1
+    assert pdf_bytes.count(b"PART-UNREVIEWED") == 1
+    assert b"Part Pass/Fail Assignments" not in pdf_bytes
+    assert b"Part Status Summary" not in pdf_bytes
+    assert b"Image-to-Part Mapping" not in pdf_bytes
+
+
+def test_legacy_pdf_report_preserves_assignments_summary_and_mapping_pages():
+    payload = {
+        "project": {"id": "project-1", "name": "Legacy", "project_type": "PT1"},
+        "summary": {
+            "total_images": 1,
+            "total_batches": 1,
+            "total_parts": 1,
+            "reviewed_parts": 1,
+            "unreviewed_parts": 0,
+            "part_status_counts": {"pass": 1, "reject": 0, "unreviewed": 0},
+            "metadata_normalization": {"dropped_non_object_items": {}},
+        },
+        "part_assignments": [
+            {
+                "part_identifier": "PART-PASS",
+                "pass_fail": "pass",
+                "username": "inspector",
+                "batch_owner": "owner",
+                "assigned_at": "2026-01-01",
+            }
+        ],
+        "part_review_summary": [
+            {
+                "part_identifier": "PART-PASS",
+                "review_status": "pass",
+            }
+        ],
+        "image_part_mappings": [
+            {
+                "filename": "source.png",
+                "part_identifier": "PART-PASS",
+            }
+        ],
+    }
+    pdf_bytes = build_legacy_simple_report_pdf(payload)
+
+    assert _pdf_page_count(pdf_bytes) == 2
+    assert b"Part Pass/Fail Assignments" in pdf_bytes
+    assert b"Part Status Summary" in pdf_bytes
+    assert b"VISTA Report Image-to-Part Mapping" in pdf_bytes
+    assert b"source.png -> PART-PASS" in pdf_bytes
+
+
+def test_simple_pdf_report_renders_empty_part_table():
+    pdf_bytes = build_simple_report_pdf(_make_report_payload([]))
+
+    assert _pdf_page_count(pdf_bytes) == 1
+    assert b"Total Parts: 0" in pdf_bytes
+    assert b"\\(no parts\\)" in pdf_bytes
+    assert b"Page 1 of 1" in pdf_bytes
+
+
+def test_simple_pdf_report_paginates_every_part_without_truncation():
+    part_rows = [
+        (f"PAGE-PART-{index:03d}", ("pass", "reject", "unreviewed")[index % 3])
+        for index in range(85)
+    ]
+    pdf_bytes = build_simple_report_pdf(_make_report_payload(part_rows))
+
+    assert _pdf_page_count(pdf_bytes) == 3
+    assert b"/Count 3" in pdf_bytes
+    assert pdf_bytes.count(b"PAGE-PART-000") == 1
+    assert pdf_bytes.count(b"PAGE-PART-042") == 1
+    assert pdf_bytes.count(b"PAGE-PART-084") == 1
+    assert (
+        sum(pdf_bytes.count(f"PAGE-PART-{index:03d}".encode()) for index in range(85))
+        == 85
+    )
+    assert b"Page 3 of 3" in pdf_bytes
+
+
+def test_simple_pdf_report_escapes_and_wraps_special_long_identifier():
+    special_identifier = "PART (A) \\ control\nline\x01 café " + ("X" * 150)
+    pdf_bytes = build_simple_report_pdf(
+        _make_report_payload([(special_identifier, "reject")])
+    )
+
+    assert _pdf_page_count(pdf_bytes) == 1
+    assert b"PART \\(A\\) \\\\ control line  caf\xe9" in pdf_bytes
+    assert pdf_bytes.count(b"X") == 150
+    assert pdf_bytes.endswith(b"%%EOF")
+
+
+def test_simple_pdf_report_preserves_distinct_non_latin_identifiers_as_ascii_escapes():
+    pdf_bytes = build_simple_report_pdf(
+        _make_report_payload(
+            [
+                ("部品一", "pass"),
+                ("部品二", "reject"),
+            ]
+        )
+    )
+    extracted_text = "\n".join(_pdf_extracted_lines(pdf_bytes))
+
+    assert r"\u90e8\u54c1\u4e00" in extracted_text
+    assert r"\u90e8\u54c1\u4e8c" in extracted_text
+    assert r"\u90e8\u54c1\u4e00" != r"\u90e8\u54c1\u4e8c"
+    assert b"?" not in pdf_bytes
+
+
+def test_simple_pdf_report_wraps_max_length_project_header():
+    payload = _make_report_payload([("PART-001", "pass")])
+    payload["project"]["name"] = "P" * 255
+
+    extracted_lines = _pdf_extracted_lines(build_simple_report_pdf(payload))
+    project_lines = [
+        line.removeprefix("Project: ")
+        for line in extracted_lines
+        if line.startswith("Project: ") or (line and set(line) == {"P"})
+    ]
+
+    assert "".join(project_lines) == "P" * 255
+    assert all(len(line) <= 84 for line in extracted_lines)
+
+
+def test_simple_pdf_report_moves_a_wrapped_logical_row_intact_to_the_next_page():
+    short_rows = [(f"SHORT-{index:02d}", "pass") for index in range(39)]
+    long_identifier = "BOUNDARY-" + ("X" * 80)
+    pdf_bytes = build_simple_report_pdf(
+        _make_report_payload([*short_rows, (long_identifier, "reject")])
+    )
+    content_streams = _pdf_content_streams(pdf_bytes)
+
+    assert _pdf_page_count(pdf_bytes) == 2
+    assert b"BOUNDARY-" not in content_streams[0]
+    assert b"BOUNDARY-" in content_streams[1]
+    assert content_streams[1].count(b"reject") == 1
+    assert b"yes" not in content_streams[1]
+
+
+def test_simple_pdf_report_repeats_disposition_when_one_row_spans_pages():
+    huge_identifier = "HUGE-" + ("Z" * 5000)
+    content_streams = _pdf_content_streams(
+        build_simple_report_pdf(_make_report_payload([(huge_identifier, "reject")]))
+    )
+
+    assert len(content_streams) >= 2
+    assert all(
+        b"reject" in stream and b"yes" not in stream for stream in content_streams
+    )
+    assert sum(stream.count(b"Z") for stream in content_streams) == 5000
+
+
 def test_project_pdf_report_supports_export(client):
     headers = {
         "X-User-Id": "pdf-report@example.com",
-        "X-User-Groups": "[\"pdf-report-group\"]",
+        "X-User-Groups": '["pdf-report-group"]',
     }
     project_resp = client.post(
         "/api/projects/",
@@ -627,8 +1013,127 @@ def test_project_pdf_report_supports_export(client):
     report_resp = client.get(f"/api/projects/{project_id}/report-pdf", headers=headers)
     assert report_resp.status_code == 200, report_resp.text
     assert report_resp.headers["content-type"].startswith("application/pdf")
-    assert report_resp.headers["content-disposition"].endswith("-report.pdf\"")
+    assert (
+        'filename="PDF Report Project-report.pdf"'
+        in report_resp.headers["content-disposition"]
+    )
+    assert (
+        "filename*=UTF-8''PDF%20Report%20Project-report.pdf"
+        in report_resp.headers["content-disposition"]
+    )
     assert report_resp.content.startswith(b"%PDF-1.4")
+    v3_headers = [
+        line
+        for line in _pdf_extracted_lines(report_resp.content)
+        if line.startswith("Part ")
+    ]
+    assert len(v3_headers) == 1
+    assert "Reviewed" not in v3_headers[0]
+
+    v2_report_resp = client.get(
+        f"/api/projects/{project_id}/report-pdf?schema_version=2",
+        headers=headers,
+    )
+    assert v2_report_resp.status_code == 200, v2_report_resp.text
+    assert _pdf_page_count(v2_report_resp.content) == 2
+    assert b"Part Pass/Fail Assignments" in v2_report_resp.content
+    assert b"VISTA Report Image-to-Part Mapping" in v2_report_resp.content
+
+    for endpoint in ("report-json", "report-pdf"):
+        unsupported_resp = client.get(
+            f"/api/projects/{project_id}/{endpoint}?schema_version=4",
+            headers=headers,
+        )
+        assert unsupported_resp.status_code == 422
+        assert unsupported_resp.json()["detail"] == "schema_version must be 2 or 3"
+
+
+def test_project_pdf_report_uses_safe_unicode_content_disposition(client):
+    project_name = 'Résumé "部品"/QA\r\nX-Injected: yes'
+    headers = {
+        "X-User-Id": "pdf-header@example.com",
+        "X-User-Groups": '["pdf-header-group"]',
+    }
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": project_name,
+            "description": "pdf header hardening",
+            "meta_group_id": "pdf-header-group",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+
+    report_resp = client.get(
+        f"/api/projects/{project_resp.json()['id']}/report-pdf",
+        headers=headers,
+    )
+
+    assert report_resp.status_code == 200, report_resp.text
+    disposition = report_resp.headers["content-disposition"]
+    assert disposition.startswith('attachment; filename="')
+    assert "\r" not in disposition and "\n" not in disposition
+    assert "/" not in disposition and '\\"' not in disposition
+    assert "filename*=UTF-8''" in disposition
+    assert "%C3%A9" in disposition
+    assert "%E9%83%A8%E5%93%81" in disposition
+    assert "%0D" not in disposition and "%0A" not in disposition
+
+
+def test_project_report_with_images_pdf_endpoint_auth_filename_and_content(client):
+    project_name = 'Evidence Résumé "部品"/QA\r\nInjected'
+    headers = {
+        "X-User-Id": "evidence-report@example.com",
+        "X-User-Groups": '["evidence-report-group"]',
+    }
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": project_name,
+            "description": "image evidence report",
+            "meta_group_id": "evidence-report-group",
+            "project_type": "PT1",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+    synthetic_pdf = b"%PDF-1.4\nsynthetic evidence\n%%EOF"
+
+    with patch(
+        "routers.export.build_project_report_with_images_pdf",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                pdf_bytes=synthetic_pdf,
+                page_count=1,
+                panel_count=0,
+                omissions=[],
+            )
+        ),
+    ):
+        report_resp = client.get(
+            f"/api/projects/{project_id}/report-with-images-pdf",
+            headers=headers,
+        )
+
+    assert report_resp.status_code == 200, report_resp.text
+    assert report_resp.content == synthetic_pdf
+    assert report_resp.headers["content-type"].startswith("application/pdf")
+    disposition = report_resp.headers["content-disposition"]
+    assert "-report-with-images.pdf" in disposition
+    assert "filename*=UTF-8''" in disposition
+    assert "%C3%A9" in disposition
+    assert "%E9%83%A8%E5%93%81" in disposition
+    assert "\r" not in disposition and "\n" not in disposition
+
+    with patch("utils.dependencies.is_user_in_group", return_value=False):
+        forbidden_resp = client.get(
+            f"/api/projects/{project_id}/report-with-images-pdf",
+            headers={"X-User-Id": "outsider@example.com", "X-User-Groups": "[]"},
+        )
+    assert forbidden_resp.status_code == 403
 
 
 def test_project_bundle_json_supports_progressive_users_per_project_type(client):
@@ -752,32 +1257,68 @@ def test_project_bundle_json_supports_progressive_users_per_project_type(client)
                 image_resp = client.post(
                     f"/api/projects/{project_id}/images",
                     files=files,
-                    data={"metadata": _json.dumps({"slot": image_idx, "scenario": scenario["user"]})},
+                    data={
+                        "metadata": _json.dumps(
+                            {"slot": image_idx, "scenario": scenario["user"]}
+                        )
+                    },
                     headers=headers,
                 )
                 assert image_resp.status_code == 201, image_resp.text
 
-            bundle_resp = client.get(f"/api/projects/{project_id}/export-bundle-json", headers=headers)
+            bundle_resp = client.get(
+                f"/api/projects/{project_id}/export-bundle-json", headers=headers
+            )
             assert bundle_resp.status_code == 200, bundle_resp.text
             payload = bundle_resp.json()
             assert payload["project"]["project_type"] == project_type
-            assert payload["bundle_summary"]["images"]["total"] == scenario["image_count"]
+            assert (
+                payload["bundle_summary"]["images"]["total"] == scenario["image_count"]
+            )
             assert payload["bundle_summary"]["parts"]["total"] == scenario["part_count"]
-            assert payload["bundle_summary"]["annotations"]["total"] == total_annotations
-            assert len(payload["bundle_summary"]["annotations"]["records"]) == total_annotations
-            assert payload["bundle_summary"]["overlays"]["configured_layers"] == total_overlay_layers
-            assert payload["bundle_summary"]["overlays"]["segmentation_runs"] == total_segmentation_runs
-            assert len(payload["bundle_summary"]["overlays"]["records"]) == total_overlay_layers
-            assert payload["bundle_summary"]["measurements"]["ai_runs"] == total_measurement_runs
-            assert len(payload["bundle_summary"]["measurements"]["records"]) == total_measurement_runs
+            assert (
+                payload["bundle_summary"]["annotations"]["total"] == total_annotations
+            )
+            assert (
+                len(payload["bundle_summary"]["annotations"]["records"])
+                == total_annotations
+            )
+            assert (
+                payload["bundle_summary"]["overlays"]["configured_layers"]
+                == total_overlay_layers
+            )
+            assert (
+                payload["bundle_summary"]["overlays"]["segmentation_runs"]
+                == total_segmentation_runs
+            )
+            assert (
+                len(payload["bundle_summary"]["overlays"]["records"])
+                == total_overlay_layers
+            )
+            assert (
+                payload["bundle_summary"]["measurements"]["ai_runs"]
+                == total_measurement_runs
+            )
+            assert (
+                len(payload["bundle_summary"]["measurements"]["records"])
+                == total_measurement_runs
+            )
             assert payload["bundle_summary"]["images"]["total_bytes"] > 0
-            assert len(payload["bundle_summary"]["discrepancies"]["per_part"]) == scenario["part_count"]
+            assert (
+                len(payload["bundle_summary"]["discrepancies"]["per_part"])
+                == scenario["part_count"]
+            )
             expected_discrepancy_parts = 1 if scenario["level"] > 1 else 0
-            assert payload["bundle_summary"]["discrepancies"]["parts_with_discrepancies"] == expected_discrepancy_parts
+            assert (
+                payload["bundle_summary"]["discrepancies"]["parts_with_discrepancies"]
+                == expected_discrepancy_parts
+            )
 
 
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
-def test_project_bundle_json_ignores_adversarial_non_list_metadata_shapes(client, project_type):
+def test_project_bundle_json_ignores_adversarial_non_list_metadata_shapes(
+    client, project_type
+):
     group = f"bundle-json-adversarial-{project_type.lower()}"
     headers = {"X-Forwarded-Email": f"adversary@{group}.test"}
 
@@ -819,7 +1360,9 @@ def test_project_bundle_json_ignores_adversarial_non_list_metadata_shapes(client
     )
     assert part_resp.status_code == 201, part_resp.text
 
-    bundle_resp = client.get(f"/api/projects/{project_id}/export-bundle-json", headers=headers)
+    bundle_resp = client.get(
+        f"/api/projects/{project_id}/export-bundle-json", headers=headers
+    )
     assert bundle_resp.status_code == 200, bundle_resp.text
     payload = bundle_resp.json()
 
@@ -836,7 +1379,9 @@ def test_project_bundle_json_ignores_adversarial_non_list_metadata_shapes(client
 
 
 @pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
-def test_project_bundle_json_flags_dropped_non_object_metadata_items(client, project_type):
+def test_project_bundle_json_flags_dropped_non_object_metadata_items(
+    client, project_type
+):
     group = f"bundle-json-dropped-{project_type.lower()}"
     headers = {"X-Forwarded-Email": f"normalizer@{group}.test"}
 
@@ -868,8 +1413,15 @@ def test_project_bundle_json_flags_dropped_non_object_metadata_items(client, pro
             "display_name": "mixed-list-part",
             "batch_id": batch_id,
             "metadata": {
-                "annotations": [{"id": "ann-1", "defect_class": "scratch", "modality": "rgb"}, "junk", 5],
-                "overlay_layers": [{"id": "overlay-1", "label": "Mask", "color": "#22c55e"}, 9],
+                "annotations": [
+                    {"id": "ann-1", "defect_class": "scratch", "modality": "rgb"},
+                    "junk",
+                    5,
+                ],
+                "overlay_layers": [
+                    {"id": "overlay-1", "label": "Mask", "color": "#22c55e"},
+                    9,
+                ],
                 "segmentation_runs": [{"overlay_id": "overlay-1"}, None],
                 "measurement_runs": [{"run_id": "run-1", "status": "completed"}, False],
             },
@@ -878,7 +1430,9 @@ def test_project_bundle_json_flags_dropped_non_object_metadata_items(client, pro
     )
     assert part_resp.status_code == 201, part_resp.text
 
-    bundle_resp = client.get(f"/api/projects/{project_id}/export-bundle-json", headers=headers)
+    bundle_resp = client.get(
+        f"/api/projects/{project_id}/export-bundle-json", headers=headers
+    )
     assert bundle_resp.status_code == 200, bundle_resp.text
     payload = bundle_resp.json()
     part_summary = payload["bundle_summary"]["discrepancies"]["per_part"][0]
@@ -905,84 +1459,10 @@ def test_project_bundle_json_forbidden_for_non_group_member(client):
     assert project_resp.status_code == 201
     project_id = project_resp.json()["id"]
 
-    with patch("routers.export.is_user_in_group", return_value=False):
+    with patch("utils.dependencies.is_user_in_group", return_value=False):
         bundle_resp = client.get(f"/api/projects/{project_id}/export-bundle-json")
 
     assert bundle_resp.status_code == 403
-
-
-@pytest.mark.parametrize("project_type", ["PT1", "PT2", "PT3"])
-def test_project_json_report_tracks_metadata_normalization_with_progressive_users(client, project_type):
-    scenarios = (
-        {"user": "report-mixed-basic", "level": 1, "part_count": 1, "dropped_per_part": 1},
-        {"user": "report-mixed-intermediate", "level": 2, "part_count": 2, "dropped_per_part": 2},
-        {"user": "report-mixed-advanced", "level": 3, "part_count": 3, "dropped_per_part": 3},
-    )
-    for scenario in scenarios:
-        group = f"report-norm-{project_type.lower()}-{scenario['user']}"
-        headers = {"X-Forwarded-Email": f"{scenario['user']}@{group}.test"}
-        project_resp = client.post(
-            "/api/projects/",
-            json={
-                "name": f"Report normalization {project_type} {scenario['user']}",
-                "description": "report metadata normalization coverage",
-                "meta_group_id": group,
-                "project_type": project_type,
-            },
-            headers=headers,
-        )
-        assert project_resp.status_code == 201, project_resp.text
-        project_id = project_resp.json()["id"]
-
-        for idx in range(scenario["part_count"]):
-            batch_resp = client.post(
-                f"/api/projects/{project_id}/batches",
-                json={"name": f"batch-{idx}", "description": f"batch {idx}"},
-                headers=headers,
-            )
-            assert batch_resp.status_code == 201, batch_resp.text
-            batch_id = batch_resp.json()["id"]
-
-            annotations = [{"id": f"ann-{idx}", "defect_class": "scratch", "modality": "rgb"}]
-            annotations.extend([f"noise-{n}" for n in range(scenario["dropped_per_part"])])
-            part_resp = client.post(
-                f"/api/projects/{project_id}/parts",
-                json={
-                    "serial_number": f"{project_type}-REPORT-{scenario['level']}-{idx}",
-                    "display_name": f"report-part-{idx}",
-                    "batch_id": batch_id,
-                    "review_state": "pass" if idx % 2 == 0 else "unreviewed",
-                    "metadata": {
-                        "annotations": annotations,
-                        "overlay_layers": [{"id": f"overlay-{idx}", "label": "Mask", "color": "#22c55e"}],
-                        "segmentation_runs": [{"overlay_id": f"overlay-{idx}"}],
-                        "measurement_runs": [{"run_id": f"run-{idx}", "status": "completed"}],
-                    },
-                },
-                headers=headers,
-            )
-            assert part_resp.status_code == 201, part_resp.text
-
-            image_resp = client.post(
-                f"/api/projects/{project_id}/images",
-                files={"file": (f"report_{idx}.png", b"report-bytes", "image/png")},
-                data={"metadata": _json.dumps({"scenario": scenario["user"], "index": idx})},
-                headers=headers,
-            )
-            assert image_resp.status_code == 201, image_resp.text
-
-        report_resp = client.get(f"/api/projects/{project_id}/report-json", headers=headers)
-        assert report_resp.status_code == 200, report_resp.text
-        payload = report_resp.json()
-        assert payload["project"]["project_type"] == project_type
-        assert payload["summary"]["total_parts"] == scenario["part_count"]
-        assert payload["summary"]["total_images"] == scenario["part_count"]
-        assert payload["summary"]["metadata_normalization"]["dropped_non_object_items"]["annotations"] == (
-            scenario["part_count"] * scenario["dropped_per_part"]
-        )
-        assert payload["summary"]["metadata_normalization"]["dropped_non_object_items"]["overlay_layers"] == 0
-        assert payload["summary"]["metadata_normalization"]["dropped_non_object_items"]["segmentation_runs"] == 0
-        assert payload["summary"]["metadata_normalization"]["dropped_non_object_items"]["measurement_runs"] == 0
 
 
 def test_project_bundle_archive_supports_progressive_users_per_project_type(client):
@@ -1043,9 +1523,23 @@ def test_project_bundle_archive_supports_progressive_users_per_project_type(clie
                         "batch_id": batch_id,
                         "metadata": {
                             "synthetic_level": scenario["level"],
-                            "annotations": [{"id": f"ann-{idx}", "defect_class": "scratch", "modality": "rgb"}],
-                            "overlay_layers": [{"id": f"overlay-{idx}", "label": "Mask", "color": "#22c55e"}],
-                            "measurement_runs": [{"run_id": f"measure-{idx}", "status": "completed"}],
+                            "annotations": [
+                                {
+                                    "id": f"ann-{idx}",
+                                    "defect_class": "scratch",
+                                    "modality": "rgb",
+                                }
+                            ],
+                            "overlay_layers": [
+                                {
+                                    "id": f"overlay-{idx}",
+                                    "label": "Mask",
+                                    "color": "#22c55e",
+                                }
+                            ],
+                            "measurement_runs": [
+                                {"run_id": f"measure-{idx}", "status": "completed"}
+                            ],
                         },
                     },
                     headers=headers,
@@ -1063,12 +1557,18 @@ def test_project_bundle_archive_supports_progressive_users_per_project_type(clie
                 image_resp = client.post(
                     f"/api/projects/{project_id}/images",
                     files=files,
-                    data={"metadata": _json.dumps({"slot": image_idx, "scenario": scenario["user"]})},
+                    data={
+                        "metadata": _json.dumps(
+                            {"slot": image_idx, "scenario": scenario["user"]}
+                        )
+                    },
                     headers=headers,
                 )
                 assert image_resp.status_code == 201, image_resp.text
 
-            bundle_resp = client.get(f"/api/projects/{project_id}/export-bundle", headers=headers)
+            bundle_resp = client.get(
+                f"/api/projects/{project_id}/export-bundle", headers=headers
+            )
             assert bundle_resp.status_code == 200, bundle_resp.text
             assert bundle_resp.headers["content-type"].startswith("application/zip")
             assert ".zip" in bundle_resp.headers.get("content-disposition", "")
@@ -1082,19 +1582,33 @@ def test_project_bundle_archive_supports_progressive_users_per_project_type(clie
                 assert "images.toml" in names
                 assert "parts.toml" in names
                 assert "created-overlays.toml" in names
-                manifest = _json.loads(archive.read("export-manifest.json").decode("utf-8"))
+                manifest = _json.loads(
+                    archive.read("export-manifest.json").decode("utf-8")
+                )
                 manifest_toml = archive.read("export-manifest.toml").decode("utf-8")
                 parts_toml = archive.read("parts.toml").decode("utf-8")
 
             assert manifest["project"]["project_type"] == project_type
-            assert manifest["export"]["options"]["include_project_configuration"] is True
+            assert (
+                manifest["export"]["options"]["include_project_configuration"] is True
+            )
             assert "[project]" in manifest_toml
             assert "[[image_references]]" in manifest_toml
             assert "[[parts]]" in parts_toml
-            assert manifest["bundle_summary"]["parts"]["total"] == scenario["part_count"]
-            assert manifest["bundle_summary"]["images"]["total"] == scenario["image_count"]
-            assert len(manifest["bundle_summary"]["overlays"]["records"]) == scenario["part_count"]
-            assert len(manifest["bundle_summary"]["measurements"]["records"]) == scenario["part_count"]
+            assert (
+                manifest["bundle_summary"]["parts"]["total"] == scenario["part_count"]
+            )
+            assert (
+                manifest["bundle_summary"]["images"]["total"] == scenario["image_count"]
+            )
+            assert (
+                len(manifest["bundle_summary"]["overlays"]["records"])
+                == scenario["part_count"]
+            )
+            assert (
+                len(manifest["bundle_summary"]["measurements"]["records"])
+                == scenario["part_count"]
+            )
             assert len(manifest["image_references"]) == scenario["image_count"]
 
 
@@ -1146,22 +1660,86 @@ def test_project_bundle_archive_respects_export_option_flags(client):
     assert manifest["image_references"][0]["archive_path"] == ""
 
 
+def test_project_bundle_archive_streams_image_artifacts_as_valid_zip(
+    client, monkeypatch
+):
+    headers = {"X-Forwarded-Email": "bundle-images@bundle-images.test"}
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Bundle Images Only",
+            "description": "image artifact export coverage",
+            "meta_group_id": "bundle-images",
+            "project_type": "PT2",
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    image_bytes = b"image-bytes" * 200_000
+    image_resp = client.post(
+        f"/api/projects/{project_id}/images",
+        files={"file": ("loaded_image.png", image_bytes, "image/png")},
+        data={"metadata": _json.dumps({"overlay": False})},
+        headers=headers,
+    )
+    assert image_resp.status_code == 201, image_resp.text
+    image_key = image_resp.json()["object_storage_key"]
+
+    class FakeS3Client:
+        def download_fileobj(self, bucket, key, fileobj):
+            assert key == image_key
+            midpoint = len(image_bytes) // 2
+            fileobj.write(image_bytes[:midpoint])
+            fileobj.write(image_bytes[midpoint:])
+
+    monkeypatch.setattr(object_storage, "boto3_client", FakeS3Client())
+
+    bundle_resp = client.get(
+        (
+            f"/api/projects/{project_id}/export-bundle"
+            "?include_images=true"
+            "&include_overlays=false"
+            "&include_metadata=false"
+            "&include_created_overlays=false"
+            "&include_project_configuration=false"
+        ),
+        headers=headers,
+    )
+    assert bundle_resp.status_code == 200, bundle_resp.text
+
+    with zipfile.ZipFile(io.BytesIO(bundle_resp.content)) as archive:
+        assert archive.testzip() is None
+        manifest = _json.loads(archive.read("manifest.json").decode("utf-8"))
+        project_backup = _json.loads(
+            archive.read(f"projects/{project_id}/project-backup.json").decode("utf-8")
+        )
+        image_ref = project_backup["images"][0]
+        assert archive.read(image_ref["archive_path"]) == image_bytes
+
+    assert manifest["artifact_counts"]["files_written"] == 1
+    assert manifest["artifact_counts"]["files_missing"] == 0
+
+
 # ---------------------------------------------------------------------------
-# Unit tests for _build_workbook helper
+# Unit tests for build_workbook helper
 # ---------------------------------------------------------------------------
 
+
 class TestBuildWorkbook:
-    """Tests for the _build_workbook helper function."""
+    """Tests for the build_workbook helper function."""
 
     def _load(self, wb):
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
         from openpyxl import load_workbook
+
         return load_workbook(buf)
 
     def test_empty_rows_no_meta_keys_produces_six_columns(self):
-        wb = _build_workbook("Test", [], [])
+        wb = build_workbook("Test", [], [])
         ws = self._load(wb).active
         assert ws.max_row == 1
         # Columns: Filename, Review Status, Reviewer, Review Date, Image Classes, Comment
@@ -1175,7 +1753,7 @@ class TestBuildWorkbook:
 
     def test_meta_keys_become_columns(self):
         meta_keys = ["lot_number", "serial"]
-        wb = _build_workbook("Test", [], meta_keys)
+        wb = build_workbook("Test", [], meta_keys)
         ws = self._load(wb).active
         # Columns: Filename, lot_number, serial, Review Status, Reviewer, Review Date,
         #          Image Classes, Comment
@@ -1190,13 +1768,13 @@ class TestBuildWorkbook:
         assert ws.max_column == 8
 
     def test_freeze_panes_set(self):
-        wb = _build_workbook("Test", [{"filename": "a.png"}], [])
+        wb = build_workbook("Test", [{"filename": "a.png"}], [])
         ws = self._load(wb).active
         assert ws.freeze_panes == "A2"
 
     def test_autofilter_set_with_data(self):
         rows = [{"filename": f"img{i}.png"} for i in range(3)]
-        wb = _build_workbook("Test", rows, [])
+        wb = build_workbook("Test", rows, [])
         ws = self._load(wb).active
         assert ws.auto_filter.ref is not None
         assert "A1" in ws.auto_filter.ref
@@ -1205,30 +1783,34 @@ class TestBuildWorkbook:
         assert "F4" in ws.auto_filter.ref
 
     def test_autofilter_not_set_for_empty(self):
-        wb = _build_workbook("Test", [], [])
+        wb = build_workbook("Test", [], [])
         ws = self._load(wb).active
         assert ws.auto_filter.ref is None
 
     def test_header_styling(self):
-        wb = _build_workbook("Test", [], [])
+        wb = build_workbook("Test", [], [])
         ws = self._load(wb).active
         header_cell = ws.cell(row=1, column=1)
         assert header_cell.font.bold is True
         assert header_cell.fill.start_color.rgb is not None
 
     def test_column_count_no_meta_keys(self):
-        wb = _build_workbook("Test", [], [])
+        wb = build_workbook("Test", [], [])
         ws = self._load(wb).active
-        assert ws.max_column == 6  # Filename + Review Status + Reviewer + Review Date + Image Classes + Comment
+        assert (
+            ws.max_column == 6
+        )  # Filename + Review Status + Reviewer + Review Date + Image Classes + Comment
 
     def test_column_count_with_meta_keys(self):
         meta_keys = ["a", "b", "c"]
-        wb = _build_workbook("Test", [], meta_keys)
+        wb = build_workbook("Test", [], meta_keys)
         ws = self._load(wb).active
-        assert ws.max_column == 9  # Filename + 3 keys + Review Status + Reviewer + Review Date + Image Classes + Comment
+        assert (
+            ws.max_column == 9
+        )  # Filename + 3 keys + Review Status + Reviewer + Review Date + Image Classes + Comment
 
     def test_sheet_title(self):
-        wb = _build_workbook("My Project", [], [])
+        wb = build_workbook("My Project", [], [])
         ws = self._load(wb).active
         assert ws.title == "Image Data"
 
@@ -1239,7 +1821,7 @@ class TestBuildWorkbook:
             {"filename": "img2.png", "lot_number": "L2"},
             {"filename": "img3.png", "lot_number": "L3"},
         ]
-        wb = _build_workbook("Test", rows, meta_keys)
+        wb = build_workbook("Test", rows, meta_keys)
         ws = self._load(wb).active
         assert ws.max_row == 4
         assert ws.cell(row=2, column=1).value == "img1.png"
@@ -1250,7 +1832,7 @@ class TestBuildWorkbook:
         """Row dicts missing some keys should produce empty cells."""
         meta_keys = ["lot_number", "serial"]
         rows = [{"filename": "img.png", "lot_number": "L1"}]  # missing "serial"
-        wb = _build_workbook("Test", rows, meta_keys)
+        wb = build_workbook("Test", rows, meta_keys)
         ws = self._load(wb).active
         # serial (col 3) should be empty
         assert ws.cell(row=2, column=3).value in (None, "")
@@ -1258,7 +1840,7 @@ class TestBuildWorkbook:
     def test_metadata_values_written_correctly(self):
         meta_keys = ["status", "part"]
         rows = [{"filename": "x.png", "status": "Pass", "part": "P-001"}]
-        wb = _build_workbook("Test", rows, meta_keys)
+        wb = build_workbook("Test", rows, meta_keys)
         ws = self._load(wb).active
         assert ws.cell(row=2, column=1).value == "x.png"
         assert ws.cell(row=2, column=2).value == "Pass"
@@ -1272,18 +1854,19 @@ class TestBuildWorkbook:
             {"filename": "+safe", "formula_field": "-value"},
             {"filename": "@user", "formula_field": "normal"},
         ]
-        wb = _build_workbook("Test", rows, meta_keys)
+        wb = build_workbook("Test", rows, meta_keys)
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
         from openpyxl import load_workbook
+
         ws = load_workbook(buf).active
         # Values starting with formula chars are stored as text via quotePrefix
-        assert ws.cell(row=2, column=1).quotePrefix is True   # "=CMD"
-        assert ws.cell(row=2, column=2).quotePrefix is True   # "=SUM(A1)"
-        assert ws.cell(row=3, column=1).quotePrefix is True   # "+safe"
-        assert ws.cell(row=3, column=2).quotePrefix is True   # "-value"
-        assert ws.cell(row=4, column=1).quotePrefix is True   # "@user"
+        assert ws.cell(row=2, column=1).quotePrefix is True  # "=CMD"
+        assert ws.cell(row=2, column=2).quotePrefix is True  # "=SUM(A1)"
+        assert ws.cell(row=3, column=1).quotePrefix is True  # "+safe"
+        assert ws.cell(row=3, column=2).quotePrefix is True  # "-value"
+        assert ws.cell(row=4, column=1).quotePrefix is True  # "@user"
         # Normal values must not have quotePrefix set
         assert ws.cell(row=4, column=2).quotePrefix is False  # "normal"
         # Values are preserved verbatim
@@ -1293,11 +1876,12 @@ class TestBuildWorkbook:
     def test_formula_injection_header_cells_have_quote_prefix(self):
         """Header cells from metadata keys starting with formula chars must have quotePrefix."""
         meta_keys = ["=evil_key", "+tricky", "@mention", "normal_key"]
-        wb = _build_workbook("Test", [], meta_keys)
+        wb = build_workbook("Test", [], meta_keys)
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
         from openpyxl import load_workbook
+
         ws = load_workbook(buf).active
         # Metadata key headers are columns 2-5 (column 1 is Filename)
         assert ws.cell(row=1, column=2).value == "=evil_key"
@@ -1314,12 +1898,15 @@ class TestBuildWorkbook:
 
 
 def test_project_backup_import_preview_and_restore_as_new(client):
-    project_resp = client.post("/api/projects/", json={
-        "name": "Restorable Project",
-        "description": "round trip backup",
-        "meta_group_id": "test-group",
-        "project_type": "PT2",
-    })
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Restorable Project",
+            "description": "round trip backup",
+            "meta_group_id": "test-group",
+            "project_type": "PT2",
+        },
+    )
     assert project_resp.status_code == 201, project_resp.text
     project = project_resp.json()
     image_resp = client.post(
@@ -1329,7 +1916,9 @@ def test_project_backup_import_preview_and_restore_as_new(client):
     )
     assert image_resp.status_code == 201, image_resp.text
 
-    export_resp = client.get(f"/api/projects/{project['id']}/export-bundle?include_images=false")
+    export_resp = client.get(
+        f"/api/projects/{project['id']}/export-bundle?include_images=false"
+    )
     assert export_resp.status_code == 200, export_resp.text
     assert int(export_resp.headers["x-vista-backup-estimated-bytes"]) > 0
     with zipfile.ZipFile(io.BytesIO(export_resp.content)) as archive:
@@ -1369,16 +1958,22 @@ def test_project_backup_import_preview_and_restore_as_new(client):
     assert len(restored_images) == 1
     assert restored_images[0]["filename"] == "restore.png"
     assert restored_images[0]["metadata"]["serial"] == "RESTORE-001"
-    assert restored_images[0]["metadata"]["source_backup"]["image_id"] == image_resp.json()["id"]
+    assert (
+        restored_images[0]["metadata"]["source_backup"]["image_id"]
+        == image_resp.json()["id"]
+    )
 
 
 def test_dashboard_backup_export_and_import_preview(client):
-    project_resp = client.post("/api/projects/", json={
-        "name": "Dashboard Backup Project",
-        "description": "dashboard backup",
-        "meta_group_id": "test-group",
-        "project_type": "PT1",
-    })
+    project_resp = client.post(
+        "/api/projects/",
+        json={
+            "name": "Dashboard Backup Project",
+            "description": "dashboard backup",
+            "meta_group_id": "test-group",
+            "project_type": "PT1",
+        },
+    )
     assert project_resp.status_code == 201, project_resp.text
     project_id = project_resp.json()["id"]
 
@@ -1388,15 +1983,21 @@ def test_dashboard_backup_export_and_import_preview(client):
             "include_images": False,
             "include_overlays": False,
             "include_ui_state": True,
-            "dashboard_state": {"gallery_state": {"gallery_state_demo": {"sortBy": "name"}}},
+            "dashboard_state": {
+                "gallery_state": {"gallery_state_demo": {"sortBy": "name"}}
+            },
         },
     )
     assert export_resp.status_code == 200, export_resp.text
-    assert export_resp.headers["content-type"].startswith("application/vnd.vista.dashboard-backup+zip")
+    assert export_resp.headers["content-type"].startswith(
+        "application/vnd.vista.dashboard-backup+zip"
+    )
     assert int(export_resp.headers["x-vista-backup-estimated-bytes"]) > 0
     with zipfile.ZipFile(io.BytesIO(export_resp.content)) as archive:
         manifest = _json.loads(archive.read("manifest.json").decode("utf-8"))
-        dashboard_state = _json.loads(archive.read("dashboard-state.json").decode("utf-8"))
+        dashboard_state = _json.loads(
+            archive.read("dashboard-state.json").decode("utf-8")
+        )
         names = archive.namelist()
     assert manifest["format"] == "vista-dashboard-backup"
     assert manifest["project_count"] == 1
@@ -1405,7 +2006,9 @@ def test_dashboard_backup_export_and_import_preview(client):
 
     preview_resp = client.post(
         "/api/dashboard/import/preview",
-        files={"file": ("dashboard.vistabundle", export_resp.content, "application/zip")},
+        files={
+            "file": ("dashboard.vistabundle", export_resp.content, "application/zip")
+        },
     )
     assert preview_resp.status_code == 200, preview_resp.text
     assert preview_resp.json()["format"] == "vista-dashboard-backup"
@@ -1416,8 +2019,16 @@ def test_project_import_into_active_project_append_tags_duplicate_part_serials(c
     group = "active-import-append"
     headers = {"X-Forwarded-Email": f"user@{group}.test"}
 
-    source_resp = client.post("/api/projects/", json={"name": "Source", "meta_group_id": group}, headers=headers)
-    target_resp = client.post("/api/projects/", json={"name": "Target", "meta_group_id": group}, headers=headers)
+    source_resp = client.post(
+        "/api/projects/",
+        json={"name": "Source", "meta_group_id": group},
+        headers=headers,
+    )
+    target_resp = client.post(
+        "/api/projects/",
+        json={"name": "Target", "meta_group_id": group},
+        headers=headers,
+    )
     assert source_resp.status_code == 201, source_resp.text
     assert target_resp.status_code == 201, target_resp.text
     source_id = source_resp.json()["id"]
@@ -1431,7 +2042,9 @@ def test_project_import_into_active_project_append_tags_duplicate_part_serials(c
         )
         assert part_resp.status_code == 201, part_resp.text
 
-    bundle_resp = client.get(f"/api/projects/{source_id}/export-bundle", headers=headers)
+    bundle_resp = client.get(
+        f"/api/projects/{source_id}/export-bundle", headers=headers
+    )
     assert bundle_resp.status_code == 200, bundle_resp.text
 
     import_resp = client.post(
@@ -1453,8 +2066,16 @@ def test_project_import_into_active_project_overwrite_replaces_current_parts(cli
     group = "active-import-overwrite"
     headers = {"X-Forwarded-Email": f"user@{group}.test"}
 
-    source_resp = client.post("/api/projects/", json={"name": "Source", "meta_group_id": group}, headers=headers)
-    target_resp = client.post("/api/projects/", json={"name": "Target", "meta_group_id": group}, headers=headers)
+    source_resp = client.post(
+        "/api/projects/",
+        json={"name": "Source", "meta_group_id": group},
+        headers=headers,
+    )
+    target_resp = client.post(
+        "/api/projects/",
+        json={"name": "Target", "meta_group_id": group},
+        headers=headers,
+    )
     assert source_resp.status_code == 201, source_resp.text
     assert target_resp.status_code == 201, target_resp.text
     source_id = source_resp.json()["id"]
@@ -1473,7 +2094,9 @@ def test_project_import_into_active_project_overwrite_replaces_current_parts(cli
     assert source_part_resp.status_code == 201, source_part_resp.text
     assert target_part_resp.status_code == 201, target_part_resp.text
 
-    bundle_resp = client.get(f"/api/projects/{source_id}/export-bundle", headers=headers)
+    bundle_resp = client.get(
+        f"/api/projects/{source_id}/export-bundle", headers=headers
+    )
     assert bundle_resp.status_code == 200, bundle_resp.text
 
     import_resp = client.post(

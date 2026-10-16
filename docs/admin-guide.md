@@ -132,7 +132,7 @@ podman logs -f vista
 pg_dump -h localhost -U postgres imagemanager > backup.sql
 
 # Check application health
-curl http://localhost:8000/health
+curl http://localhost:8000/api/health
 ```
 
 ### Environment Files

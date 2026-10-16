@@ -1,4 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import {
+  assignImagesToGroup,
+  fetchGroup,
+  fetchProjectGroups,
+  removeImagesFromGroup,
+} from '../api/groups';
 
 /**
  * ImageGroupPanel - shows and allows editing the group assignment for an image.
@@ -22,8 +28,7 @@ function ImageGroupPanel({ imageId, projectId, groupId, onGroupChanged, readOnly
   // hundreds of groups should consider adding server-side search/pagination here.
   useEffect(() => {
     if (!projectId) return;
-    fetch(`/api/projects/${projectId}/groups?limit=500`)
-      .then(r => r.ok ? r.json() : { groups: [] })
+    fetchProjectGroups(projectId, { limit: 500 })
       .then(data => setGroups(data.groups || []))
       .catch(() => {});
   }, [projectId]);
@@ -31,8 +36,7 @@ function ImageGroupPanel({ imageId, projectId, groupId, onGroupChanged, readOnly
   // Resolve current group name
   useEffect(() => {
     if (groupId) {
-      fetch(`/api/groups/${groupId}`)
-        .then(r => r.ok ? r.json() : null)
+      fetchGroup(groupId)
         .then(data => setCurrentGroup(data))
         .catch(() => {});
     } else {
@@ -47,20 +51,10 @@ function ImageGroupPanel({ imageId, projectId, groupId, onGroupChanged, readOnly
     try {
       if (selectedGroupId) {
         // Assign image to group
-        const resp = await fetch(`/api/groups/${selectedGroupId}/images`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([imageId]),
-        });
-        if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
+        await assignImagesToGroup(selectedGroupId, [imageId]);
       } else if (groupId) {
         // Remove from current group
-        const resp = await fetch(`/api/groups/${groupId}/images`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([imageId]),
-        });
-        if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
+        await removeImagesFromGroup(groupId, [imageId]);
       }
       setEditing(false);
       if (onGroupChanged) onGroupChanged(selectedGroupId || null);

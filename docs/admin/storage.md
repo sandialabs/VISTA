@@ -425,15 +425,15 @@ For large files, use multipart upload (handled automatically by boto3):
 ```python
 # In application code (automatic for files > 5GB)
 s3_client.upload_file(
-    '/path/to/large/file',
-    'bucket',
-    'key',
+    "/path/to/large/file",
+    "bucket",
+    "key",
     Config=boto3.s3.transfer.TransferConfig(
         multipart_threshold=1024 * 25,  # 25 MB
         max_concurrency=10,
         multipart_chunksize=1024 * 25,
-        use_threads=True
-    )
+        use_threads=True,
+    ),
 )
 ```
 
@@ -498,9 +498,7 @@ Application uses presigned URLs for secure temporary access:
 ```python
 # URL expires after 1 hour
 url = s3_client.generate_presigned_url(
-    'get_object',
-    Params={'Bucket': bucket, 'Key': key},
-    ExpiresIn=3600
+    "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
 )
 ```
 

@@ -26,6 +26,7 @@ function GalleryListView({
             key={image.id}
             className={`gallery-list-row ${selectedImages.has(image.id) ? 'selected' : ''} ${image.deleted_at ? 'deleted' : ''}`}
             role="button"
+            aria-label={image.displayName || image.filename || 'Unnamed image'}
             tabIndex={0}
             onMouseDown={(e) => {
               if (e.shiftKey) e.preventDefault();
@@ -57,7 +58,7 @@ function GalleryListView({
               <span className={`custom-check ${selectedImages.has(image.id) ? 'checked' : ''}`} />
             </div>
             <div className="gallery-list-cell gallery-list-cell-filename">
-              {image.filename || 'Unnamed image'}
+              {image.displayName || image.filename || 'Unnamed image'}
               {image.deleted_at && (
                 <span className="item-status" style={{ color: '#c0392b', fontWeight: '600', marginLeft: '6px' }}>Deleted</span>
               )}

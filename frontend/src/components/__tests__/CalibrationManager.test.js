@@ -283,7 +283,7 @@ describe('CalibrationManager', () => {
     it('saves project default calibration', async () => {
       global.fetch
         .mockResolvedValueOnce({ ok: false }) // Initial load
-        .mockResolvedValueOnce({ ok: true }); // Save
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) }); // Save
 
       render(<CalibrationManager {...defaultProps} />);
 
@@ -316,7 +316,7 @@ describe('CalibrationManager', () => {
     it('saves image-specific calibration', async () => {
       global.fetch
         .mockResolvedValueOnce({ ok: false }) // Initial load
-        .mockResolvedValueOnce({ ok: true }); // Save
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) }); // Save
 
       render(<CalibrationManager {...defaultProps} />);
 
@@ -380,7 +380,9 @@ describe('CalibrationManager', () => {
     it('clears override when confirmed', async () => {
       jest.spyOn(window, 'confirm').mockReturnValue(true);
 
-      global.fetch.mockResolvedValue({ ok: true });
+      global.fetch
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+        .mockResolvedValueOnce({ ok: false });
 
       const imageWithOverride = {
         metadata: {
@@ -401,6 +403,7 @@ describe('CalibrationManager', () => {
           '/api/images/image-456/metadata/calibration_override',
           expect.objectContaining({ method: 'DELETE' })
         );
+        expect(defaultProps.onCalibrationChange).toHaveBeenLastCalledWith(null);
       });
     });
 
@@ -433,7 +436,7 @@ describe('CalibrationManager', () => {
     it('correctly converts mm to inches when saving', async () => {
       global.fetch
         .mockResolvedValueOnce({ ok: false })
-        .mockResolvedValueOnce({ ok: true });
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
 
       render(<CalibrationManager {...defaultProps} />);
 
@@ -462,7 +465,7 @@ describe('CalibrationManager', () => {
     it('correctly converts inches to mm when saving', async () => {
       global.fetch
         .mockResolvedValueOnce({ ok: false })
-        .mockResolvedValueOnce({ ok: true });
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
 
       render(<CalibrationManager {...defaultProps} />);
 
@@ -623,7 +626,7 @@ describe('CalibrationManager', () => {
           ok: true,
           json: () => Promise.resolve({ calibration_rules: [] })
         })
-        .mockResolvedValueOnce({ ok: true }) // Save rule
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) }) // Save rule
         .mockResolvedValueOnce({ // Reload after save
           ok: true,
           json: () => Promise.resolve({
@@ -728,7 +731,7 @@ describe('CalibrationManager', () => {
             ]
           })
         })
-        .mockResolvedValueOnce({ ok: true }) // Save updated rules
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) }) // Save updated rules
         .mockResolvedValueOnce({ // Reload after delete
           ok: true,
           json: () => Promise.resolve({
@@ -800,6 +803,234 @@ describe('CalibrationManager', () => {
 
       expect(window.confirm).toHaveBeenCalled();
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('read-only mode', () => {
+    it('hides calibration creation and save controls', async () => {
+      global.fetch.mockResolvedValue({ ok: false });
+
+      const { rerender } = render(
+        <CalibrationManager {...defaultProps} readOnly={false} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Set Calibration' })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Set Calibration' }));
+      expect(screen.getByRole('button', { name: 'Save as Project Default' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save for This Image Only' })).toBeInTheDocument();
+
+      rerender(<CalibrationManager {...defaultProps} readOnly />);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Pixels per:')).not.toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: 'Set Calibration' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save as Project Default' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save for This Image Only' })).not.toBeInTheDocument();
+    });
+
+    it('hides edit and clear controls for an image override', async () => {
+      const imageWithOverride = {
+        metadata: {
+          calibration_override: {
+            pixels_per_mm: 20,
+            pixels_per_inch: 508,
+            unit: 'mm'
+          }
+        }
+      };
+
+      render(
+        <CalibrationManager
+          {...defaultProps}
+          image={imageWithOverride}
+          readOnly
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Using image-specific calibration')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Clear Image Override' })).not.toBeInTheDocument();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('hides edit and delete controls for a matched metadata rule', async () => {
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          calibration_rules: [{
+            metadata_key: 'camera',
+            metadata_value: 'a47',
+            calibration: {
+              pixels_per_mm: 15,
+              pixels_per_inch: 381,
+              unit: 'mm'
+            }
+          }]
+        })
+      });
+
+      render(
+        <CalibrationManager
+          {...defaultProps}
+          image={{ metadata: { camera: 'a47' } }}
+          readOnly
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/Using metadata rule/)).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Remove Metadata Rule' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('async route ownership', () => {
+    it('aborts image A loading and ignores its response after image B is active', async () => {
+      let resolveImageA;
+      let resolveImageB;
+      const imageAResponse = new Promise(resolve => {
+        resolveImageA = resolve;
+      });
+      const imageBResponse = new Promise(resolve => {
+        resolveImageB = resolve;
+      });
+      const imageACalibration = {
+        pixels_per_mm: 11,
+        pixels_per_inch: 279.4,
+        unit: 'mm'
+      };
+      const imageBCalibration = {
+        pixels_per_mm: 22,
+        pixels_per_inch: 558.8,
+        unit: 'mm'
+      };
+
+      global.fetch
+        .mockReturnValueOnce(imageAResponse)
+        .mockReturnValueOnce(imageBResponse);
+
+      const { rerender } = render(
+        <CalibrationManager
+          {...defaultProps}
+          projectId="project-a"
+          imageId="image-a"
+        />
+      );
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      const imageASignal = global.fetch.mock.calls[0][1].signal;
+
+      rerender(
+        <CalibrationManager
+          {...defaultProps}
+          projectId="project-b"
+          imageId="image-b"
+        />
+      );
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(imageASignal.aborted).toBe(true);
+
+      resolveImageB({
+        ok: true,
+        json: () => Promise.resolve({ calibration_default: imageBCalibration })
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('22.00 px/mm')).toBeInTheDocument();
+      });
+
+      resolveImageA({
+        ok: true,
+        json: () => Promise.resolve({ calibration_default: imageACalibration })
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('22.00 px/mm')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('11.00 px/mm')).not.toBeInTheDocument();
+      expect(defaultProps.onCalibrationChange).not.toHaveBeenCalledWith(imageACalibration);
+      expect(defaultProps.onCalibrationChange).toHaveBeenLastCalledWith(imageBCalibration);
+    });
+
+    it('ignores a completed image A override save after navigating to image B', async () => {
+      let resolveImageASave;
+      const imageASave = new Promise(resolve => {
+        resolveImageASave = resolve;
+      });
+      const imageBCalibration = {
+        pixels_per_mm: 22,
+        pixels_per_inch: 558.8,
+        unit: 'mm'
+      };
+
+      global.fetch.mockImplementation((url, options = {}) => {
+        if (url === '/api/images/image-a/metadata' && options.method === 'PUT') {
+          return imageASave;
+        }
+        if (url === '/api/projects/project-b/metadata-dict') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ calibration_default: imageBCalibration })
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const { rerender } = render(
+        <CalibrationManager
+          {...defaultProps}
+          projectId="project-a"
+          imageId="image-a"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Set Calibration' })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Set Calibration' }));
+      fireEvent.change(screen.getByRole('spinbutton'), {
+        target: { value: '15' }
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Save for This Image Only' }));
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/images/image-a/metadata',
+          expect.objectContaining({ method: 'PUT' })
+        );
+      });
+      const saveCall = global.fetch.mock.calls.find(
+        ([url, options]) => url === '/api/images/image-a/metadata' && options?.method === 'PUT'
+      );
+
+      rerender(
+        <CalibrationManager
+          {...defaultProps}
+          projectId="project-b"
+          imageId="image-b"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('22.00 px/mm')).toBeInTheDocument();
+      });
+      expect(saveCall[1].signal.aborted).toBe(true);
+
+      resolveImageASave({ ok: true, json: async () => ({}) });
+
+      await waitFor(() => {
+        expect(screen.getByText('22.00 px/mm')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('15.00 px/mm')).not.toBeInTheDocument();
+      expect(screen.queryByText('Image-specific calibration saved successfully')).not.toBeInTheDocument();
+      expect(defaultProps.onCalibrationChange).toHaveBeenLastCalledWith(imageBCalibration);
     });
   });
 });

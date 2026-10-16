@@ -8,7 +8,7 @@ This guide covers common issues and their solutions for VISTA.
 
 ```bash
 # Application health
-curl http://localhost:8000/health
+curl http://localhost:8000/api/health
 
 # Docker container status
 podman ps | grep vista
@@ -37,7 +37,7 @@ podman ps | grep vista || echo "Container not running!"
 echo
 
 echo "2. Health Check:"
-curl -s http://localhost:8000/health || echo "Health check FAILED"
+curl -s http://localhost:8000/api/health || echo "Health check FAILED"
 echo
 
 echo "3. Database:"

@@ -57,10 +57,11 @@ describe('GroupedImagesPage', () => {
     delete global.fetch;
   });
 
-  test('shows loading spinner initially', () => {
+  test('shows loading spinner initially', async () => {
     mockFetchResponses();
     renderPage();
     expect(screen.getByText('Loading groups...')).toBeInTheDocument();
+    expect(await screen.findByText('Serial 001')).toBeInTheDocument();
   });
 
   test('renders group rows after loading', async () => {
@@ -194,7 +195,7 @@ describe('GroupedImagesPage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText(/HTTP error 500/)).toBeInTheDocument();
+      expect(screen.getByText(/Request failed \(500\)/)).toBeInTheDocument();
     });
   });
 
@@ -232,7 +233,7 @@ describe('GroupedImagesPage', () => {
       // Mock the DELETE call
       global.fetch.mockImplementation((url, opts) => {
         if (opts?.method === 'DELETE') {
-          return Promise.resolve({ ok: true });
+          return Promise.resolve({ ok: true, status: 204 });
         }
         return Promise.resolve({ ok: true, json: async () => ({}) });
       });

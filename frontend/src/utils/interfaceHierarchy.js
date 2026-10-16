@@ -2,7 +2,7 @@ const DEFAULT_INTERFACE_HIERARCHY = {
   mainTabs: ['project_configuration', 'project_data', 'analyze', 'inspection', 'report'],
   inspection: {
     leftColumn: 'part_summary',
-    centerTabs: ['inspector', 'image_metadata'],
+    centerTabs: ['view_parts', 'image_metadata'],
     rightColumn: 'annotations',
     layout: {
       gridTemplateColumns: '320px minmax(560px, 1fr) 360px',
@@ -28,6 +28,34 @@ const DEFAULT_INTERFACE_HIERARCHY = {
         order: 1,
         isOpen: true,
         minWidthPx: 520,
+        minHeightPx: 420,
+      },
+      view_all_images: {
+        slot: 'center',
+        label: 'View All Images',
+        tabGroup: 'center',
+        order: 1,
+        isOpen: true,
+        minWidthPx: 520,
+        minHeightPx: 420,
+      },
+      view_parts: {
+        slot: 'center',
+        label: 'View Parts',
+        tabGroup: 'center',
+        order: 2,
+        isOpen: true,
+        minWidthPx: 520,
+        minHeightPx: 420,
+      },
+      filter_images: {
+        slot: 'left',
+        label: 'Filter Images',
+        order: 1,
+        isOpen: true,
+        widthPx: 320,
+        minWidthPx: 280,
+        maxWidthPx: 420,
         minHeightPx: 420,
       },
       mpr: {

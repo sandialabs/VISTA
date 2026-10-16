@@ -21,6 +21,7 @@ A full-stack web application for managing, classifying, and collaborating on vis
 - **Team Collaboration** - Add comments and share insights with your team
 - **Metadata Management** - Store custom key-value metadata for projects and images
 - **ML Analysis Integration** - Visualize machine learning results with interactive overlays (bounding boxes, heatmaps)
+- **Inspection Workbench** - Organize images into batches and parts, annotate and measure findings, and review 2D or 3D CT-stack data side by side across parts
 - **Safe Deletion** - Two-stage deletion with 60-day recovery period
 - **API Access** - RESTful API with comprehensive documentation and API key authentication
 

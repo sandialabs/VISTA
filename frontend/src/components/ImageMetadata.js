@@ -1,13 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import MetadataEditDialog from './MetadataEditDialog';
+import { deleteImageMetadata, updateImageMetadata } from '../api/images';
+import { fetchProjectMetadataDictionary } from '../api/projects';
 
-function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError }) {
+function ImageMetadata({
+  imageId,
+  image,
+  setImage,
+  loading,
+  setLoading,
+  setError,
+  readOnly = false,
+}) {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState(null);
   const [editingValue, setEditingValue] = useState('');
   const [projectMetadata, setProjectMetadata] = useState({});
   const [projectMetadataLoading, setProjectMetadataLoading] = useState(false);
 
+  useEffect(() => {
+    if (readOnly) {
+      setEditDialogOpen(false);
+      setEditingKey(null);
+      setEditingValue('');
+    }
+  }, [readOnly]);
 
   useEffect(() => {
     const projectId = image?.project_id;
@@ -18,11 +35,7 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
     let cancelled = false;
     setProjectMetadataLoading(true);
-    fetch(`/api/projects/${projectId}/metadata-dict`)
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-        return response.json();
-      })
+    fetchProjectMetadataDictionary(projectId)
       .then((payload) => {
         if (!cancelled) setProjectMetadata(payload && typeof payload === 'object' ? payload : {});
       })
@@ -89,6 +102,7 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
   // Open dialog for adding new metadata
   const handleOpenAddDialog = () => {
+    if (readOnly) return;
     setEditingKey(null);
     setEditingValue('');
     setEditDialogOpen(true);
@@ -96,6 +110,7 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
   // Open dialog for editing existing metadata
   const handleOpenEditDialog = (key, value) => {
+    if (readOnly) return;
     setEditingKey(key);
     setEditingValue(formatValueForEdit(value));
     setEditDialogOpen(true);
@@ -103,6 +118,8 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
   // Handle save from dialog
   const handleSaveMetadata = async (newKey, newValue) => {
+    if (readOnly) return;
+
     if (newKey.trim() === '') {
       setError('Metadata key cannot be empty');
       return;
@@ -114,30 +131,11 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
       // If editing and key changed, delete the old key first
       if (keyChanged) {
-        const deleteResponse = await fetch(`/api/images/${imageId}/metadata/${editingKey}`, {
-          method: 'DELETE',
-        });
-
-        if (!deleteResponse.ok) {
-          throw new Error(`Failed to delete old key: ${deleteResponse.status}`);
-        }
+        await deleteImageMetadata(imageId, editingKey);
       }
 
       // Add/update with new key and value
-      const response = await fetch(`/api/images/${imageId}/metadata`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          key: newKey,
-          value: parseMetadataValue(newValue),
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
+      await updateImageMetadata(imageId, newKey, parseMetadataValue(newValue));
 
       // Update the image metadata
       setImage(prev => {
@@ -175,6 +173,8 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
   // Handle deleting metadata
   const handleDeleteMetadata = async (key) => {
+    if (readOnly) return;
+
     if (!window.confirm(`Are you sure you want to delete the metadata key "${key}"?`)) {
       return;
     }
@@ -182,13 +182,7 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
     try {
       setLoading(true);
 
-      const response = await fetch(`/api/images/${imageId}/metadata/${key}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
+      await deleteImageMetadata(imageId, key);
 
       // Update the image metadata
       setImage(prev => {
@@ -254,13 +248,15 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
 
             <div className="custom-metadata-header">
               <h3>Custom Metadata</h3>
-              <button
-                className="btn btn-small btn-primary"
-                onClick={handleOpenAddDialog}
-                disabled={loading}
-              >
-                Add Metadata
-              </button>
+              {!readOnly && (
+                <button
+                  className="btn btn-small btn-primary"
+                  onClick={handleOpenAddDialog}
+                  disabled={loading}
+                >
+                  Add Metadata
+                </button>
+              )}
             </div>
 
             {hasCustomMetadata ? (
@@ -280,22 +276,24 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
                               value.toString()
                             )}
                           </div>
-                          <div className="metadata-actions">
-                            <button
-                              className="btn btn-small"
-                              onClick={() => handleOpenEditDialog(key, value)}
-                              disabled={loading}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              className="btn btn-small btn-danger"
-                              onClick={() => handleDeleteMetadata(key)}
-                              disabled={loading}
-                            >
-                              Delete
-                            </button>
-                          </div>
+                          {!readOnly && (
+                            <div className="metadata-actions">
+                              <button
+                                className="btn btn-small"
+                                onClick={() => handleOpenEditDialog(key, value)}
+                                disabled={loading}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="btn btn-small btn-danger"
+                                onClick={() => handleDeleteMetadata(key)}
+                                disabled={loading}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -344,7 +342,7 @@ function ImageMetadata({ imageId, image, setImage, loading, setLoading, setError
       </div>
 
       <MetadataEditDialog
-        isOpen={editDialogOpen}
+        isOpen={editDialogOpen && !readOnly}
         onClose={() => {
           setEditDialogOpen(false);
           setEditingKey(null);

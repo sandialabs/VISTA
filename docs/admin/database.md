@@ -200,35 +200,36 @@ alembic upgrade head --sql
 **Adding a column:**
 ```python
 def upgrade():
-    op.add_column('projects',
-        sa.Column('new_field', sa.String(255), nullable=True)
-    )
+    op.add_column("projects", sa.Column("new_field", sa.String(255), nullable=True))
+
 
 def downgrade():
-    op.drop_column('projects', 'new_field')
+    op.drop_column("projects", "new_field")
 ```
 
 **Adding an index:**
 ```python
 def upgrade():
-    op.create_index('ix_projects_name', 'projects', ['name'])
+    op.create_index("ix_projects_name", "projects", ["name"])
+
 
 def downgrade():
-    op.drop_index('ix_projects_name', table_name='projects')
+    op.drop_index("ix_projects_name", table_name="projects")
 ```
 
 **Adding NOT NULL constraint:**
 ```python
 def upgrade():
     # First add column as nullable
-    op.add_column('projects', sa.Column('status', sa.String(50), nullable=True))
+    op.add_column("projects", sa.Column("status", sa.String(50), nullable=True))
     # Set default value for existing rows
     op.execute("UPDATE projects SET status = 'active' WHERE status IS NULL")
     # Then make it NOT NULL
-    op.alter_column('projects', 'status', nullable=False)
+    op.alter_column("projects", "status", nullable=False)
+
 
 def downgrade():
-    op.drop_column('projects', 'status')
+    op.drop_column("projects", "status")
 ```
 
 ### Troubleshooting Migrations

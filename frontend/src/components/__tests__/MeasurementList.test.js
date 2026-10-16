@@ -207,4 +207,46 @@ describe('MeasurementList', () => {
     // Header should show +
     expect(screen.getByText('Measurements (2) +')).toBeInTheDocument();
   });
+
+  test('read-only mode blocks rename and delete while preserving visibility and export', () => {
+    const createObjectURL = jest.fn(() => 'blob:read-only-export');
+    const revokeObjectURL = jest.fn();
+    global.URL.createObjectURL = createObjectURL;
+    global.URL.revokeObjectURL = revokeObjectURL;
+
+    const originalClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = jest.fn();
+
+    render(<MeasurementList {...defaultProps} readOnly />);
+
+    expect(screen.queryByTitle('Delete')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Measurement 1'));
+    expect(screen.queryByDisplayValue('Measurement 1')).not.toBeInTheDocument();
+    expect(defaultProps.onRenameMeasurement).not.toHaveBeenCalled();
+    expect(window.confirm).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByTitle('Hide')[0]);
+    expect(defaultProps.onToggleVisibility).toHaveBeenCalledWith('measurement-1');
+
+    fireEvent.click(screen.getByText('Export CSV'));
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalled();
+
+    HTMLAnchorElement.prototype.click = originalClick;
+  });
+
+  test('switching to read-only mode clears an in-progress rename', () => {
+    const { rerender } = render(<MeasurementList {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('Measurement 1'));
+    expect(screen.getByDisplayValue('Measurement 1')).toBeInTheDocument();
+
+    rerender(<MeasurementList {...defaultProps} readOnly />);
+    expect(screen.queryByDisplayValue('Measurement 1')).not.toBeInTheDocument();
+
+    rerender(<MeasurementList {...defaultProps} />);
+    expect(screen.queryByDisplayValue('Measurement 1')).not.toBeInTheDocument();
+    expect(defaultProps.onRenameMeasurement).not.toHaveBeenCalled();
+  });
 });

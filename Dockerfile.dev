@@ -12,6 +12,7 @@ RUN microdnf install -y --nodocs \
     gcc-c++ \
     libpq-devel \
     git \
+    wget \
     ca-certificates \
     nodejs \
     npm \
@@ -49,17 +50,22 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Install uv and debugging tools
 RUN pip install --no-cache-dir --upgrade pip uv
+RUN pip install --no-cache-dir ultralytics
 
 WORKDIR /app
 
 # Install Python dependencies (cached layer)
 COPY pyproject.toml uv.lock ./
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-install-project --inexact
 
 # Copy backend code (will be overridden by volume mount in development)
 COPY ./backend /app/backend
-COPY ./test /app/test
+# Download the bundled default SAM checkpoint used by Analyze (public weights
+# only; nothing is committed to the repository). See Dockerfile for details.
+RUN mkdir -p /app/checkpoints && \
+    wget -q -O /app/checkpoints/sam_vit_b_01ec64.pth \
+        https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
 
 # Backend tests validate frontend npm scripts, so keep package metadata
 # available in the backend-dev image even when only /app/backend is mounted.
@@ -68,20 +74,31 @@ COPY ./frontend/package.json ./frontend/package-lock.json /app/frontend/
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV no_proxy=$no_proxy,minio
+ENV NO_PROXY=$no_proxy
 
-# Backend development stage
-FROM base AS backend-dev
-
+# Shared backend runtime stage
+FROM base AS backend-runtime
+ENV VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME=false
+ENV YOLO_CONFIG_DIR=/tmp/ultralytics
 RUN chown -R appuser:appuser /app
 WORKDIR /app/backend
 EXPOSE 8000
 
 USER appuser
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Backend development stage
+FROM backend-runtime AS backend-dev
+
+COPY --chown=appuser:appuser ./test /app/test
+
+# The dependency manifests are bind-mounted by docker-compose.dev.yml. Reconcile the
+# environment on every start so an existing development image picks up newly added
+# packages without requiring developers to diagnose import errors and rebuild first.
+CMD ["sh", "-c", "uv sync --frozen --no-install-project --inexact && exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload"]
 
 # Optional heavyweight model service for Analyze/backend analyze toolbox execution.
-FROM backend-dev AS toolbox-model-service
+FROM backend-runtime AS toolbox-model-service
 
 USER root
 RUN pip install --no-cache-dir \
@@ -111,10 +128,8 @@ WORKDIR /app/frontend
 RUN chown appuser:appuser /app/frontend
 COPY --chown=appuser:appuser frontend/package*.json ./
 
-# Install dependencies as the runtime user so node_modules is writable without
-# a slow recursive ownership pass over the dependency tree.
-USER appuser
-RUN npm install
+# Install dependencies and set ownership
+RUN npm ci --no-audit --no-fund && chown -R appuser:appuser /app
 
 # Copy frontend source (will be overridden by volume mount in development)
 COPY --chown=appuser:appuser frontend/ ./

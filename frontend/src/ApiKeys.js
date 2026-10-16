@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import './App.css';
+import { createApiKey, deleteApiKey, fetchApiKeys as loadApiKeys } from './api/apiKeys';
+import { fetchCurrentUser } from './api/users';
 import Toast from './components/Toast';
 
 function ApiKeys() {
@@ -28,50 +30,31 @@ function ApiKeys() {
       await navigator.clipboard.writeText(text);
       showToast('API key copied to clipboard!', 'success');
     } catch (err) {
-      console.error('Failed to copy: ', err);
       showToast('Failed to copy to clipboard', 'error');
     }
   };
 
   // Fetch current user
   useEffect(() => {
-    fetch('/api/users/me')
-      .then(response => {
-        if (!response.ok) {
-          if (response.status === 401) {
-            console.log("Authentication is disabled or user is not logged in");
-            return null;
-          }
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-      })
+    fetchCurrentUser()
       .then(userData => {
         if (userData) {
           setCurrentUser(userData);
         }
       })
       .catch(err => {
-        console.error("Failed to fetch current user:", err);
       });
   }, []);
 
   // Fetch API keys
   const fetchApiKeys = useCallback(() => {
     setLoading(true);
-    fetch('/api/api-keys')
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-      })
+    loadApiKeys()
       .then(data => {
         setApiKeys(data);
         setLoading(false);
       })
       .catch(err => {
-        console.error("Failed to fetch API keys:", err);
         showToast(`Failed to fetch API keys: ${err.message}`, 'error');
         setLoading(false);
       });
@@ -92,23 +75,8 @@ function ApiKeys() {
     }
 
     setLoading(true);
-    fetch('/api/api-keys', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ name }),
-    })
-      .then(response => {
-        if (!response.ok) {
-          return response.json().then(errorData => {
-            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-          });
-        }
-        return response.json();
-      })
+    createApiKey(name)
       .then(data => {
-        console.log("API key created successfully:", data);
         setNewlyCreatedKey(data.key); // Store the raw key for one-time display
         setApiKeys(prev => [...prev, data.api_key]);
         setShowCreateModal(false);
@@ -118,7 +86,6 @@ function ApiKeys() {
         nameInputRef.current.value = '';
       })
       .catch(err => {
-        console.error("Failed to create API key:", err);
         showToast(err.message, 'error');
         setLoading(false);
       });
@@ -130,19 +97,13 @@ function ApiKeys() {
       return;
     }
 
-    fetch(`/api/api-keys/${keyId}`, {
-      method: 'DELETE',
-    })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+    deleteApiKey(keyId)
+      .then(() => {
         // Remove the key from the list
         setApiKeys(prev => prev.filter(key => key.id !== keyId));
         showToast(`API key "${keyName}" has been deactivated`, 'success');
       })
       .catch(err => {
-        console.error("Failed to delete API key:", err);
         showToast(`Failed to deactivate API key: ${err.message}`, 'error');
       });
   };

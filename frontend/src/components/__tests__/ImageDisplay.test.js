@@ -63,11 +63,67 @@ describe('ImageDisplay', () => {
     test('shows all control buttons for regular images', () => {
       renderImageDisplay();
       
-      expect(screen.queryByText('Zoom In')).not.toBeInTheDocument();
-      expect(screen.queryByText('Zoom Out')).not.toBeInTheDocument();
       expect(screen.getByText('Reset')).toBeInTheDocument();
       expect(screen.getByText('Download')).toBeInTheDocument();
       expect(screen.getByText('Delete')).toBeInTheDocument();
+    });
+
+    test('renders original and ML overlay images side by side when a bitmap is available', () => {
+      renderImageDisplay({
+        navigateToPreviousImage: jest.fn(),
+        navigateToNextImage: jest.fn(),
+        currentImageIndex: 0,
+        projectImages: [mockRegularImage],
+        selectedAnalysis: null,
+        annotations: [],
+        overlayOptions: {
+          showBoxes: false,
+          showHeatmap: false,
+          opacity: 0.7,
+          viewMode: 'side-by-side',
+          bitmapAvailable: true
+        }
+      });
+
+      expect(screen.getAllByAltText('test-image.jpg')).toHaveLength(2);
+      expect(screen.getByText('Original')).toBeInTheDocument();
+      expect(screen.getByText('ML Overlay')).toBeInTheDocument();
+    });
+
+    test('keeps image geometry unchanged when measure mode toggles', () => {
+      const setMeasurementActive = jest.fn();
+      const { rerender } = renderImageDisplay({
+        setMeasurementActive,
+        measurementActive: false,
+        calibration: { pixels_per_mm: 10, pixels_per_inch: 254, unit: 'mm' }
+      });
+
+      const inactiveImage = screen.getByAltText('test-image.jpg');
+      const inactiveLayer = screen.getByTestId('image-anchored-layer');
+      const inactiveImageStyle = inactiveImage.getAttribute('style') || '';
+      const inactiveLayerStyle = inactiveLayer.getAttribute('style') || '';
+      const imageDisplay = document.getElementById('image-display');
+      const inactiveDisplayClass = imageDisplay.getAttribute('class') || '';
+      const inactiveDisplayStyle = imageDisplay.getAttribute('style') || '';
+
+      rerender(
+        <ImageDisplay
+          imageId="img-1"
+          image={mockRegularImage}
+          isTransitioning={false}
+          projectId="test-project-id"
+          setImage={jest.fn()}
+          refreshProjectImages={jest.fn()}
+          setMeasurementActive={setMeasurementActive}
+          measurementActive={true}
+          calibration={{ pixels_per_mm: 10, pixels_per_inch: 254, unit: 'mm' }}
+        />
+      );
+
+      expect(screen.getByAltText('test-image.jpg').getAttribute('style') || '').toBe(inactiveImageStyle);
+      expect(screen.getByTestId('image-anchored-layer').getAttribute('style') || '').toBe(inactiveLayerStyle);
+      expect(document.getElementById('image-display').getAttribute('class') || '').toBe(inactiveDisplayClass);
+      expect(document.getElementById('image-display').getAttribute('style') || '').toBe(inactiveDisplayStyle);
     });
 
     test('zoom reset functionality works correctly', () => {
@@ -75,11 +131,67 @@ describe('ImageDisplay', () => {
       
       const image = screen.getByAltText('test-image.jpg');
       
-      expect(image.style.transform).toBe('scale(1)');
+      expect(screen.getByTestId('image-anchored-layer').style.transform).toBe('scale(1)');
+      expect(image.style.transform).toBe('');
       
       const resetButton = screen.getByText('Reset');
       fireEvent.click(resetButton);
-      expect(image.style.transform).toBe('scale(1)');
+      expect(screen.getByTestId('image-anchored-layer').style.transform).toBe('scale(1)');
+      expect(image.style.transform).toBe('');
+    });
+  });
+
+  describe('Image Navigation', () => {
+    test('navigates between images and disables navigation at the list boundaries', () => {
+      const navigateToPreviousImage = jest.fn();
+      const navigateToNextImage = jest.fn();
+      const projectImages = [
+        mockRegularImage,
+        { ...mockRegularImage, id: 'img-2', filename: 'second-image.jpg' },
+        { ...mockRegularImage, id: 'img-3', filename: 'third-image.jpg' }
+      ];
+      const navigationProps = {
+        isTransitioning: false,
+        projectId: 'test-project-id',
+        setImage: jest.fn(),
+        refreshProjectImages: jest.fn(),
+        navigateToPreviousImage,
+        navigateToNextImage,
+        projectImages
+      };
+
+      const { rerender } = renderImageDisplay({
+        ...navigationProps,
+        imageId: projectImages[1].id,
+        image: projectImages[1],
+        currentImageIndex: 1
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /prev/i }));
+      fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+      expect(navigateToPreviousImage).toHaveBeenCalledTimes(1);
+      expect(navigateToNextImage).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <ImageDisplay
+          {...navigationProps}
+          imageId={projectImages[0].id}
+          image={projectImages[0]}
+          currentImageIndex={0}
+        />
+      );
+      expect(screen.getByRole('button', { name: /prev/i })).toBeDisabled();
+
+      rerender(
+        <ImageDisplay
+          {...navigationProps}
+          imageId={projectImages[2].id}
+          image={projectImages[2]}
+          currentImageIndex={2}
+        />
+      );
+      expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
     });
   });
 
@@ -111,8 +223,6 @@ describe('ImageDisplay', () => {
         image: mockDeletedImage
       });
       
-      expect(screen.queryByText('Zoom In')).not.toBeInTheDocument();
-      expect(screen.queryByText('Zoom Out')).not.toBeInTheDocument();
       expect(screen.getByText('Reset')).toBeInTheDocument();
       expect(screen.getByText('Download')).toBeInTheDocument();
     });
@@ -125,7 +235,8 @@ describe('ImageDisplay', () => {
 
       const image = screen.getByAltText('Deleted');
 
-      expect(image.style.transform).toBe('scale(1)');
+      expect(screen.getByTestId('image-anchored-layer').style.transform).toBe('scale(1)');
+      expect(image.style.transform).toBe('');
     });
   });
 
@@ -309,19 +420,23 @@ describe('ImageDisplay', () => {
       
       const image = screen.getByAltText('test-image.jpg');
       
-      expect(image.style.transform).toBe('scale(1)');
+      expect(screen.getByTestId('image-anchored-layer').style.transform).toBe('scale(1)');
+      expect(image.style.transform).toBe('');
       
       // Zoom in with + key
       fireEvent.keyDown(document, { key: '+' });
-      expect(image.style.transform).toBe('scale(1.25)');
+      expect(screen.getByTestId('image-anchored-layer').style.transform).toBe('scale(1.25)');
+      expect(image.style.transform).toBe('');
       
       // Reset with 0 key
       fireEvent.keyDown(document, { key: '0' });
-      expect(image.style.transform).toBe('scale(1)');
+      expect(screen.getByTestId('image-anchored-layer').style.transform).toBe('scale(1)');
+      expect(image.style.transform).toBe('');
       
       // Zoom out with - key
       fireEvent.keyDown(document, { key: '-' });
-      expect(image.style.transform).toBe('scale(0.75)');
+      expect(screen.getByTestId('image-anchored-layer').style.transform).toBe('scale(0.75)');
+      expect(image.style.transform).toBe('');
     });
   });
 });

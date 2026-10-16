@@ -103,7 +103,7 @@ server {
         # Proxy to backend
         ProxyPass http://localhost:8000/
         ProxyPassReverse http://localhost:8000/
-        
+
         # Preserve host header
         ProxyPreserveHost On
     </Location>
@@ -141,13 +141,33 @@ oauth2-proxy --config oauth2-proxy.cfg
 
 Projects belong to groups (`meta_group_id`). Users must be members of a project's group to access it.
 
+`core.group_auth._check_group_membership` is **fail-closed**: it raises
+`NotImplementedError` until `VISTA_AUTH_BACKEND` is set. Supported values:
+
+- `demo` -- hardcoded example mapping. Development/tests only; refused when `ENV=production`.
+- `custom` -- your real integration (LDAP, OIDC, database, etc.).
+
+On startup, `run_auth_startup_self_test()` verifies that, for non-demo
+backends, the hardcoded demo emails (`admin@example.com`,
+`scientist@example.com`, `user@example.com`) do NOT resolve as members of
+the demo groups. If any do, the app refuses to start.
+
 ### Implementing Group Membership
 
-Edit `backend/core/group_auth.py` and implement `_check_group_membership`:
+Set `VISTA_AUTH_BACKEND=custom`, then edit `backend/core/group_auth.py` and
+replace the `custom` branch of `_check_group_membership`.
+
+VISTA ships with only `AUTH_SERVER_URL` in `core.config.Settings`. The
+examples below reference additional environment variables (LDAP URL,
+bind DN, API tokens, etc.) that **you must add yourself** -- either as
+new fields on `Settings` or via `os.getenv()`. Do not copy the examples
+verbatim expecting those knobs to already exist.
 
 ```python
+import os
 import requests
 from core.config import settings
+
 
 def _check_group_membership(user_email: str, group_id: str) -> bool:
     """
@@ -155,24 +175,27 @@ def _check_group_membership(user_email: str, group_id: str) -> bool:
     Implement based on your auth system.
     """
     # Example 1: LDAP/Active Directory
+    # Add LDAP_URL, LDAP_BIND_DN, LDAP_BIND_PASSWORD, LDAP_BASE_DN,
+    # LDAP_GROUPS_DN to your environment / Settings class first.
     import ldap
-    conn = ldap.initialize(settings.LDAP_URL)
-    conn.simple_bind_s(settings.LDAP_BIND_DN, settings.LDAP_BIND_PASSWORD)
+    conn = ldap.initialize(os.environ["LDAP_URL"])
+    conn.simple_bind_s(os.environ["LDAP_BIND_DN"], os.environ["LDAP_BIND_PASSWORD"])
     result = conn.search_s(
-        settings.LDAP_BASE_DN,
+        os.environ["LDAP_BASE_DN"],
         ldap.SCOPE_SUBTREE,
-        f"(&(mail={user_email})(memberOf=cn={group_id},{settings.LDAP_GROUPS_DN}))"
+        f"(&(mail={user_email})(memberOf=cn={group_id},{os.environ['LDAP_GROUPS_DN']}))",
     )
     return len(result) > 0
-    
+
     # Example 2: External API
+    # settings.AUTH_SERVER_URL already exists; supply your own token env var.
     response = requests.get(
         f"{settings.AUTH_SERVER_URL}/api/users/{user_email}/groups",
-        headers={"Authorization": f"Bearer {settings.AUTH_API_TOKEN}"}
+        headers={"Authorization": f"Bearer {os.environ['VISTA_AUTH_API_TOKEN']}"},
     )
     user_groups = response.json().get("groups", [])
     return group_id in user_groups
-    
+
     # Example 3: Database
     from core.database import get_db
     # Query user_groups table
@@ -321,7 +344,7 @@ Implement rate limiting at the reverse proxy level:
 ```nginx
 http {
     limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-    
+
     server {
         location /api/ {
             limit_req zone=api burst=20 nodelay;
@@ -339,24 +362,26 @@ For production, use a secrets manager:
 ```python
 import boto3
 
+
 def get_secret(secret_name):
-    client = boto3.client('secretsmanager', region_name='us-east-1')
+    client = boto3.client("secretsmanager", region_name="us-east-1")
     response = client.get_secret_value(SecretId=secret_name)
-    return response['SecretString']
+    return response["SecretString"]
+
 
 # In config.py
-PROXY_SHARED_SECRET = get_secret('image-manager/proxy-secret')
+PROXY_SHARED_SECRET = get_secret("image-manager/proxy-secret")
 ```
 
 **HashiCorp Vault:**
 ```python
 import hvac
 
-client = hvac.Client(url='https://vault.example.com')
-client.auth.approle.login(role_id='...', secret_id='...')
+client = hvac.Client(url="https://vault.example.com")
+client.auth.approle.login(role_id="...", secret_id="...")
 
-secret = client.secrets.kv.v2.read_secret_version(path='image-manager/config')
-PROXY_SHARED_SECRET = secret['data']['data']['proxy_secret']
+secret = client.secrets.kv.v2.read_secret_version(path="image-manager/config")
+PROXY_SHARED_SECRET = secret["data"]["data"]["proxy_secret"]
 ```
 
 ## Testing Authentication

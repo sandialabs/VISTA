@@ -16,7 +16,8 @@ export default function MeasurementListItem({
   onToggleVisibility,
   onToggleExpanded,
   onMouseEnter,
-  onMouseLeave
+  onMouseLeave,
+  readOnly = false
 }) {
   // Calculate real-world distances dynamically from pixels using current calibration
   const calculateDistances = () => {
@@ -50,14 +51,14 @@ export default function MeasurementListItem({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      {isEditing ? (
+      {isEditing && !readOnly ? (
         <div>
           <input
             type="text"
             value={editingName}
             onChange={(e) => setEditingName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') onSaveRename();
+              if (e.key === 'Enter' && !readOnly) onSaveRename();
               if (e.key === 'Escape') onCancelRename();
             }}
             autoFocus
@@ -72,7 +73,9 @@ export default function MeasurementListItem({
           />
           <div style={{ display: 'flex', gap: '4px' }}>
             <button
-              onClick={onSaveRename}
+              onClick={() => {
+                if (!readOnly) onSaveRename();
+              }}
               style={{
                 flex: 1,
                 padding: '4px',
@@ -116,12 +119,12 @@ export default function MeasurementListItem({
                 fontSize: '14px',
                 fontWeight: '500',
                 color: '#1f2937',
-                cursor: 'pointer',
+                cursor: readOnly ? 'default' : 'pointer',
                 flex: 1
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                onStartRename();
+                if (!readOnly) onStartRename();
               }}
             >
               {measurement.name}
@@ -144,23 +147,25 @@ export default function MeasurementListItem({
               >
                 {isVisible ? '●' : '○'}
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-                style={{
-                  padding: '2px 6px',
-                  fontSize: '11px',
-                  background: 'transparent',
-                  color: '#dc2626',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-                title="Delete"
-              >
-                x
-              </button>
+              {!readOnly && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!readOnly) onDelete();
+                  }}
+                  style={{
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    background: 'transparent',
+                    color: '#dc2626',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                  title="Delete"
+                >
+                  x
+                </button>
+              )}
             </div>
           </div>
 

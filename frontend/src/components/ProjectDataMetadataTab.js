@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { updatePartMetadataSources } from '../api/parts';
 
 function isPlainObject(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -95,12 +96,7 @@ function ProjectDataMetadataTab({ projectId, metadata = {}, parts = [], onAssoci
 
     setSavingPartIds((prev) => new Set(prev).add(String(part.id)));
     try {
-      const resp = await fetch(`/api/projects/${projectId}/parts/${part.id}/metadata-sources`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata_source_keys: nextRefs }),
-      });
-      if (!resp.ok) throw new Error(`Failed to update metadata association (${resp.status})`);
+      await updatePartMetadataSources(projectId, part.id, nextRefs);
       if (onAssociationsChanged) await onAssociationsChanged();
     } catch (err) {
       if (setError) setError(err.message || 'Failed to update metadata association');

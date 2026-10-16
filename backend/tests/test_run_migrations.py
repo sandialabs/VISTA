@@ -5,8 +5,12 @@ import subprocess
 from backend.scripts import run_migrations
 
 
-def _cp(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+def _cp(
+    returncode: int = 0, stdout: str = "", stderr: str = ""
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=[], returncode=returncode, stdout=stdout, stderr=stderr
+    )
 
 
 def test_parse_head_revisions_extracts_revision_tokens() -> None:
@@ -64,7 +68,9 @@ def test_run_upgrades_single_head_without_merge(monkeypatch) -> None:
     ]
 
 
-def test_run_repairs_missing_metadata_only_revision_then_retries(monkeypatch, capsys) -> None:
+def test_run_repairs_missing_metadata_only_revision_then_retries(
+    monkeypatch, capsys
+) -> None:
     calls: list[tuple[str, ...]] = []
     repairs: list[tuple[str, tuple[str, ...]]] = []
 
@@ -72,8 +78,14 @@ def test_run_repairs_missing_metadata_only_revision_then_retries(monkeypatch, ca
         calls.append(args)
         if args == ("heads",):
             return _cp(stdout="rev_present (head)\n")
-        if args == ("upgrade", "head") and len([call for call in calls if call == args]) == 1:
-            return _cp(returncode=255, stderr="FAILED: Can't locate revision identified by 'removed_noop_rev'")
+        if (
+            args == ("upgrade", "head")
+            and len([call for call in calls if call == args]) == 1
+        ):
+            return _cp(
+                returncode=255,
+                stderr="FAILED: Can't locate revision identified by 'removed_noop_rev'",
+            )
         return _cp()
 
     def fake_repair(missing_revision: str, local_heads: list[str]) -> bool:
@@ -86,7 +98,9 @@ def test_run_repairs_missing_metadata_only_revision_then_retries(monkeypatch, ca
         return True
 
     monkeypatch.setattr(run_migrations, "_run_alembic_command", fake_run)
-    monkeypatch.setattr(run_migrations, "_repair_missing_metadata_only_revision", fake_repair)
+    monkeypatch.setattr(
+        run_migrations, "_repair_missing_metadata_only_revision", fake_repair
+    )
 
     rc = run_migrations.run()
 
@@ -109,8 +123,14 @@ def test_run_repairs_missing_revision_reported_on_stdout(monkeypatch) -> None:
         calls.append(args)
         if args == ("heads",):
             return _cp(stdout="rev_present (head)\n")
-        if args == ("upgrade", "head") and len([call for call in calls if call == args]) == 1:
-            return _cp(returncode=255, stdout="FAILED: Can't locate revision identified by 'stdout_removed_rev'")
+        if (
+            args == ("upgrade", "head")
+            and len([call for call in calls if call == args]) == 1
+        ):
+            return _cp(
+                returncode=255,
+                stdout="FAILED: Can't locate revision identified by 'stdout_removed_rev'",
+            )
         return _cp()
 
     def fake_repair(missing_revision: str, local_heads: list[str]) -> bool:
@@ -118,7 +138,9 @@ def test_run_repairs_missing_revision_reported_on_stdout(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(run_migrations, "_run_alembic_command", fake_run)
-    monkeypatch.setattr(run_migrations, "_repair_missing_metadata_only_revision", fake_repair)
+    monkeypatch.setattr(
+        run_migrations, "_repair_missing_metadata_only_revision", fake_repair
+    )
 
     rc = run_migrations.run()
 
@@ -132,17 +154,24 @@ def test_run_repairs_missing_revision_reported_on_stdout(monkeypatch) -> None:
     ]
 
 
-def test_run_does_not_retry_missing_revision_when_schema_diff_blocks_repair(monkeypatch) -> None:
+def test_run_does_not_retry_missing_revision_when_schema_diff_blocks_repair(
+    monkeypatch,
+) -> None:
     calls: list[tuple[str, ...]] = []
 
     def fake_run(*args: str) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         if args == ("heads",):
             return _cp(stdout="rev_present (head)\n")
-        return _cp(returncode=255, stderr="FAILED: Can't locate revision identified by 'real_removed_rev'")
+        return _cp(
+            returncode=255,
+            stderr="FAILED: Can't locate revision identified by 'real_removed_rev'",
+        )
 
     monkeypatch.setattr(run_migrations, "_run_alembic_command", fake_run)
-    monkeypatch.setattr(run_migrations, "_repair_missing_metadata_only_revision", lambda *_args: False)
+    monkeypatch.setattr(
+        run_migrations, "_repair_missing_metadata_only_revision", lambda *_args: False
+    )
 
     rc = run_migrations.run()
 

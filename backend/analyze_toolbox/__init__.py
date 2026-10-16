@@ -10,7 +10,7 @@ from .contracts import (
     WorkflowNodeResult,
     WorkflowNodeSpec,
 )
-from .executor import execute_image_workflow
+from .executor import AnalyzeExecutionCancelled, execute_image_workflow
 from .registry import execute_workflow, get_manifest, validate_workflow
 from .segmentation import (
     ImageComponent,
@@ -41,6 +41,7 @@ __all__ = [
     "SegmentationMask",
     "SegmentationOutput",
     "execute_image_workflow",
+    "AnalyzeExecutionCancelled",
     "execute_workflow",
     "get_manifest",
     "validate_workflow",
