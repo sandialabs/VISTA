@@ -230,3 +230,8 @@ yolov8n.pt
 *.endpointdlp
 *Zone.Identifier
 .claude/settings.local.json
+
+# Local Dev Tools
+.claude/
+.opencode-workspace/
+.codex/
