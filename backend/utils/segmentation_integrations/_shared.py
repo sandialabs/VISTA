@@ -15,7 +15,6 @@ from PIL import Image
 
 def payload_from_request(request: Any) -> dict[str, Any]:
     """Return a plain dictionary for a Pydantic or dictionary request."""
-
     if hasattr(request, "model_dump"):
         return request.model_dump(mode="python", exclude={"image"})
     return dict(request or {})
@@ -23,7 +22,6 @@ def payload_from_request(request: Any) -> dict[str, Any]:
 
 def decode_request_image(payload: dict[str, Any]) -> Image.Image:
     """Decode VISTA's base64 PNG payload into an RGB Pillow image."""
-
     encoded = str(payload.get("image_data_base64") or "")
     if encoded.startswith("data:") and "," in encoded:
         encoded = encoded.split(",", 1)[1]
@@ -53,7 +51,6 @@ def bytes_from_file_like(value: Any) -> bytes:
 
 def rgb_image_from_payload(payload: dict[str, Any]) -> Image.Image:
     """Decode an in-memory ``file`` value when present, else the base64 image."""
-
     file_value = payload.get("file")
     if file_value is not None and is_file_like(file_value):
         return Image.open(io.BytesIO(bytes_from_file_like(file_value))).convert("RGB")
@@ -74,7 +71,6 @@ def _float_option(options: dict[str, Any], name: str, default: float) -> float:
 
 def centered_bbox_xywh(image: Image.Image, fraction: float = 0.4) -> list[float]:
     """Return a centered fallback bbox in [x, y, width, height] form."""
-
     width, height = image.size
     box_width = max(1.0, width * fraction)
     box_height = max(1.0, height * fraction)
@@ -95,7 +91,6 @@ def foreground_bbox_xywh(
     should replace this heuristic with their deployed model call while keeping
     the returned dictionary shape stable.
     """
-
     grayscale = image.convert("L")
     width, height = grayscale.size
     if width <= 0 or height <= 0:
@@ -135,7 +130,6 @@ def foreground_bbox_xywh(
 
 def prompted_bbox_xywh(image: Image.Image, prompts: dict[str, Any]) -> list[float]:
     """Build a bbox from SAM-like box prompts when present, else fallback."""
-
     box = prompts.get("box") or prompts.get("bbox")
     if isinstance(box, Iterable) and not isinstance(box, (str, bytes, dict)):
         try:
@@ -160,7 +154,6 @@ def output_for_box(
     extra_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return VISTA's shared segmentation output shape for one bbox mask."""
-
     options = payload.get("options") if isinstance(payload.get("options"), dict) else {}
     metrics = {
         "runtime": runtime,
@@ -209,7 +202,6 @@ def run_segmenter(segmenter: Any, data: Any):
 
 def masks_from_entries(entries: Any, *, label_prefix: str) -> list[dict[str, Any]]:
     """Normalize toolkit mask dictionaries that carry an [x, y, w, h] bbox."""
-
     masks = []
     for index, entry in enumerate(entries or [], start=1):
         if hasattr(entry, "model_dump"):
@@ -246,7 +238,6 @@ def foreground_fallback_output(
     label: str,
 ) -> dict[str, Any]:
     """Return a foreground-bbox output that records why the runtime failed."""
-
     options = options_from_payload(payload)
     image = rgb_image_from_payload(payload)
     concise_reason = str(reason).strip() or f"{display_name} runtime failed"
@@ -260,7 +251,10 @@ def foreground_fallback_output(
         score=score_from_options(options, 0.75),
         extra_metrics={
             "fallback_reason": concise_reason,
-            "runtime_warning": f"{display_name} runtime failed; used foreground fallback ({concise_reason}).",
+            "runtime_warning": (
+                f"{display_name} runtime failed; used foreground fallback "
+                f"({concise_reason})."
+            ),
         },
     )
 
@@ -283,7 +277,6 @@ def native_runtime_disabled() -> bool:
 
 def runtime_loader_is_patched(loader: Any, module_name: str) -> bool:
     """Return true when a test replaced the backend's loader with a fake."""
-
     return getattr(loader, "__module__", module_name) != module_name
 
 

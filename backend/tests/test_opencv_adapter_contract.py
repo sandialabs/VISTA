@@ -1,3 +1,5 @@
+"""Tests for the OpenCV segmentation adapter's runtime contract."""
+
 import base64
 import io
 import json
@@ -14,6 +16,7 @@ from core.config import settings
 
 
 def test_opencv_adapter_is_drop_in_for_strict_deployment_class(monkeypatch):
+    """Run the adapter unchanged against a strict external OpenCV class."""
     calls = {}
 
     class ExternalOutput(BaseModel):
@@ -78,6 +81,8 @@ def test_opencv_adapter_is_drop_in_for_strict_deployment_class(monkeypatch):
 
 
 def test_opencv_adapter_returns_fallback_output_when_runtime_fails(monkeypatch):
+    """Return fallback output when the OpenCV runtime fails."""
+
     def fail_loader():
         raise RuntimeError("cv2 import failed")
 
@@ -100,6 +105,8 @@ def test_opencv_adapter_returns_fallback_output_when_runtime_fails(monkeypatch):
 
 
 def test_opencv_adapter_returns_fallback_when_subprocess_crashes(monkeypatch):
+    """Return fallback output when the OpenCV subprocess crashes."""
+
     def fake_run(*args, **kwargs):
         return subprocess.CompletedProcess(
             args=args, returncode=134, stdout="", stderr="Aborted"
@@ -131,7 +138,6 @@ def test_opencv_adapter_returns_fallback_when_subprocess_crashes(monkeypatch):
 
 def _builtin_shaped_result(mode="default", masks=None):
     """Mimic the result object the built-in watershed runtime returns."""
-
     namespace = {
         "mode": mode,
         "metadata": {
@@ -153,6 +159,7 @@ def _builtin_shaped_result(mode="default", masks=None):
 
 
 def test_builtin_runtime_result_is_normalized_to_the_dict_contract():
+    """Normalize the built-in runtime's result to the dict contract."""
     normalized = opencv_backend._normalize_runtime_result(_builtin_shaped_result())
 
     assert normalized["backend"] == "opencv"
@@ -170,6 +177,7 @@ def test_builtin_runtime_result_is_normalized_to_the_dict_contract():
 
 
 def test_normalized_builtin_result_is_json_serializable_with_the_runtime_name():
+    """Serialize a normalized built-in result to JSON with the runtime name."""
     result = opencv_backend._annotate_runtime(
         opencv_backend._normalize_runtime_result(_builtin_shaped_result(mode="custom"))
     )
@@ -181,6 +189,7 @@ def test_normalized_builtin_result_is_json_serializable_with_the_runtime_name():
 
 
 def test_results_that_already_follow_the_contract_pass_through_unchanged():
+    """Pass through results that already follow the contract unchanged."""
     as_dict = {"backend": "x", "mode": "watershed", "masks": [], "metrics": {}}
     plain_object = object()
 
@@ -189,6 +198,7 @@ def test_results_that_already_follow_the_contract_pass_through_unchanged():
 
 
 def test_subprocess_environment_exposes_repository_root_and_backend(monkeypatch):
+    """Expose the repository root and backend directory to the subprocess."""
     monkeypatch.setenv("PYTHONPATH", "/existing/path")
     entries = opencv_backend._subprocess_env()["PYTHONPATH"].split(
         opencv_backend.os.pathsep
@@ -204,6 +214,7 @@ def test_subprocess_environment_exposes_repository_root_and_backend(monkeypatch)
 def test_native_gate_reads_environment_when_core_is_not_importable(monkeypatch):
     # A None entry makes ``from core.config import settings`` raise
     # ModuleNotFoundError, as it does when only the repository root is on sys.path.
+    """Read the native-runtime gate from the environment without core."""
     monkeypatch.setitem(sys.modules, "core.config", None)
 
     monkeypatch.delenv("VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME", raising=False)
