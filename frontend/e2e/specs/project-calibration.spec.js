@@ -83,14 +83,14 @@ test.describe('Project calibration configuration and measurement workflow', () =
     await expect(calibrationCard).toBeVisible();
     await expect(calibrationCard.getByText('NOT SET')).toBeVisible();
     await page.getByLabel('Project calibration unit').selectOption('inches');
-    await page.getByLabel('Pixels per inch').fill('254');
+    await page.getByLabel('Pixels per inch', { exact: true }).fill('254');
     await expect(calibrationCard.getByText('CALIBRATED')).toBeVisible();
     await expect(calibrationCard.getByText('1 in = 254 px')).toBeVisible();
 
     await page.getByLabel('Project calibration unit').selectOption('mm');
-    await expect(page.getByLabel('Pixels per millimeter')).toHaveValue('10');
+    await expect(page.getByLabel('Pixels per millimeter', { exact: true })).toHaveValue('10');
     await page.getByLabel('Project calibration unit').selectOption('inches');
-    await expect(page.getByLabel('Pixels per inch')).toHaveValue('254');
+    await expect(page.getByLabel('Pixels per inch', { exact: true })).toHaveValue('254');
 
     await page.getByRole('button', { name: 'Save Configuration' }).click();
     await expect(page.getByText('Configuration saved.')).toBeVisible();
@@ -145,7 +145,7 @@ test.describe('Project calibration configuration and measurement workflow', () =
 
     await page.getByRole('tab', { name: 'Project Configuration' }).click();
     await expect(page.getByLabel('Project calibration unit')).toHaveValue('inches');
-    await expect(page.getByLabel('Pixels per inch')).toHaveValue('254');
+    await expect(page.getByLabel('Pixels per inch', { exact: true })).toHaveValue('254');
     const saveCountBeforeClear = getSavedConfigurations().length;
     await page.getByRole('button', { name: 'Clear Calibration' }).click();
     await page.getByRole('button', { name: 'Save Configuration' }).click();

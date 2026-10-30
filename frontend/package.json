@@ -6,7 +6,7 @@
     "flexlayout-react": "^0.8.19",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.16.0",
+    "react-router-dom": "^6.30.6",
     "react-scripts": "^5.0.1",
     "three": "^0.185.1"
   },
