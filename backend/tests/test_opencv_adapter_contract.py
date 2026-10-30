@@ -1,10 +1,12 @@
 import base64
 import io
+import json
 import subprocess
+import sys
 
 from backend.tests.analyze_segmentation_fakes import ToolkitSegmentationInput
 from backend.tests.test_segmentation_integrations import _encoded_test_image
-from backend.utils.segmentation_integrations import opencv_backend
+from backend.utils.segmentation_integrations import _shared, opencv_backend
 from PIL import Image
 from pydantic import BaseModel
 
@@ -125,3 +127,88 @@ def test_opencv_adapter_returns_fallback_when_subprocess_crashes(monkeypatch):
     assert output["metrics"]["runtime"] == "analysis_toolkit.opencv_fallback"
     assert "OpenCV subprocess failed: Aborted" in output["metrics"]["fallback_reason"]
     assert output["masks"][0]["bbox"] == [3.0, 4.0, 5.0, 6.0]
+
+
+def _builtin_shaped_result(mode="default", masks=None):
+    """Mimic the result object the built-in watershed runtime returns."""
+
+    namespace = {
+        "mode": mode,
+        "metadata": {
+            "backend": "opencv",
+            "runtime": "vista.watershed",
+            "masks": [
+                {
+                    "bbox": [1.0, 2.0, 3.0, 4.0],
+                    "area": 9.0,
+                    "score": None,
+                    "label": "region_1",
+                }
+            ]
+            if masks is None
+            else masks,
+        },
+    }
+    return type("VistaWatershedResult", (), namespace)()
+
+
+def test_builtin_runtime_result_is_normalized_to_the_dict_contract():
+    normalized = opencv_backend._normalize_runtime_result(_builtin_shaped_result())
+
+    assert normalized["backend"] == "opencv"
+    assert normalized["mode"] == "watershed"
+    assert normalized["masks"] == [
+        {
+            "segmentation": None,
+            "bbox": [1.0, 2.0, 3.0, 4.0],
+            "area": 9.0,
+            "score": None,
+            "label": "region_1",
+        }
+    ]
+    assert normalized["metrics"] == {"mask_count": 1}
+
+
+def test_normalized_builtin_result_is_json_serializable_with_the_runtime_name():
+    result = opencv_backend._annotate_runtime(
+        opencv_backend._normalize_runtime_result(_builtin_shaped_result(mode="custom"))
+    )
+    payload = json.loads(json.dumps(opencv_backend._json_safe(result)))
+
+    assert payload["mode"] == "custom"
+    assert payload["metrics"]["runtime"] == "analysis_toolkit.opencv"
+    assert payload["masks"][0]["label"] == "region_1"
+
+
+def test_results_that_already_follow_the_contract_pass_through_unchanged():
+    as_dict = {"backend": "x", "mode": "watershed", "masks": [], "metrics": {}}
+    plain_object = object()
+
+    assert opencv_backend._normalize_runtime_result(as_dict) is as_dict
+    assert opencv_backend._normalize_runtime_result(plain_object) is plain_object
+
+
+def test_subprocess_environment_exposes_repository_root_and_backend(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/existing/path")
+    entries = opencv_backend._subprocess_env()["PYTHONPATH"].split(
+        opencv_backend.os.pathsep
+    )
+
+    assert entries[0] == str(opencv_backend._REPOSITORY_ROOT)
+    assert entries[1] == str(opencv_backend._BACKEND_DIR)
+    assert entries[-1] == "/existing/path"
+    assert (opencv_backend._BACKEND_DIR / "core" / "config.py").is_file()
+    assert (opencv_backend._REPOSITORY_ROOT / "backend").is_dir()
+
+
+def test_native_gate_reads_environment_when_core_is_not_importable(monkeypatch):
+    # A None entry makes ``from core.config import settings`` raise
+    # ModuleNotFoundError, as it does when only the repository root is on sys.path.
+    monkeypatch.setitem(sys.modules, "core.config", None)
+
+    monkeypatch.delenv("VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME", raising=False)
+    assert _shared.native_runtime_disabled() is False
+    monkeypatch.setenv("VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME", "true")
+    assert _shared.native_runtime_disabled() is True
+    monkeypatch.setenv("VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME", "false")
+    assert _shared.native_runtime_disabled() is False

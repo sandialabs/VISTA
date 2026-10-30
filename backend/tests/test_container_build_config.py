@@ -77,3 +77,19 @@ def test_ci_container_sync_preserves_ffmpeg_free_opencv():
         " && uvicorn"
     ) in workflow
     assert "uv sync --frozen && uvicorn" not in workflow
+
+
+def test_minio_services_use_a_pullable_image_and_a_curl_free_healthcheck():
+    for relative_path in (
+        "docker-compose.yml",
+        "docker-compose.dev.yml",
+        "docker-compose.test.yml",
+        "deployment-test/minio.yaml",
+    ):
+        content = _read_repo_file(relative_path)
+
+        # Pulls of the official minio/minio image were denied on Docker Hub and Quay.
+        assert "image: minio/minio" not in content, relative_path
+        assert "image: cgr.dev/chainguard/minio" in content, relative_path
+        # The Chainguard image ships no curl; use MinIO's own readiness check.
+        assert "minio/health/live" not in content, relative_path

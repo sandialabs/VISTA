@@ -173,6 +173,13 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 - Do not run a plain `uv sync` inside the image; it reinstalls the PyPI wheel. Use `uv sync --frozen --inexact --no-install-package opencv-python-headless` (the CI container test does).
 - A cold build compiles OpenCV, which adds substantial time (more on small CI runners). The layer is cached while the pinned inputs are unchanged.
 
+## Local Services, OpenCV Adapter, and E2E Notes
+
+- **MinIO image:** the compose files and `deployment-test/minio.yaml` use `cgr.dev/chainguard/minio:latest` because pulls of `minio/minio` were denied on Docker Hub and Quay. It runs as uid 65532 (host bind mounts need `:U` or `chown 65532`), has no `curl`, and is health-checked with `mc ready local`. `test_container_build_config.py` guards against reverting.
+- **OpenCV adapter (`utils/segmentation_integrations/opencv_backend.py`):** the built-in watershed runtime returns an object whose masks are under `metadata`; `_normalize_runtime_result` converts it to the dict contract the Analyze consumer reads (top-level `backend`, `mode`, `masks`, `metrics`, with `default` mapped to `watershed`). The child process is started with `_subprocess_env()` (repository root and `backend/` on `PYTHONPATH`), so the image needs no `PYTHONPATH` setting. `native_runtime_disabled()` falls back to the `VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME` environment variable when `core` is not importable.
+- **Native segmentation tests** (`VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true`) are off in the default suite and pass when enabled. The SAM and Anomalib smoke tests assert the built-in runtimes' own names (`RuntimeSAMSegmentation`, `RuntimeSAMSegmentationInput`, `vista.patchcore`). The YOLO tests need `yolo11n-seg.pt` (a segmentation model, not `yolov8n.pt`) in `checkpoints/`, the repository root, and `backend/`, or network access to download it; they compare boxes and confidences with a tolerance because inference output varies by machine.
+- **E2E specs run against the production container** (`E2E_BASE_URL`), whose Content-Security-Policy is `connect-src 'self'`: do not `fetch()` `data:` URLs in page code or helpers; decode with `atob` and `createImageBitmap`.
+
 ## Useful References
 
 - High‑level overview & quick start: `README.md`.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -267,8 +268,15 @@ def foreground_fallback_output(
 def native_runtime_disabled() -> bool:
     # Imported lazily so the backend modules stay importable with only the
     # repository root on sys.path, which is how the runtime smoke tests load
-    # them.
-    from core.config import settings  # noqa: PLC0415
+    # them. There ``core`` is not importable, so read the same environment
+    # variable the settings object is built from.
+    try:
+        from core.config import settings  # noqa: PLC0415
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"core", "core.config"}:
+            raise
+        value = os.environ.get("VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME", "")
+        return value.strip().lower() in {"1", "true", "yes", "on"}
 
     return settings.VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME
 

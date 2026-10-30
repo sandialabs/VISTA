@@ -95,8 +95,10 @@ async function waitForRenderedFrames(page, frameCount = 3) {
 async function captureWebglSignature(page, canvas) {
   const screenshot = await canvas.screenshot({ animations: 'disabled', omitBackground: true });
   return page.evaluate(async (base64) => {
-    const response = await fetch(`data:image/png;base64,${base64}`);
-    const bitmap = await createImageBitmap(await response.blob());
+    // Decode in the page: fetch() of a data: URL is blocked by the production
+    // Content-Security-Policy (connect-src 'self'), and no request is needed here.
+    const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
     const scratch = document.createElement('canvas');
     scratch.width = bitmap.width;
     scratch.height = bitmap.height;

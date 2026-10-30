@@ -277,8 +277,8 @@ def test_real_sam_runtime_import_smoke_in_subprocess():
         """
         from backend.utils.segmentation_integrations import sam_backend
         sam_segmentation_cls, sam_input_cls = sam_backend._load_sam_runtime()
-        assert sam_segmentation_cls.__name__ == "SAMSegmentation"
-        assert sam_input_cls.__name__ == "SAMSegmentationInput"
+        assert sam_segmentation_cls.__name__ == "RuntimeSAMSegmentation"
+        assert sam_input_cls.__name__ == "RuntimeSAMSegmentationInput"
         print("sam-runtime-import-ok")
         """
     )
@@ -385,10 +385,7 @@ def test_real_anomalib_runtime_smoke_in_subprocess():
             "options": {"model_name": "patchcore", "threshold": 0.5},
         })
         assert result["backend"] == "anomalib", result
-        assert result["metrics"]["runtime"] in {
-            "analysis_toolkit.anomalib",
-            "analysis_toolkit.anomalib_fallback",
-        }, result
+        assert result["metrics"]["runtime"] == "vista.patchcore", result
         assert result["masks"], result
         print(json.dumps({
             "runtime": result["metrics"]["runtime"],

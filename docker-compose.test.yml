@@ -23,7 +23,7 @@ services:
 
   # MinIO for testing (ephemeral)
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
     container_name: vista_minio_test
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -32,7 +32,7 @@ services:
     tmpfs:
       - /data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s
       retries: 5

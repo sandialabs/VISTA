@@ -595,6 +595,25 @@ def test_analyze_default_yolo_output_is_visible_as_inspection_overlay(
     )
 
 
+# Network output varies slightly with the CPU, torch build, and thread count (the
+# same image and weights gave box x of 17.80, 17.82, and 17.84 on three machines),
+# so geometry and confidence are compared with a tolerance. A wrong class or a
+# resize/letterbox error shifts boxes by several pixels and still fails.
+_YOLO_BBOX_TOLERANCE_PX = 1.0
+_YOLO_CONFIDENCE_TOLERANCE = 0.01
+
+
+def _assert_yolo_detections_close(actual, expected):
+    assert len(actual) == len(expected)
+    for got, want in zip(actual, expected, strict=True):
+        assert got["id"] == want["id"]
+        assert got["class_name"] == want["class_name"]
+        assert got["confidence"] == pytest.approx(
+            want["confidence"], abs=_YOLO_CONFIDENCE_TOLERANCE
+        )
+        assert got["bbox"] == pytest.approx(want["bbox"], abs=_YOLO_BBOX_TOLERANCE_PX)
+
+
 def test_analyze_executes_yolo11n_seg_checkpoint_from_checkpoints_tab(
     client, monkeypatch
 ):
@@ -703,48 +722,54 @@ def test_analyze_executes_yolo11n_seg_checkpoint_from_checkpoints_tab(
         "mask_count": 5,
     }
     assert yolo_node["summary"]["detection_count"] == 5
-    assert yolo_node["summary"]["detections"][:3] == [
-        {
-            "id": "yolo-1",
-            "class_name": "bus",
-            "confidence": 0.9051998853683472,
-            "bbox": {
-                "x": 17.817317962646484,
-                "y": 230.1595458984375,
-                "width": 785.6532020568848,
-                "height": 512.3945922851562,
+    _assert_yolo_detections_close(
+        yolo_node["summary"]["detections"][:3],
+        [
+            {
+                "id": "yolo-1",
+                "class_name": "bus",
+                "confidence": 0.9051998853683472,
+                "bbox": {
+                    "x": 17.817317962646484,
+                    "y": 230.1595458984375,
+                    "width": 785.6532020568848,
+                    "height": 512.3945922851562,
+                },
             },
-        },
-        {
-            "id": "yolo-2",
-            "class_name": "person",
-            "confidence": 0.8782566785812378,
-            "bbox": {
-                "x": 670.2122192382812,
-                "y": 395.2248840332031,
-                "width": 139.3194580078125,
-                "height": 476.5345153808594,
+            {
+                "id": "yolo-2",
+                "class_name": "person",
+                "confidence": 0.8782566785812378,
+                "bbox": {
+                    "x": 670.2122192382812,
+                    "y": 395.2248840332031,
+                    "width": 139.3194580078125,
+                    "height": 476.5345153808594,
+                },
             },
-        },
-        {
-            "id": "yolo-3",
-            "class_name": "person",
-            "confidence": 0.8457951545715332,
-            "bbox": {
-                "x": 51.58706283569336,
-                "y": 396.8096618652344,
-                "width": 172.52756118774414,
-                "height": 504.7131042480469,
+            {
+                "id": "yolo-3",
+                "class_name": "person",
+                "confidence": 0.8457951545715332,
+                "bbox": {
+                    "x": 51.58706283569336,
+                    "y": 396.8096618652344,
+                    "width": 172.52756118774414,
+                    "height": 504.7131042480469,
+                },
             },
-        },
-    ]
+        ],
+    )
     assert yolo_node["summary"]["measurements"][0]["label"] == "bus"
-    assert yolo_node["summary"]["measurements"][0]["bbox"] == [
-        17.817317962646484,
-        230.1595458984375,
-        785.6532020568848,
-        512.3945922851562,
-    ]
+    assert yolo_node["summary"]["measurements"][0]["bbox"] == pytest.approx(
+        [
+            17.817317962646484,
+            230.1595458984375,
+            785.6532020568848,
+            512.3945922851562,
+        ],
+        abs=_YOLO_BBOX_TOLERANCE_PX,
+    )
 
 
 def test_analyze_executes_default_yolo11n_seg_checkpoint_on_example_image(
@@ -791,12 +816,15 @@ def test_analyze_executes_default_yolo11n_seg_checkpoint_on_example_image(
     }
     assert yolo_node["summary"]["detection_count"] == 5
     assert yolo_node["summary"]["detections"][0]["class_name"] == "bus"
-    assert yolo_node["summary"]["detections"][0]["bbox"] == {
-        "x": 17.817317962646484,
-        "y": 230.1595458984375,
-        "width": 785.6532020568848,
-        "height": 512.3945922851562,
-    }
+    assert yolo_node["summary"]["detections"][0]["bbox"] == pytest.approx(
+        {
+            "x": 17.817317962646484,
+            "y": 230.1595458984375,
+            "width": 785.6532020568848,
+            "height": 512.3945922851562,
+        },
+        abs=_YOLO_BBOX_TOLERANCE_PX,
+    )
 
 
 def test_analyze_executes_default_anomalib_patchcore_on_example_image(client):

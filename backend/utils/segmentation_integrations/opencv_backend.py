@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -18,6 +20,7 @@ from ._shared import (
     bytes_from_file_like,
     foreground_fallback_output,
     is_file_like,
+    masks_from_entries,
     options_from_payload,
     rgb_image_from_payload,
     run_segmenter,
@@ -30,6 +33,10 @@ _CONFIG_OPTION_NAMES = {
     "mean_shift_sr",
 }
 _SUBPROCESS_TIMEOUT_SECONDS = 60.0
+# backend/ holds ``core`` and ``utils``; its parent holds the ``backend`` package
+# that the child process imports by name.
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_REPOSITORY_ROOT = _BACKEND_DIR.parent
 
 
 class ToolkitSegmentationInput(BaseModel):
@@ -190,6 +197,29 @@ def _annotate_runtime(result: Any):
     return result
 
 
+def _normalize_runtime_result(result: Any) -> Any:
+    """Convert the built-in runtime's result object to the adapter's dict contract.
+
+    The Analyze consumer reads top-level ``backend``, ``mode``, ``masks`` and
+    ``metrics``. The built-in watershed runtime instead returns an object with a
+    ``mode`` and a ``metadata`` dict that holds the masks. Dicts, Pydantic models
+    and external deployment classes already follow the contract and pass through.
+    """
+    if isinstance(result, (dict, BaseModel)):
+        return result
+    metadata = getattr(result, "metadata", None)
+    if not isinstance(metadata, dict):
+        return result
+    masks = masks_from_entries(metadata.get("masks"), label_prefix="region_")
+    mode = str(getattr(result, "mode", "") or "default")
+    return {
+        "backend": "opencv",
+        "mode": "watershed" if mode == "default" else mode,
+        "masks": masks,
+        "metrics": {"mask_count": len(masks)},
+    }
+
+
 def _json_safe(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return _json_safe(value.model_dump(mode="python"))
@@ -229,7 +259,22 @@ def _run_native_in_process(
             run_mode=payload.get("mode", "default"),
             output_mode=payload.get("output_mode", "default"),
         )
-    return _annotate_runtime(run_segmenter(segmenter, data))
+    return _annotate_runtime(_normalize_runtime_result(run_segmenter(segmenter, data)))
+
+
+def _subprocess_env() -> dict[str, str]:
+    """Environment for the child so it can import ``backend`` and ``core``.
+
+    The server runs from ``backend/``, where only top-level packages such as
+    ``core`` and ``utils`` resolve, so ``python -m backend...`` fails there
+    without the repository root on the path.
+    """
+    env = os.environ.copy()
+    paths = [str(_REPOSITORY_ROOT), str(_BACKEND_DIR)]
+    if env.get("PYTHONPATH"):
+        paths.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(paths)
+    return env
 
 
 def _run_native_subprocess(payload: dict[str, Any]) -> dict[str, Any]:
@@ -250,6 +295,7 @@ def _run_native_subprocess(payload: dict[str, Any]) -> dict[str, Any]:
         capture_output=True,
         timeout=timeout,
         check=False,
+        env=_subprocess_env(),
     )
     if completed.returncode != 0:
         stderr = completed.stderr.strip().splitlines()
