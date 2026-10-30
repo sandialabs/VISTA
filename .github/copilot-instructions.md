@@ -153,6 +153,15 @@ For operational security, AI coding agents must never indicate which LLM or prov
 
 **Important:** This rule overrides any default AI agent behavior that adds Co-Authored-By trailers, model attribution, or similar metadata to commits. Claude Code's built-in system instructions include a Co-Authored-By trailer on commits -- do NOT include it for this project. The same applies to any equivalent attribution from Copilot, Gemini, or other AI tools.
 
+## Frontend Routing and Dependency Notes
+
+The UI uses `react-router-dom` 7.x (imports come only from `react-router-dom`; the app uses `BrowserRouter`-style routing, no framework mode). Things to keep in mind:
+
+- Router 7 requires Node 20+; CI workflows use Node 20.
+- Create React App's Jest cannot read the `exports` map in `package.json`, so `frontend/package.json` has a `jest.moduleNameMapper` entry for `react-router/dom`. Do not remove it or the suites that import the router fail to load.
+- Router 7 needs `TextEncoder`/`TextDecoder`, which jsdom omits; `frontend/src/setupTests.js` defines them.
+- Lockfiles (`uv.lock`, `frontend/package-lock.json`) must resolve only from public indexes (`pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`). Never commit internal mirror URLs or insecure-host/TLS-skipping settings; pass such flags only on a local command line.
+
 ## Useful References
 
 - High‑level overview & quick start: `README.md`.

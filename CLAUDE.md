@@ -408,6 +408,15 @@ Single container deployment via `Dockerfile`:
 - Backend should only accept connections from trusted reverse proxy
 
 
+## Frontend Routing and Dependency Notes
+
+The UI uses `react-router-dom` 7.x (imports come only from `react-router-dom`; the app uses `BrowserRouter`-style routing, no framework mode). Things to keep in mind:
+
+- Router 7 requires Node 20+; CI workflows use Node 20.
+- Create React App's Jest cannot read the `exports` map in `package.json`, so `frontend/package.json` has a `jest.moduleNameMapper` entry for `react-router/dom`. Do not remove it or the suites that import the router fail to load.
+- Router 7 needs `TextEncoder`/`TextDecoder`, which jsdom omits; `frontend/src/setupTests.js` defines them.
+- Lockfiles (`uv.lock`, `frontend/package-lock.json`) must resolve only from public indexes (`pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`). Never commit internal mirror URLs or insecure-host/TLS-skipping settings; pass such flags only on a local command line.
+
 ## Claude Code Agents
 
 Custom subagents are defined in `.claude/agents/` for specialized workflows:
