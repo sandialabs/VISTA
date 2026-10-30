@@ -47,7 +47,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Install uv package installer and debugging tools
 RUN pip install --no-cache-dir --upgrade pip uv debugpy
-RUN pip install --no-cache-dir ultralytics
+# ultralytics and every other runtime dependency come from uv.lock in the builder
+# stage. Do not pip install them here: this stage's /opt/venv is also the base of
+# the final stage, and COPY --from=builder only adds files, so anything installed
+# here (for example the GUI opencv-python with its bundled FFmpeg) would survive
+# into the shipped image.
 
 WORKDIR /app
 
@@ -55,12 +59,54 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# OpenCV without FFmpeg. The opencv-python-headless wheels on PyPI bundle FFmpeg
+# libraries that accumulate unpatched CVEs, and VISTA never decodes video with
+# cv2, so build the headless wheel from the hash-pinned PyPI source distribution
+# with FFmpeg disabled. Video writing and decoding through cv2 is unavailable in
+# this image by design. Keep OPENCV_VERSION equal to the opencv-python-headless
+# version in uv.lock; backend/tests/test_container_build_config.py enforces it.
+# A cold build compiles OpenCV and takes a while; the layer is cached afterwards.
+FROM registry.access.redhat.com/ubi9/ubi-minimal AS opencv-build
+
+ARG OPENCV_VERSION=5.0.0.93
+ARG OPENCV_SDIST_SHA256=b82f9831daab90b725c7c1ee1b36cb5732c367096ac76d119e64e14eb70d5f3c
+
+# gcc-toolset-13 is required: the default UBI 9 assembler is too old for
+# instructions that OpenCV's dnn module emits.
+RUN microdnf install -y --nodocs \
+    python3.11 \
+    python3.11-pip \
+    python3.11-devel \
+    gcc-toolset-13-gcc \
+    gcc-toolset-13-gcc-c++ \
+    gcc-toolset-13-binutils \
+    make \
+    cmake \
+    && microdnf clean all
+
+ENV PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
+ENV ENABLE_HEADLESS=1
+ENV CMAKE_ARGS="-DWITH_FFMPEG=OFF"
+
+RUN echo "opencv-python-headless==${OPENCV_VERSION} --hash=sha256:${OPENCV_SDIST_SHA256}" \
+        > /tmp/opencv-requirements.txt && \
+    CMAKE_BUILD_PARALLEL_LEVEL="$(nproc)" python3.11 -m pip wheel \
+        --no-deps --no-binary opencv-python-headless --require-hashes \
+        -r /tmp/opencv-requirements.txt -w /wheels
+
 FROM base AS builder
 
 # Install Python dependencies
 COPY pyproject.toml uv.lock ./
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 RUN uv sync --frozen --no-dev --no-install-project --inexact
+
+# Replace the PyPI opencv-python-headless (it bundles FFmpeg) with the FFmpeg-free
+# wheel built above. The final stage verifies that nothing FFmpeg-related ships.
+COPY --from=opencv-build /wheels /tmp/opencv-wheels
+RUN uv pip uninstall --python /opt/venv/bin/python opencv-python-headless && \
+    uv pip install --python /opt/venv/bin/python --no-deps --no-cache /tmp/opencv-wheels/*.whl && \
+    rm -rf /tmp/opencv-wheels
 
 # Copy backend code
 COPY ./backend /app/backend
@@ -92,6 +138,14 @@ ARG GITLAB_COMMIT_SHA=""
 # Copy Python dependencies from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+
+# Fail the build if the shipped environment contains FFmpeg in any form: a cv2
+# built with it, an FFmpeg library, or a PyPI OpenCV distribution (all of which
+# bundle FFmpeg) next to the FFmpeg-free wheel.
+RUN python -c "import cv2; assert 'FFMPEG' not in cv2.getBuildInformation(), 'cv2 was built with FFmpeg'" && \
+    ! find /opt/venv \( -name 'libavcodec*' -o -name 'libavformat*' -o -name 'libavutil*' \
+        -o -name 'libswscale*' -o -name 'libswresample*' -o -name 'opencv_python.libs' \
+        -o -name 'opencv_python-*.dist-info' -o -name 'opencv_python_headless.libs' \) | grep -q .
 
 # Install uv in the final stage for testing
 RUN pip install --no-cache-dir uv

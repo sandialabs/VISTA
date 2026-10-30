@@ -37,7 +37,7 @@ jobs:
       if: matrix.language == 'javascript-typescript'
       uses: actions/setup-node@v5
       with:
-        node-version: '18'
+        node-version: '20'
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4

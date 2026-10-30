@@ -31,6 +31,13 @@ dependencies = [
     "scikit-image",
 ]
 
+[tool.uv]
+# ultralytics requires the GUI opencv-python distribution, which bundles its own
+# Qt and FFmpeg libraries and shares the cv2 package directory with
+# opencv-python-headless. VISTA depends on the headless build only, so drop the
+# GUI distribution from resolution. The marker never matches.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
+
 [dependency-groups]
 dev = [
     "mypy",

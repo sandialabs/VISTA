@@ -1,3 +1,5 @@
+"""Segmentation integration adapter tests: OpenCV, SAM, YOLO, Anomalib, and FastAPI."""
+
 import base64
 import importlib
 import io
@@ -43,10 +45,10 @@ def _encoded_test_image() -> str:
 
 def test_real_opencv_runtime_smoke_in_subprocess():
     """Exercise the operational OpenCV import without crashing this worker."""
-
     if not native_segmentation_runtime_enabled():
         pytest.skip(
-            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native segmentation runtimes"
+            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native "
+            "segmentation runtimes"
         )
 
     script = textwrap.dedent(
@@ -67,7 +69,11 @@ def test_real_opencv_runtime_smoke_in_subprocess():
             "mode": "default",
             "options": {"min_peak_distance_px": 1},
         })
-        payload = result.model_dump(mode="python") if hasattr(result, "model_dump") else result
+        payload = (
+            result.model_dump(mode="python")
+            if hasattr(result, "model_dump")
+            else result
+        )
         assert payload["backend"] == "opencv", payload
         assert payload["mode"] == "watershed", payload
         assert payload["metrics"]["runtime"] == "analysis_toolkit.opencv", payload
@@ -98,6 +104,7 @@ def test_real_opencv_runtime_smoke_in_subprocess():
 
 
 def test_documented_opencv_local_import_path_uses_fake_runtime_under_pytest():
+    """Load the fake OpenCV runtime for the documented import path under pytest."""
     if native_segmentation_runtime_enabled():
         pytest.skip(
             "native runtime opt-in intentionally bypasses the fake OpenCV runtime"
@@ -129,6 +136,7 @@ def test_documented_opencv_local_import_path_uses_fake_runtime_under_pytest():
 def test_local_import_segmentation_adapters_return_shared_output_shape(
     backend, function_path, expected_label
 ):
+    """Return the shared output shape from every local-import adapter."""
     options = {
         "integration_mode": "local_import",
         "function_path": function_path,
@@ -178,6 +186,7 @@ def test_local_import_segmentation_adapters_return_shared_output_shape(
 
 
 def test_sam_local_import_adapter_segments_prompted_box_with_toolkit_fallback():
+    """Segment a prompted box through the SAM adapter's toolkit fallback."""
     request = SegmentationInput(
         image_data_base64=_encoded_test_image(),
         backend="sam",
@@ -204,6 +213,7 @@ def test_sam_local_import_adapter_segments_prompted_box_with_toolkit_fallback():
 
 
 def test_sam_default_fallback_segments_foreground_without_prompt():
+    """Segment the foreground with the default SAM fallback when no prompt is given."""
     result = SegmentationComponent().run(
         SegmentationInput(
             image_data_base64=_encoded_test_image(),
@@ -223,6 +233,8 @@ def test_sam_default_fallback_segments_foreground_without_prompt():
 
 
 def test_sam_fallback_without_checkpoint_does_not_import_runtime(monkeypatch):
+    """Use the SAM fallback without importing the runtime when no checkpoint is set."""
+
     def fail_loader():
         raise AssertionError("SAM runtime should stay lazy without a checkpoint")
 
@@ -243,7 +255,6 @@ def test_sam_with_checkpoint_stays_lazy_while_native_runtime_is_disabled(monkeyp
     exhausting memory and killing pytest-xdist workers in CI once a default
     checkpoint was auto-injected into the workflow.
     """
-
     from core.config import settings
 
     monkeypatch.setattr(settings, "VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME", True)
@@ -267,18 +278,18 @@ def test_sam_with_checkpoint_stays_lazy_while_native_runtime_is_disabled(monkeyp
 
 def test_real_sam_runtime_import_smoke_in_subprocess():
     """Exercise the operational SAM import without crashing this worker."""
-
     if not native_segmentation_runtime_enabled():
         pytest.skip(
-            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native segmentation runtimes"
+            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native "
+            "segmentation runtimes"
         )
 
     script = textwrap.dedent(
         """
         from backend.utils.segmentation_integrations import sam_backend
         sam_segmentation_cls, sam_input_cls = sam_backend._load_sam_runtime()
-        assert sam_segmentation_cls.__name__ == "SAMSegmentation"
-        assert sam_input_cls.__name__ == "SAMSegmentationInput"
+        assert sam_segmentation_cls.__name__ == "RuntimeSAMSegmentation"
+        assert sam_input_cls.__name__ == "RuntimeSAMSegmentationInput"
         print("sam-runtime-import-ok")
         """
     )
@@ -306,10 +317,10 @@ def test_real_sam_runtime_import_smoke_in_subprocess():
 
 def test_real_yolo_runtime_smoke_in_subprocess():
     """Exercise the operational YOLO adapter without crashing this worker."""
-
     if not native_segmentation_runtime_enabled():
         pytest.skip(
-            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native segmentation runtimes"
+            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native "
+            "segmentation runtimes"
         )
 
     script = textwrap.dedent(
@@ -360,10 +371,10 @@ def test_real_yolo_runtime_smoke_in_subprocess():
 
 def test_real_anomalib_runtime_smoke_in_subprocess():
     """Exercise the operational Anomalib adapter without crashing this worker."""
-
     if not native_segmentation_runtime_enabled():
         pytest.skip(
-            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native segmentation runtimes"
+            "set VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true to import native "
+            "segmentation runtimes"
         )
 
     script = textwrap.dedent(
@@ -385,10 +396,7 @@ def test_real_anomalib_runtime_smoke_in_subprocess():
             "options": {"model_name": "patchcore", "threshold": 0.5},
         })
         assert result["backend"] == "anomalib", result
-        assert result["metrics"]["runtime"] in {
-            "analysis_toolkit.anomalib",
-            "analysis_toolkit.anomalib_fallback",
-        }, result
+        assert result["metrics"]["runtime"] == "vista.patchcore", result
         assert result["masks"], result
         print(json.dumps({
             "runtime": result["metrics"]["runtime"],
@@ -419,6 +427,7 @@ def test_real_anomalib_runtime_smoke_in_subprocess():
 
 
 def test_default_patchcore_runtime_is_available_without_native_opt_in():
+    """Run the default PatchCore runtime without the native-runtime opt-in."""
     result = anomalib_backend.run(
         {
             "image_data_base64": _encoded_test_image(),
@@ -435,6 +444,7 @@ def test_default_patchcore_runtime_is_available_without_native_opt_in():
 
 @pytest.mark.parametrize("backend", ["opencv", "yolo", "anomalib", "sam"])
 def test_default_placeholder_dispatches_to_replaceable_imglib(backend, monkeypatch):
+    """Dispatch the default placeholder to the replaceable imglib implementation."""
     if backend == "yolo":
         from core.config import settings
 
@@ -455,6 +465,7 @@ def test_default_placeholder_dispatches_to_replaceable_imglib(backend, monkeypat
 
 @pytest.mark.parametrize("source", ["image", "file", "data_uri"])
 def test_placeholder_accepts_every_supported_image_source(source, tmp_path):
+    """Accept every supported image source in the placeholder component."""
     image = Image.open(io.BytesIO(base64.b64decode(_encoded_test_image())))
     kwargs = {"image": image}
     if source == "file":
@@ -474,6 +485,7 @@ def test_placeholder_accepts_every_supported_image_source(source, tmp_path):
 
 
 def test_sam_option_overrides_duplicate_prompt_without_crashing():
+    """Let a SAM option override a duplicate prompt without crashing."""
     result = SegmentationComponent().run(
         SegmentationInput(
             image_data_base64=_encoded_test_image(),
@@ -486,6 +498,7 @@ def test_sam_option_overrides_duplicate_prompt_without_crashing():
 
 
 def test_opencv_placeholder_matches_deployment_class_contract():
+    """Match the deployment class contract in the OpenCV placeholder."""
     config = NativeOpenCVSegmentationConfig(
         min_mask_area_px=2.5,
         min_peak_distance_px=4,
@@ -511,6 +524,7 @@ def test_opencv_placeholder_matches_deployment_class_contract():
 
 
 def test_opencv_placeholder_rejects_mode_not_supported_by_deployment():
+    """Reject a mode the deployment class does not support in the placeholder."""
     data = ToolkitSegmentationInput(
         file=None, image=np.zeros((4, 4, 3)), run_mode="other"
     )
@@ -519,6 +533,7 @@ def test_opencv_placeholder_rejects_mode_not_supported_by_deployment():
 
 
 def test_opencv_adapter_accepts_file_like_payload_without_treating_it_as_a_path():
+    """Accept a file-like payload in the OpenCV adapter instead of reading a path."""
     image_bytes = base64.b64decode(_encoded_test_image())
 
     result = opencv_backend.run(
@@ -538,6 +553,7 @@ def test_opencv_adapter_accepts_file_like_payload_without_treating_it_as_a_path(
 
 
 def test_sam_adapter_accepts_file_like_payload_without_treating_it_as_a_path():
+    """Accept a file-like payload in the SAM adapter instead of reading a path."""
     image_bytes = base64.b64decode(_encoded_test_image())
 
     result = sam_backend.run(
@@ -554,6 +570,8 @@ def test_sam_adapter_accepts_file_like_payload_without_treating_it_as_a_path():
 
 
 def test_sam_adapter_normalizes_toolkit_mask_arrays(monkeypatch):
+    """Normalize the toolkit mask arrays returned to the SAM adapter."""
+
     class FakeSAMSegmentation:
         def __init__(self, **config):
             assert config["model_checkpoint"] == "/tmp/sam-test.pth"
@@ -600,6 +618,7 @@ def test_sam_adapter_normalizes_toolkit_mask_arrays(monkeypatch):
 
 
 def test_yolo_adapter_calls_toolkit_runtime_and_normalizes_boxes(monkeypatch):
+    """Call the toolkit runtime from the YOLO adapter and normalize its boxes."""
     calls = {}
 
     class FakeYOLOInput:
@@ -649,6 +668,7 @@ def test_yolo_adapter_calls_toolkit_runtime_and_normalizes_boxes(monkeypatch):
 
 
 def test_anomalib_adapter_calls_toolkit_runtime_and_normalizes_masks(monkeypatch):
+    """Call the toolkit runtime from the Anomalib adapter and normalize its masks."""
     calls = {}
 
     class FakeInput:
@@ -707,6 +727,7 @@ def test_anomalib_adapter_calls_toolkit_runtime_and_normalizes_masks(monkeypatch
 def test_fastapi_segmentation_sends_capvision_payload_and_normalizes_predictions(
     monkeypatch,
 ):
+    """Send a CapVision payload through FastAPI and normalize the predictions."""
     calls = {}
 
     class FakeResponse:
@@ -778,6 +799,7 @@ def test_fastapi_segmentation_sends_capvision_payload_and_normalizes_predictions
 
 
 def test_fastapi_remote_block_forces_fastapi_dispatch(monkeypatch):
+    """Force FastAPI dispatch when the parameters include a remote block."""
     from backend.analyze_toolbox import (
         WorkflowGraph,
         WorkflowImageInput,
@@ -898,6 +920,7 @@ def test_fastapi_remote_block_forces_fastapi_dispatch(monkeypatch):
 
 
 def test_fastapi_remote_uploaded_prediction_becomes_overlay_artifact(monkeypatch):
+    """Turn a prediction uploaded by the remote service into an overlay artifact."""
     from backend.analyze_toolbox import (
         WorkflowGraph,
         WorkflowImageInput,
@@ -1029,6 +1052,7 @@ def test_fastapi_remote_uploaded_prediction_becomes_overlay_artifact(monkeypatch
 
 
 def test_fastapi_segmentation_can_submit_gpu_inference_job(monkeypatch):
+    """Submit a GPU inference job through FastAPI segmentation."""
     calls = []
 
     class FakeResponse:
@@ -1119,6 +1143,7 @@ def test_fastapi_segmentation_can_submit_gpu_inference_job(monkeypatch):
 
 
 def test_gpu_inference_job_uses_vista_s3_defaults_when_not_overridden(monkeypatch):
+    """Use the VISTA S3 defaults for a GPU inference job unless overridden."""
     calls = []
 
     class FakeResponse:
@@ -1173,6 +1198,7 @@ def test_gpu_inference_job_uses_vista_s3_defaults_when_not_overridden(monkeypatc
 
 
 def test_gpu_inference_presigned_builds_download_and_upload_urls(monkeypatch):
+    """Build presigned download and upload URLs for a GPU inference job."""
     calls = []
 
     class FakeResponse:
@@ -1266,6 +1292,7 @@ def test_gpu_inference_presigned_builds_download_and_upload_urls(monkeypatch):
 
 
 def test_fastapi_json_payload_excludes_internal_callbacks():
+    """Exclude internal callbacks from the FastAPI JSON payload."""
     data = SegmentationInput(
         image_data_base64=_encoded_test_image(),
         backend="fastapi",
@@ -1291,6 +1318,8 @@ def test_fastapi_json_payload_excludes_internal_callbacks():
 
 
 def test_fastapi_connection_failure_reports_actionable_diagnostics(monkeypatch):
+    """Report actionable diagnostics when the FastAPI connection fails."""
+
     class FakeSession:
         trust_env = True
 
@@ -1325,6 +1354,8 @@ def test_fastapi_connection_failure_reports_actionable_diagnostics(monkeypatch):
 
 
 def test_gpu_inference_failed_job_reports_execution_and_result_diagnostics(monkeypatch):
+    """Report execution and result diagnostics for a failed GPU inference job."""
+
     class FakeResponse:
         status_code = 200
 
@@ -1407,6 +1438,8 @@ def test_gpu_inference_failed_job_reports_execution_and_result_diagnostics(monke
 
 
 def test_normalization_preserves_external_backend_and_mode():
+    """Preserve the backend and mode reported by an external implementation."""
+
     class ExternalOutput(BaseModel):
         backend: str = "opencv-deployment"
         mode: str = "watershed"

@@ -4,6 +4,11 @@
 // learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
+import { TextDecoder, TextEncoder } from 'util';
+
+// react-router 7 needs TextEncoder/TextDecoder, which the jsdom environment omits.
+if (typeof global.TextEncoder === 'undefined') global.TextEncoder = TextEncoder;
+if (typeof global.TextDecoder === 'undefined') global.TextDecoder = TextDecoder;
 
 // The real factory uses `new URL(..., import.meta.url)`, which Jest cannot parse.
 // jsdom has no Worker, so this throws and the viewer takes its unavailable path

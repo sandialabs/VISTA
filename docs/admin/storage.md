@@ -24,8 +24,10 @@ podman run -d \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=minioadminpassword \
   -v /data/minio:/data \
-  minio/minio server /data --console-address ":9001"
+  cgr.dev/chainguard/minio server /data --console-address ":9001"
 ```
+
+Pulls of the official `minio/minio` image were denied on Docker Hub and Quay when this was written, so VISTA uses the Chainguard build of MinIO. It runs as the non-root user 65532, so a host directory mounted at `/data` must be writable by that user (for Podman add `:U` to the volume, for example `-v /data/minio:/data:U`, or `chown 65532 /data/minio`). Named volumes need no change.
 
 ### Binary Installation
 

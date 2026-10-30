@@ -511,7 +511,7 @@ psql -U postgres -d imagemanager -c "VACUUM ANALYZE;"
 
 # Check for updates
 podman pull postgres:15
-podman pull minio/minio:latest
+podman pull cgr.dev/chainguard/minio:latest
 
 # Generate report
 echo "Weekly Maintenance Report $(date)" > /tmp/weekly-report.txt
