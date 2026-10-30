@@ -417,6 +417,17 @@ The UI uses `react-router-dom` 7.x (imports come only from `react-router-dom`; t
 - Router 7 needs `TextEncoder`/`TextDecoder`, which jsdom omits; `frontend/src/setupTests.js` defines them.
 - Lockfiles (`uv.lock`, `frontend/package-lock.json`) must resolve only from public indexes (`pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`). Never commit internal mirror URLs or insecure-host/TLS-skipping settings; pass such flags only on a local command line.
 
+## Container OpenCV Build (No FFmpeg)
+
+The production `Dockerfile` ships an `opencv-python-headless` wheel compiled from the hash-pinned PyPI source distribution with `-DWITH_FFMPEG=OFF` (stage `opencv-build`), because the PyPI wheels bundle FFmpeg libraries that carry unpatched CVEs. Things to keep in mind:
+
+- Video decoding and writing through `cv2` (`VideoCapture`, `VideoWriter` with FFmpeg codecs such as `mp4v`) is unavailable in the image by design. Image I/O, drawing, contours, `dnn`, and ultralytics inference are unaffected (YOLO inference and common cv2 operations were verified bit-identical to the stock wheel).
+- `pyproject.toml` has a `[tool.uv] override-dependencies` entry that drops the GUI `opencv-python` distribution (required by ultralytics) from resolution; it bundles its own FFmpeg and shares the `cv2` directory with the headless wheel. Local development and CI test runs still install the stock PyPI headless wheel.
+- To bump OpenCV: update `OPENCV_VERSION` and `OPENCV_SDIST_SHA256` in the `Dockerfile` together with the `uv.lock` version. `backend/tests/test_container_build_config.py` fails if they drift.
+- Never `pip install` runtime packages in the `base` stage: the `final` stage inherits its `/opt/venv` and `COPY --from=builder` does not delete files, so anything installed there (such as the GUI `opencv-python`) ships. The `final` stage fails the build if any FFmpeg library or PyPI OpenCV distribution is present.
+- Do not run a plain `uv sync` inside the image; it reinstalls the PyPI wheel. Use `uv sync --frozen --inexact --no-install-package opencv-python-headless` (the CI container test does).
+- A cold build compiles OpenCV, which adds substantial time (more on small CI runners). The layer is cached while the pinned inputs are unchanged.
+
 ## Claude Code Agents
 
 Custom subagents are defined in `.claude/agents/` for specialized workflows:

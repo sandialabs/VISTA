@@ -177,7 +177,9 @@ jobs:
 
     - name: Test container
       run: |
-        # Start the container (install dev deps for aiosqlite SQLite driver)
+        # Start the container (install dev deps for aiosqlite SQLite driver).
+        # --inexact --no-install-package keeps the image's FFmpeg-free OpenCV; a plain
+        # "uv sync --frozen" would replace it with the PyPI wheel that bundles FFmpeg.
         docker run -d --name test-container \
           -e DATABASE_URL="sqlite+aiosqlite:///./test.db" \
           -e FAST_TEST_MODE=true \
@@ -189,7 +191,7 @@ jobs:
           -e POSTGRES_SERVER=localhost \
           -p 8000:8000 \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-          bash -c "uv sync --frozen && uvicorn main:app --host 0.0.0.0 --port 8000"
+          bash -c "uv sync --frozen --inexact --no-install-package opencv-python-headless && uvicorn main:app --host 0.0.0.0 --port 8000"
         
         # Wait for container to start and implement health checking with retry
         echo "Waiting for container to become healthy..."

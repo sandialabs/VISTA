@@ -300,6 +300,8 @@ podman build -t vista .
 podman run -p 8000:8000 vista
 ```
 
+The image compiles OpenCV from source without FFmpeg (to avoid the CVEs in the FFmpeg libraries bundled with the PyPI wheels), so the first build takes noticeably longer than later cached builds. Video decoding and writing through `cv2` is not available in the image.
+
 Access at http://localhost:8000
 
 ## ML Analysis Feature
