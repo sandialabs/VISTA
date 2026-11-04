@@ -206,6 +206,48 @@ Process:
 
 ## Troubleshooting
 
+### Build Fails with CERTIFICATE_VERIFY_FAILED (Corporate Proxy / TLS Inspection)
+
+**Symptoms:** `pip`, `uv`, `npm`, or `wget` fail during the image build with
+`SSLCertVerificationError ... unable to get local issuer certificate`.
+
+**Cause:** the network re-signs HTTPS traffic with a corporate root CA (for example
+Zscaler). The host trusts it, but the UBI9 build container does not.
+
+**Solution:** `./scripts/dev.sh up` and `./scripts/dev.sh build` copy `*.crt` / `*.pem`
+files from `/usr/local/share/ca-certificates` into `certs/` (gitignored). `Dockerfile.dev`
+adds them to the system trust store before any download and points pip, uv, requests,
+and Node at it. After the certificates are staged, rebuild:
+
+```bash
+./scripts/dev.sh build
+./scripts/dev.sh up
+```
+
+- Use a different source directory: `EXTRA_CA_CERT_SOURCE=/path/to/cas ./scripts/dev.sh build`
+- Disable automatic staging: `EXTRA_CA_CERTS_AUTO=false`
+- If WSL does not have the CA yet, export it from Windows (PowerShell:
+  `Get-ChildItem Cert:\LocalMachine\Root | Where-Object Subject -match Zscaler | Export-Certificate -FilePath zscaler.cer`),
+  convert it with `openssl x509 -inform der -in zscaler.cer -out certs/zscaler_root_ca.crt`, and rebuild.
+- Never commit certificates or work around the error by disabling TLS verification.
+
+### Podman: short-name did not resolve / dev.sh health waits time out
+
+- `short-name "postgres:15" did not resolve to an alias`: the compose files now use fully
+  qualified names (`docker.io/library/postgres:15`). Pull the latest changes.
+- podman-compose 1.0.6 (the Ubuntu package) ignores `profiles:` and lacks newer
+  `compose ps` flags. `dev.sh` handles both: it starts only `DEV_SERVICES` and checks health
+  with `podman inspect` / `podman healthcheck run`. Remove a stray model-service container with
+  `podman rm -f vista_toolbox_models_dev`.
+
+### Backend Cannot Reach MinIO (RemoteDisconnected) Behind a Proxy
+
+Podman copies host proxy variables into containers, so requests to `http://minio:9000`
+go to the corporate proxy, which drops them. The dev and test compose files set
+`NO_PROXY` / `no_proxy` for the compose hostnames. Verify with
+`podman exec vista_backend_dev env | grep -i proxy`. Recreate containers after changes:
+`./scripts/dev.sh down && ./scripts/dev.sh up`.
+
 ### Backend Not Starting
 
 Check logs:

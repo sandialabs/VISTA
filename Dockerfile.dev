@@ -3,6 +3,23 @@
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal AS base
 
+# Optional extra CA certificates for networks with TLS inspection (corporate
+# proxies such as Zscaler). scripts/dev.sh stages host CAs into certs/; the
+# directory is empty by default, in which case only the stock bundle is used.
+# Never replace this with --trusted-host / --insecure / strict-ssl=false.
+COPY certs/ /tmp/extra-ca/
+RUN find /tmp/extra-ca -type f \( -name '*.crt' -o -name '*.pem' \) \
+        -exec cp {} /etc/pki/ca-trust/source/anchors/ \; && \
+    update-ca-trust extract && \
+    rm -rf /tmp/extra-ca
+# Point every HTTPS client at the system bundle. uv ships its own root store
+# unless native TLS is enabled; Node/npm only honor NODE_EXTRA_CA_CERTS.
+ENV SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt \
+    REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
+    PIP_CERT=/etc/pki/tls/certs/ca-bundle.crt \
+    UV_NATIVE_TLS=true \
+    NODE_EXTRA_CA_CERTS=/etc/pki/tls/certs/ca-bundle.crt
+
 # Install Python 3.11, Node.js, and system dependencies
 RUN microdnf install -y --nodocs \
     python3.11 \

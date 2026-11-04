@@ -435,6 +435,15 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 - **Native segmentation tests** (`VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true`) are off in the default suite and pass when enabled. The SAM and Anomalib smoke tests assert the built-in runtimes' own names (`RuntimeSAMSegmentation`, `RuntimeSAMSegmentationInput`, `vista.patchcore`). The YOLO tests need `yolo11n-seg.pt` (a segmentation model, not `yolov8n.pt`) in `checkpoints/`, the repository root, and `backend/`, or network access to download it; they compare boxes and confidences with a tolerance because inference output varies by machine.
 - **E2E specs run against the production container** (`E2E_BASE_URL`), whose Content-Security-Policy is `connect-src 'self'`: do not `fetch()` `data:` URLs in page code or helpers; decode with `atob` and `createImageBitmap`.
 
+## Dev Container Extra CA Certificates
+
+- On networks with TLS inspection (Zscaler), dev image builds fail with `CERTIFICATE_VERIFY_FAILED`. `scripts/dev.sh` stages host CAs from `EXTRA_CA_CERT_SOURCE` (default `/usr/local/share/ca-certificates`; disable with `EXTRA_CA_CERTS_AUTO=false`) into the gitignored `certs/` directory before `up`/`build`.
+- `Dockerfile.dev` copies `certs/` into the trust store before any network fetch and sets `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`, `NODE_EXTRA_CA_CERTS`, and `UV_NATIVE_TLS=true`. With no certs staged it behaves as before. `certs/.gitkeep` must stay tracked (`.dockerignore` drops `*.md`).
+- Fix TLS errors by adding CAs, never with `--trusted-host`, `--insecure`, or `strict-ssl=false`. `backend/tests/test_dev_container_ca_config.py` guards this. The production `Dockerfile` does not consume `certs/`.
+- Compose files and `deployment-test/` use fully qualified image names (`docker.io/library/postgres:15`); Podman without unqualified-search registries rejects short names. `test_container_build_config.py` guards this.
+- `scripts/dev.sh` works with podman-compose 1.0.6: it starts `DEV_SERVICES` / builds `DEV_BUILD_SERVICES` explicitly (old podman-compose ignores `profiles:`, which would start the GPU `toolbox-models` service), and waits for health via `podman|docker inspect` on the `com.docker.compose.service` label, running `podman healthcheck run` each poll because Podman healthcheck timers need systemd (often absent in WSL2).
+- Podman passes host `http_proxy`/`no_proxy` into containers by default, which sends `http://minio:9000` to a corporate proxy (`RemoteDisconnected`). `backend-dev`, `frontend-dev`, and `backend-test` set `NO_PROXY`/`no_proxy` listing the compose hostnames; add new service hostnames there.
+
 ## Claude Code Agents
 
 Custom subagents are defined in `.claude/agents/` for specialized workflows:

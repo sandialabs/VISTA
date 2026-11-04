@@ -5,7 +5,7 @@
 services:
   # PostgreSQL for testing (ephemeral)
   postgres:
-    image: postgres:15
+    image: docker.io/library/postgres:15
     container_name: vista_postgres_test
     environment:
       POSTGRES_USER: postgres
@@ -61,6 +61,9 @@ services:
       - SKIP_HEADER_CHECK=true
       - DEBUG=false
       - PYTHONUNBUFFERED=1
+      # Keep in-network traffic off host HTTP proxies (Podman passes host proxy vars by default)
+      - NO_PROXY=localhost,127.0.0.1,postgres,minio,backend-test,frontend-test
+      - no_proxy=localhost,127.0.0.1,postgres,minio,backend-test,frontend-test
       - DISABLE_FILE_LOGGING=true
       - CACHE_DIR=/app/.cache
     depends_on:

@@ -5,7 +5,7 @@
 services:
   # PostgreSQL database
   postgres:
-    image: postgres:15
+    image: docker.io/library/postgres:15
     container_name: vista_postgres_dev
     logging:
       driver: "json-file"
@@ -58,7 +58,7 @@ services:
 
   # pgAdmin database management UI
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: docker.io/dpage/pgadmin4:latest
     container_name: vista_pgadmin_dev
     logging:
       driver: "json-file"
@@ -130,6 +130,9 @@ services:
       - VISTA_AUTH_BACKEND=demo
       # Python settings
       - PYTHONUNBUFFERED=1
+      # Keep in-network traffic off host HTTP proxies (Podman passes host proxy vars by default)
+      - NO_PROXY=localhost,127.0.0.1,postgres,minio,backend-dev,frontend-dev,toolbox-models
+      - no_proxy=localhost,127.0.0.1,postgres,minio,backend-dev,frontend-dev,toolbox-models
       - PYTHONDONTWRITEBYTECODE=1
       # Disable file logging (use Docker logs instead)
       - DISABLE_FILE_LOGGING=true
@@ -212,6 +215,9 @@ services:
       - frontend_node_modules:/app/frontend/node_modules
     environment:
       - HOST=0.0.0.0
+      # Keep in-network traffic off host HTTP proxies (Podman passes host proxy vars by default)
+      - NO_PROXY=localhost,127.0.0.1,postgres,minio,backend-dev,frontend-dev,toolbox-models
+      - no_proxy=localhost,127.0.0.1,postgres,minio,backend-dev,frontend-dev,toolbox-models
       - REACT_APP_API_URL=http://localhost:8000
       - REACT_APP_BACKEND_URL=http://backend-dev:8000
       - FAST_REFRESH=true

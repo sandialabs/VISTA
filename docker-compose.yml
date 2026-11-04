@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:15
+    image: docker.io/library/postgres:15
     container_name: vista_postgres
     environment:
       POSTGRES_USER: postgres
@@ -38,7 +38,7 @@ services:
 
 
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: docker.io/dpage/pgadmin4:latest
     container_name: vista_pgadmin
     ports:
       - "${PGADMIN_PORT:-8080}:80"
