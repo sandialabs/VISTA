@@ -11,7 +11,13 @@ import {
   scalePointToGeometrySpace,
 } from './annotationPointerGeometry';
 import { isMiddleMousePanEvent, normalizeTileViewportTransform, stopMiddleMouseDefault } from './inspectionUtils';
-import { getDraftBox, getDraftLine, isCommittableDraftBox } from './annotationDraftReducer';
+import {
+  FULLSCREEN_MIN_MEASURE_LENGTH_PX,
+  getDraftBox,
+  getDraftLine,
+  isCommittableDraftBox,
+  isCommittableDraftLine,
+} from './annotationDraftReducer';
 import { MEASUREMENT_COLORS } from './inspectionAnnotationDisplay';
 
 export function useTileAnnotationPointer({
@@ -220,43 +226,36 @@ export function useTileAnnotationPointer({
     return true;
   };
 
-  const handleTileAnnotationPointerDown = (event, imageId) => {
+  // Tile click handler. Measure, box, and crop are all drawn by press-drag-release
+  // in the pointer handlers below, so a click while a tool is active is consumed
+  // (it must not open the fullscreen viewer) and draws nothing.
+  const handleTileAnnotationPointerDown = (event) => {
     if (startTileViewportPan(event)) return true;
     if (readOnly) return false;
     if (!annotationToolMode) return false;
     event.preventDefault();
     event.stopPropagation();
-    const position = getAnnotationSurfacePointerPosition(event);
-    if (!position) return true;
-    const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
-    if (!requireCalibrationForAnnotation(annotationImageId, { surface: 'tile', toolMode: annotationToolMode })) return true;
-    if (annotationToolMode === 'measure') {
-      const firstPoint = annotationDraftsRef.current.tile.measure;
-      if (!firstPoint) {
-        startAnnotationDraft('tile', 'measure', { ...position, mode: 'measure', imageId: annotationImageId });
-        return true;
-      }
-      const line = getDraftLine(firstPoint, position);
-      const existingLineCount = (storedMeasurementLinesByImageId[String(annotationImageId || '')] || []).length;
-      const color = MEASUREMENT_COLORS[existingLineCount % MEASUREMENT_COLORS.length];
-      createMeasurementAnnotation({
-        imageId: annotationImageId,
-        line,
-        name: nextMeasurementName(classifyMeasurementLine(line)),
-        color,
-        distanceMm: getLineDistanceMm(line, annotationImageId),
-      });
-      finishAnnotationDraft('tile');
-      setAnnotationToolMode('');
-      return true;
-    }
+    return true;
+  };
+
+  const commitTileMeasureLine = (firstPoint, position, annotationImageId) => {
+    const line = getDraftLine(firstPoint, position);
+    if (!isCommittableDraftLine(line, { minLength: FULLSCREEN_MIN_MEASURE_LENGTH_PX })) return false;
+    const existingLineCount = (storedMeasurementLinesByImageId[String(annotationImageId || '')] || []).length;
+    createMeasurementAnnotation({
+      imageId: annotationImageId,
+      line,
+      name: nextMeasurementName(classifyMeasurementLine(line)),
+      color: MEASUREMENT_COLORS[existingLineCount % MEASUREMENT_COLORS.length],
+      distanceMm: getLineDistanceMm(line, annotationImageId),
+    });
     return true;
   };
 
   const handleTileBoxPointerDown = (event, imageId) => {
     if (startTileViewportPan(event)) return true;
     if (readOnly) return false;
-    if (!['box', 'crop'].includes(annotationToolMode)) return false;
+    if (!['measure', 'box', 'crop'].includes(annotationToolMode)) return false;
     if (event.button !== undefined && event.button !== 0) return false;
     event.preventDefault();
     event.stopPropagation();
@@ -264,7 +263,11 @@ export function useTileAnnotationPointer({
     if (!position) return true;
     const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
     if (!requireCalibrationForAnnotation(annotationImageId, { surface: 'tile', toolMode: annotationToolMode })) return true;
-    startAnnotationDraft('tile', 'drag', { ...position, mode: 'box', imageId: annotationImageId });
+    if (annotationToolMode === 'measure') {
+      startAnnotationDraft('tile', 'measure', { ...position, mode: 'measure', imageId: annotationImageId });
+    } else {
+      startAnnotationDraft('tile', 'drag', { ...position, mode: 'box', imageId: annotationImageId });
+    }
     suppressNextTileClickRef.current = true;
     safeSetPointerCapture(event.currentTarget, event.pointerId);
     return true;
@@ -274,12 +277,26 @@ export function useTileAnnotationPointer({
     if (finishTileViewportPan(event)) return true;
     if (readOnly) return false;
     if (event.button !== undefined && event.button !== 0) return false;
-    if (!['box', 'crop'].includes(annotationToolMode)) return false;
+    if (!['measure', 'box', 'crop'].includes(annotationToolMode)) return false;
     event.preventDefault();
     event.stopPropagation();
     suppressNextTileClickRef.current = true;
-    const firstPoint = annotationDraftsRef.current.tile.drag;
     const position = getAnnotationSurfacePointerPosition(event);
+    if (annotationToolMode === 'measure') {
+      const measurePoint = annotationDraftsRef.current.tile.measure;
+      if (!measurePoint) return true;
+      // Clear the draft first so a repeated pointerup cannot commit a second line.
+      finishAnnotationDraft('tile');
+      safeReleasePointerCapture(event.currentTarget, event.pointerId);
+      const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
+      const sameImage = String(measurePoint.imageId || '') === String(annotationImageId || '');
+      // A press-release without a drag keeps the tool armed so the user can retry.
+      if (position && sameImage && commitTileMeasureLine(measurePoint, position, annotationImageId)) {
+        setAnnotationToolMode('');
+      }
+      return true;
+    }
+    const firstPoint = annotationDraftsRef.current.tile.drag;
     if (firstPoint && position) {
       const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
       const box = getDraftBox(firstPoint, position);
@@ -304,7 +321,8 @@ export function useTileAnnotationPointer({
   };
 
   const handleTileBoxPointerCancel = (event) => {
-    if (!annotationDraftsRef.current.tile.drag) return;
+    const { drag, measure } = annotationDraftsRef.current.tile;
+    if (!drag && !measure) return;
     event.preventDefault();
     event.stopPropagation();
     cancelAnnotationDraft('tile');

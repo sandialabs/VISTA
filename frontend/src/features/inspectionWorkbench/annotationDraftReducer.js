@@ -5,7 +5,7 @@ import { isFiniteAnnotationBox, isFiniteMeasurementLine, makeBoxFromPoints } fro
  * the tile, MPR, and fullscreen surfaces.
  *
  * Each surface keeps the same slots:
- * - `measure`: first point of a click-click (or press-release) measurement.
+ * - `measure`: first point of an MPR click-click or a tile/fullscreen press-drag-release measurement.
  * - `drag`: anchor point of a box, crop, or cube drag.
  * - `pending`: committed first face of a two-slice MPR cube.
  * - `preview`: geometry rendered while the pointer moves.
@@ -99,7 +99,7 @@ export function getDraftLine(anchor, point, extra = {}) {
 
 /**
  * True when a draft line may be saved. Without `minLength` every line is
- * accepted, matching the tile and MPR click-click flows.
+ * accepted, matching the MPR click-click flow.
  */
 export function isCommittableDraftLine(line, { minLength = null } = {}) {
   if (!line) return false;

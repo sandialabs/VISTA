@@ -262,10 +262,10 @@ export function useFullscreenAnnotationTools({
       imageWidth: position.naturalWidth,
       imageHeight: position.naturalHeight,
     });
-    if (!isCommittableDraftLine(line, { minLength: FULLSCREEN_MIN_MEASURE_LENGTH_PX })) {
-      cancelAnnotationDraft('fullscreen', ['measure', 'preview']);
-      return;
-    }
+    // Clear the draft synchronously, before the async create, so the click event
+    // that follows mouseup cannot see the anchor and commit the line a second time.
+    cancelAnnotationDraft('fullscreen', ['measure', 'preview']);
+    if (!isCommittableDraftLine(line, { minLength: FULLSCREEN_MIN_MEASURE_LENGTH_PX })) return;
     await commitFullscreenMeasureLine(line);
   };
 

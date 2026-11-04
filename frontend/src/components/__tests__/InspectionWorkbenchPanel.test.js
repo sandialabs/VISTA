@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import InspectionWorkbenchPanel, {
   applyInspectionImageDisplayOrder,
   createServerVolumeDescriptor,
@@ -461,6 +461,22 @@ function fireCoordinatePointerEvent(target, type, init = {}) {
     isPrimary: { configurable: true, value: init.isPrimary !== false },
   });
   return fireEvent(target, event);
+}
+
+// Press-drag-release as a browser delivers it, including the trailing click,
+// so tests also guard against the click committing a second annotation.
+function dragTilePointer(target, from, to) {
+  fireCoordinatePointerEvent(target, 'pointerdown', { ...from, button: 0, pointerId: 1 });
+  fireCoordinatePointerEvent(target, 'pointermove', { ...to, pointerId: 1 });
+  fireCoordinatePointerEvent(target, 'pointerup', { ...to, button: 0, pointerId: 1 });
+  fireEvent.click(target, to);
+}
+
+function dragFullscreenMouse(target, from, to) {
+  fireEvent.mouseDown(target, { ...from, button: 0 });
+  fireEvent.mouseMove(target, to);
+  fireEvent.mouseUp(target, { ...to, button: 0 });
+  fireEvent.click(target, to);
 }
 
 const defaultCalibration = { pixels_per_mm: 20, pixels_per_inch: 508, unit: 'mm' };
@@ -4436,15 +4452,16 @@ describe('InspectionWorkbenchPanel', () => {
     Object.defineProperty(fullscreenImage, 'width', { configurable: true, value: 1000 });
     Object.defineProperty(fullscreenImage, 'height', { configurable: true, value: 500 });
     fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 500, right: 1000, bottom: 500 });
-    fireEvent.click(fullscreenImage, { clientX: 100, clientY: 100 });
-    fireEvent.click(fullscreenImage, { clientX: 300, clientY: 200 });
+    dragFullscreenMouse(fullscreenImage, { clientX: 100, clientY: 100 }, { clientX: 300, clientY: 200 });
     expect(global.fetch.mock.calls.some((call) => call[0].includes('/annotations') && call[1]?.method === 'POST')).toBe(false);
 
     Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 1000 });
     Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 500 });
-	    fireEvent.click(fullscreenImage, { clientX: 100, clientY: 100 });
+	    fireEvent.mouseDown(fullscreenImage, { clientX: 100, clientY: 100, button: 0 });
 	    fireEvent.mouseMove(fullscreenImage, { clientX: 200, clientY: 100 });
 	    await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('5.00 mm'));
+	    fireEvent.mouseMove(fullscreenImage, { clientX: 300, clientY: 200 });
+	    fireEvent.mouseUp(fullscreenImage, { clientX: 300, clientY: 200, button: 0 });
 	    fireEvent.click(fullscreenImage, { clientX: 300, clientY: 200 });
 
     await waitFor(() => {
@@ -4459,6 +4476,40 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('11.18 mm'));
   });
 
+  test('creates exactly one measurement per drag in the fullscreen and tile views', async () => {
+    const linePosts = () => global.fetch.mock.calls.filter((call) => {
+      if (!call[0].includes('/annotations') || call[1]?.method !== 'POST') return false;
+      return Boolean(JSON.parse(call[1].body).geometry?.line);
+    });
+    mockWorkbenchFetch(scenarioByUser[0]);
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    const tileImage = await screen.findByAltText('front view');
+    Object.defineProperty(tileImage, 'naturalWidth', { configurable: true, value: 400 });
+    Object.defineProperty(tileImage, 'naturalHeight', { configurable: true, value: 200 });
+    tileImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
+
+    // Click-click on a tile no longer places a line.
+    fireEvent.click(screen.getByRole('button', { name: 'Measure on tiles' }));
+    expect(screen.getByText(/Click and drag on a tile to draw a measurement line/i)).toBeInTheDocument();
+    fireEvent.click(tileImage, { clientX: 40, clientY: 20 });
+    fireEvent.click(tileImage, { clientX: 140, clientY: 70 });
+    expect(linePosts()).toHaveLength(0);
+
+    dragTilePointer(tileImage, { clientX: 40, clientY: 20 }, { clientX: 140, clientY: 70 });
+    await waitFor(() => expect(linePosts()).toHaveLength(1));
+
+    fireEvent.click(tileImage);
+    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
+    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 500 });
+    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 500, right: 1000, bottom: 500 });
+    fireEvent.click(screen.getByRole('button', { name: 'Measure' }));
+    dragFullscreenMouse(fullscreenImage, { clientX: 100, clientY: 100 }, { clientX: 300, clientY: 200 });
+    await waitFor(() => expect(linePosts()).toHaveLength(2));
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
+    expect(linePosts()).toHaveLength(2);
+  });
+
   test('draws measurement lines and bounding boxes directly on image tiles', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
@@ -4470,9 +4521,11 @@ describe('InspectionWorkbenchPanel', () => {
     tileImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
 
 	    fireEvent.click(screen.getByRole('button', { name: 'Measure on tiles' }));
-	    fireEvent.click(tileImage, { clientX: 40, clientY: 20 });
+	    fireCoordinatePointerEvent(tileImage, 'pointerdown', { clientX: 40, clientY: 20, button: 0, pointerId: 1 });
 	    fireCoordinatePointerEvent(tileImage, 'pointermove', { clientX: 100, clientY: 60, pointerId: 1 });
 	    await waitFor(() => expect(screen.getByLabelText('tile measurement overlay')).toHaveTextContent('3.61 mm'));
+	    fireCoordinatePointerEvent(tileImage, 'pointermove', { clientX: 140, clientY: 70, pointerId: 1 });
+	    fireCoordinatePointerEvent(tileImage, 'pointerup', { clientX: 140, clientY: 70, button: 0, pointerId: 1 });
 	    fireEvent.click(tileImage, { clientX: 140, clientY: 70 });
 
     await waitFor(() => {
@@ -4539,8 +4592,7 @@ describe('InspectionWorkbenchPanel', () => {
     tileSurface.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 300, right: 500, bottom: 300 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Measure on tiles' }));
-    fireEvent.click(tileSurface, { clientX: 90, clientY: 45 });
-    fireEvent.click(tileSurface, { clientX: 190, clientY: 95 });
+    dragTilePointer(tileSurface, { clientX: 90, clientY: 45 }, { clientX: 190, clientY: 95 });
 
     await waitFor(() => {
       const postCall = global.fetch.mock.calls.find((call) => {
@@ -5765,8 +5817,7 @@ describe('InspectionWorkbenchPanel', () => {
     Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 200 });
     Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 100 });
     fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100 });
-    fireEvent.click(fullscreenImage, { clientX: 20, clientY: 20 });
-    fireEvent.click(fullscreenImage, { clientX: 80, clientY: 40 });
+    dragFullscreenMouse(fullscreenImage, { clientX: 20, clientY: 20 }, { clientX: 80, clientY: 40 });
 
     await waitFor(() => {
       const postCall = global.fetch.mock.calls.find((call) => call[0].includes('/annotations') && call[1]?.method === 'POST');

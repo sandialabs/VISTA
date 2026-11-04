@@ -96,7 +96,9 @@ export function AnnotationsPane(props) {
 	        </div>}
 	        {annotationToolMode === 'measure' && (
 	          <p className="muted annotation-tool-hint">
-	            Click two points {projectType === 'PT3' ? 'on an MPR slice' : 'on a tile'} to place a measurement line.
+	            {projectType === 'PT3'
+	              ? 'Click two points on an MPR slice to place a measurement line.'
+	              : 'Click and drag on a tile to draw a measurement line.'}
 	          </p>
 	        )}
 	        {annotationToolMode === 'box' && (
