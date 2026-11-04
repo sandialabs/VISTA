@@ -238,7 +238,9 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
       || modality === 'analyze-overlay'
     );
   };
-  const pushRecord = (record, index, forceOverlay = false) => {
+  // `listKey` keeps ids unique across source_images and analysis_outputs, whose
+  // indexes both start at 0 (an Analyze output can live in either list).
+  const pushRecord = (record, index, forceOverlay = false, listKey = 'source') => {
     if (!record || typeof record !== 'object') return;
     if (isDeleteCandidate(record)) return;
     const overlay = forceOverlay
@@ -260,7 +262,7 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
         ? (getAssignedOverlayDisplayLabel(record) || getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay'))
         : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
     const imageReference = {
-      id: `${part.id}-${overlay ? 'analysis' : 'source'}-${index}`,
+      id: `${part.id}-${listKey === 'source' ? '' : `${listKey}-`}${overlay ? 'analysis' : 'source'}-${index}`,
       viewName: String(record.side || record.modality || (overlay ? 'overlay' : 'image')).toLowerCase(),
       modality,
       label,
@@ -287,7 +289,7 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
     pushRecord(record, index, isAnalyzeOutputRecord(record));
   });
   analysisOutputs.forEach((record, index) => {
-    pushRecord(record, index, true);
+    pushRecord(record, index, true, 'output');
   });
 
   // source_images and analysis_outputs carry persisted UUIDs and are

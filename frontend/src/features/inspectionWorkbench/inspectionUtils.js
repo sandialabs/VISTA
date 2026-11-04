@@ -83,14 +83,6 @@ export function stopMiddleMouseDefault(event) {
   event.stopPropagation();
 }
 
-export function normalizeTileViewportTransform(transform = {}) {
-  return {
-    zoom: clampRange(transform.zoom, 0.5, 4, 1),
-    panX: clampRange(transform.panX, -10000, 10000, 0),
-    panY: clampRange(transform.panY, -10000, 10000, 0),
-  };
-}
-
 export function normalizeInspectorHotkeys(candidate) {
   const normalized = { ...DEFAULT_INSPECTOR_HOTKEYS };
   if (!candidate || typeof candidate !== 'object') return normalized;

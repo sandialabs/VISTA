@@ -1,7 +1,7 @@
 import { isFiniteAnnotationBox, isFiniteMeasurementLine } from './inspectionAnnotationGeometry';
 import { getExternalOverlayOpacity } from './inspectionAnnotationDisplay';
 import { getProjectImageRecord, getInspectionTileFilename, getImageMetadataOverlayLines } from './imageLookup';
-import { safeDecodeFilename, stopMiddleMouseDefault } from './inspectionUtils';
+import { safeDecodeFilename } from './inspectionUtils';
 import { getAnnotationSourceImageId, isInspectionItemForImageEntry } from './partImageRefs';
 import { renderAnnotationOverlay, renderTileAnnotationEditingTargets } from './annotationOverlayRendering';
 
@@ -14,8 +14,6 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
   } = selection;
   const {
     imageEnabled,
-    normalizedInspectorViewport,
-    tileViewportStyle,
     annotationOpacityMultiplier,
     measurementLinesByImageId,
     boxAnnotationsByImageId,
@@ -34,9 +32,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
     handleTileBoxPointerDown,
     handleTileAnnotationPointerMove,
     handleTileBoxPointerUp,
-    finishTileViewportPan,
     handleTileBoxPointerCancel,
-    handleTileImageWheel,
     handleTileAnnotationPointerDown,
     setFullscreenImageModal,
     startTileAnnotationGeometryDrag,
@@ -46,18 +42,6 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                 const viewName = entry.viewName || 'image';
                 const imageRef = String(entry.imageRef || '');
                 const isSelectedTileImage = String(selectedImageRef || '') === imageRef;
-                const tileViewportAttributes = isSelectedTileImage
-                  ? {
-                    'data-viewport-zoom': normalizedInspectorViewport.zoom,
-                    'data-viewport-pan-x': normalizedInspectorViewport.panX,
-                    'data-viewport-pan-y': normalizedInspectorViewport.panY,
-                    style: tileViewportStyle,
-                  }
-                  : {
-                    'data-viewport-zoom': 1,
-                    'data-viewport-pan-x': 0,
-                    'data-viewport-pan-y': 0,
-                  };
                 const imageRecord = getProjectImageRecord(projectImageLookup, {
                   image_id: entry.imageId,
                   filename: entry.filename || imageRef,
@@ -176,13 +160,10 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                         <div
                           className="inspection-overlay-composite inspection-image-annotation-surface"
 	                          data-testid="inspection-overlay-composite"
-	                          {...tileViewportAttributes}
 	                          onPointerDown={(event) => handleTileBoxPointerDown(event, imageId)}
 	                          onPointerMove={(event) => handleTileAnnotationPointerMove(event, imageId)}
 	                          onPointerUp={(event) => handleTileBoxPointerUp(event, imageId)}
-	                          onPointerCancel={(event) => { if (!finishTileViewportPan(event)) handleTileBoxPointerCancel(event); }}
-		                          onAuxClick={stopMiddleMouseDefault}
-                              onWheel={(event) => handleTileImageWheel(event, imageRef)}
+	                          onPointerCancel={handleTileBoxPointerCancel}
 	                          onClick={(event) => {
 	                            event.stopPropagation();
 	                            if (suppressNextTileClickRef.current) {
@@ -246,13 +227,10 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
 	                      ) : imageId ? (
                         <div
                           className="inspection-image-annotation-surface"
-	                          {...tileViewportAttributes}
 	                          onPointerDown={(event) => handleTileBoxPointerDown(event, imageId)}
 	                          onPointerMove={(event) => handleTileAnnotationPointerMove(event, imageId)}
 	                          onPointerUp={(event) => handleTileBoxPointerUp(event, imageId)}
-	                          onPointerCancel={(event) => { if (!finishTileViewportPan(event)) handleTileBoxPointerCancel(event); }}
-                          onAuxClick={stopMiddleMouseDefault}
-                          onWheel={(event) => handleTileImageWheel(event, imageRef)}
+	                          onPointerCancel={handleTileBoxPointerCancel}
                           onClick={(event) => {
                             event.stopPropagation();
                             if (suppressNextTileClickRef.current) {

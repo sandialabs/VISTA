@@ -1,14 +1,11 @@
-import { normalizeTileViewportTransform } from './inspectionUtils';
-
 /**
- * MPR zoom, viewport reset, projection mirror toggles, and selected tile
- * wheel zoom. Uses no React hooks.
+ * MPR zoom, viewport reset, and projection mirror toggles. Uses no React hooks.
+ * Multi-image tiles intentionally have no zoom or pan: the mouse wheel scrolls
+ * the page, and zoom lives in the single-image fullscreen view.
  */
 export function useInspectionViewportZoom({
   applyMprNavigationSession,
   setMprProjectionMirror,
-  setInspectorViewport,
-  selectedImageRef,
 }) {
   const adjustZoom = (delta) => {
     applyMprNavigationSession((previous) => ({
@@ -29,17 +26,6 @@ export function useInspectionViewportZoom({
     });
   };
 
-  const handleTileImageWheel = (event, imageRef) => {
-    if (event.target?.closest?.('.inspection-tile-metadata-overlay')) return;
-    if (String(selectedImageRef || '') !== String(imageRef || '')) return;
-    event.preventDefault();
-    const direction = event.deltaY < 0 ? 1 : -1;
-    setInspectorViewport((previous) => normalizeTileViewportTransform({
-      ...previous,
-      zoom: Number(((Number(previous.zoom) || 1) * (direction > 0 ? 1.15 : 1 / 1.15)).toFixed(2)),
-    }));
-  };
-
   const toggleMprProjectionMirror = (axis) => {
     setMprProjectionMirror((prev) => ({
       ...prev,
@@ -50,7 +36,6 @@ export function useInspectionViewportZoom({
   return {
     adjustZoom,
     resetViewport,
-    handleTileImageWheel,
     toggleMprProjectionMirror,
   };
 }

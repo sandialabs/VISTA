@@ -5170,21 +5170,20 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
-  test('pans the selected tile viewport with a middle-mouse drag without creating annotations', async () => {
+  test('ignores middle-mouse drags on tiles: no pan transform and no annotations', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
 
     const tileImage = await screen.findByAltText('front view');
-    const viewport = () => tileImage.closest('[data-viewport-pan-x]');
-    expect(viewport()).not.toBeNull();
+    const surface = tileImage.closest('.inspection-image-annotation-surface');
+    fireEvent.click(tileImage);
+    fireEvent.click(screen.getByRole('button', { name: 'Close fullscreen image' }));
     fireCoordinatePointerEvent(tileImage, 'pointerdown', { clientX: 100, clientY: 100, button: 1, buttons: 4, pointerId: 41 });
     fireCoordinatePointerEvent(tileImage, 'pointermove', { clientX: 130, clientY: 85, buttons: 4, pointerId: 41 });
     fireCoordinatePointerEvent(tileImage, 'pointerup', { clientX: 130, clientY: 85, button: 1, pointerId: 41 });
 
-    await waitFor(() => {
-      expect(viewport()).toHaveAttribute('data-viewport-pan-x', '30');
-      expect(viewport()).toHaveAttribute('data-viewport-pan-y', '-15');
-    });
+    expect(surface.style.transform).toBe('');
+    expect(surface).not.toHaveAttribute('data-viewport-pan-x');
     expect(global.fetch.mock.calls.some(([url, options]) => (
       String(url).includes('/annotations') && ['POST', 'PATCH'].includes(options?.method)
     ))).toBe(false);
@@ -5441,38 +5440,30 @@ describe('InspectionWorkbenchPanel', () => {
     expect(overlay.querySelector('.inspection-annotation-drag-target')).not.toHaveAttribute('opacity');
   });
 
-  test('zooms only the selected tile image under the mouse wheel', async () => {
-    mockWorkbenchFetch(makeImageOrderScenario());
+  test('does not zoom tile images on the mouse wheel so the page can scroll', async () => {
+    const base = scenarioByUser[0];
+    mockWorkbenchFetch({
+      ...base,
+      workspaceState: {
+        ...base.workspaceState,
+        inspector: { ...base.workspaceState.inspector, viewport_transform: { zoom: 2, panX: 40, panY: 20 } },
+      },
+    });
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
 
     const frontImage = await screen.findByAltText('front view');
-    const backImage = await screen.findByAltText('back view');
     const frontSurface = frontImage.closest('.inspection-image-annotation-surface');
-    const backSurface = backImage.closest('.inspection-image-annotation-surface');
-    expect(frontSurface).toHaveAttribute('data-viewport-zoom', '1');
-    expect(backSurface).toHaveAttribute('data-viewport-zoom', '1');
-
-    Object.defineProperty(frontImage, 'naturalWidth', { configurable: true, value: 400 });
-    Object.defineProperty(frontImage, 'naturalHeight', { configurable: true, value: 200 });
-    Object.defineProperty(backImage, 'naturalWidth', { configurable: true, value: 400 });
-    Object.defineProperty(backImage, 'naturalHeight', { configurable: true, value: 200 });
-    frontImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
-    backImage.getBoundingClientRect = () => ({ left: 0, top: 220, width: 400, height: 200, right: 400, bottom: 420 });
-
-    fireEvent.wheel(backSurface, { deltaY: -80, clientX: 200, clientY: 320 });
-    expect(frontSurface).toHaveAttribute('data-viewport-zoom', '1');
-    expect(backSurface).toHaveAttribute('data-viewport-zoom', '1');
-
-    fireEvent.click(backImage);
-    fireEvent.wheel(backSurface, { deltaY: -80, clientX: 200, clientY: 320 });
-    await waitFor(() => expect(backSurface).toHaveAttribute('data-viewport-zoom', '1.15'));
-    expect(backSurface.style.transform).toBe('translate(0px, 0px) scale(1.15)');
-    expect(frontSurface).toHaveAttribute('data-viewport-zoom', '1');
+    // Saved workspaces may still carry a tile viewport_transform; it is ignored.
     expect(frontSurface.style.transform).toBe('');
+    expect(frontSurface).not.toHaveAttribute('data-viewport-zoom');
 
-    fireEvent.wheel(frontSurface, { deltaY: -80, clientX: 200, clientY: 100 });
-    expect(frontSurface).toHaveAttribute('data-viewport-zoom', '1');
-    expect(backSurface).toHaveAttribute('data-viewport-zoom', '1.15');
+    // Select the tile (clicking opens fullscreen), close the modal, then wheel.
+    fireEvent.click(frontImage);
+    fireEvent.click(screen.getByRole('button', { name: 'Close fullscreen image' }));
+    const notCancelled = fireEvent.wheel(frontSurface, { deltaY: -80, clientX: 200, clientY: 100 });
+    expect(notCancelled).toBe(true);
+    expect(fireEvent.wheel(frontSurface, { deltaY: 80, clientX: 200, clientY: 100 })).toBe(true);
+    expect(frontSurface.style.transform).toBe('');
   });
 
   test('crops bounding box annotations into child images assigned to the workbench', async () => {

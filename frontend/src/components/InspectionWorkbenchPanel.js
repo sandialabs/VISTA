@@ -35,7 +35,7 @@ import {
   INSPECTION_VIEW_PARTS_TAB,
 } from '../features/inspectionWorkbench/inspectionConstants';
 import { MPR_RECONSTRUCTION_MODES, DEFAULT_MPR_PROJECTION_MIRROR, MPR_VOLUME_SLICE_RENDER_VERSION } from '../features/inspectionWorkbench/mprConstants';
-import { getInspectionTileMaxColumns, normalizeTileViewportTransform } from '../features/inspectionWorkbench/inspectionUtils';
+import { getInspectionTileMaxColumns } from '../features/inspectionWorkbench/inspectionUtils';
 import { getCanonicalSegmentationSliceIndex, getMprFallbackModelZoom, projectMprPointToOverlay } from '../features/inspectionWorkbench/mprGeometry';
 import {
   createServerVolumeDescriptor,
@@ -175,7 +175,6 @@ function InspectionWorkbenchPanel({
   const [modalityImageFilterKey, setModalityImageFilterKey] = useState(DEFAULT_MODALITY_IMAGE_FILTER_KEY);
   const [secondaryImageFilterKey, setSecondaryImageFilterKey] = useState(DEFAULT_SECONDARY_IMAGE_FILTER_KEY);
   const [measurementEntries, setMeasurementEntries] = useState([]);
-  const [inspectorViewport, setInspectorViewport] = useState({ zoom: 1, panX: 0, panY: 0 });
   const [annotations, setAnnotationsState] = useState([]);
   const annotationsMutationRevisionRef = useRef(0);
   const setAnnotations = useCallback((updater) => {
@@ -245,7 +244,6 @@ function InspectionWorkbenchPanel({
   const mprAnnotationGeometryDragRef = useRef(null);
   const mprGeometryDragPreviewRef = useRef(null);
   const activeSegmentationPersistenceScopeRef = useRef('');
-  const tilePanDragRef = useRef(null);
   const suppressNextTileClickRef = useRef(false);
   const mprOverlayCanvasRef = useRef(null);
 
@@ -467,7 +465,6 @@ function InspectionWorkbenchPanel({
     imageCount: visibleSelectedPartImageRefs.length || selectedPartImageRefs.length,
     initialColumnCount: 3,
   });
-  const normalizedInspectorViewport = normalizeTileViewportTransform(inspectorViewport);
   const {
     getAnnotationSourceImageIdForImage,
     handleFullscreenCalibrationChange,
@@ -542,7 +539,7 @@ function InspectionWorkbenchPanel({
   useInspectorWorkspaceHydration({
     aggregateLoadedModalities, isAllImagesSelection, selectedPart, setAnnotationDraft,
     setEnabledModalities, setHiddenModalityImageFilterValues, setHiddenPrimaryImageFilterValues,
-    setHiddenSecondaryImageFilterValues, setImageEnabled, setInspectorViewport,
+    setHiddenSecondaryImageFilterValues, setImageEnabled,
     setMeasurementEntries, setModalityImageFilterKey, setNormalizationTriageField,
     setPrimaryImageFilterKey, setSecondaryImageFilterKey,
     setShortcutHelpVisible, workspaceHydration,
@@ -562,7 +559,7 @@ function InspectionWorkbenchPanel({
     cursorProbe, displayWindow, effectiveModalityImageFilterKey, effectivePrimaryImageFilterKey,
     effectiveSecondaryImageFilterKey, enabledModalities, hiddenModalityImageFilterValues,
     hiddenPrimaryImageFilterValues, hiddenSecondaryImageFilterValues, imageEnabled,
-    inspectorViewport, loading, measurementEntries, modalityImageFilterKey, mprProjectionMirror,
+    loading, measurementEntries, modalityImageFilterKey, mprProjectionMirror,
     mprReconstructionMode, normalizationTriageField, onInspectionShareStateChange, panelLayout,
     partFilter, primaryImageFilterKey, projectId, projectType, rayMarchSettings, readOnly,
     reviewFilter, secondaryImageFilterKey, selectedBatchId, selectedImageRef, selectedPart,
@@ -591,7 +588,7 @@ function InspectionWorkbenchPanel({
   } = segmentationWorkbench;
 
   const viewportZoom = useInspectionViewportZoom({
-    applyMprNavigationSession, selectedImageRef, setInspectorViewport, setMprProjectionMirror,
+    applyMprNavigationSession, setMprProjectionMirror,
   });
 
   const {
@@ -717,9 +714,6 @@ function InspectionWorkbenchPanel({
     getLineDistanceMm,
     updateMeasurementAnnotationLine,
     updateBoxAnnotationGeometry,
-    tilePanDragRef,
-    normalizedInspectorViewport,
-    setInspectorViewport,
     annotationToolMode,
     getAnnotationSourceImageIdForImage,
     requireCalibrationForAnnotation,
@@ -855,7 +849,7 @@ function InspectionWorkbenchPanel({
     annotationDrafts, annotationLayers, annotationOpacityMultiplier, calibratedGeometry,
     deleteAnalyzeOverlay, deletingOverlayId, imageEnabled, imageSortFilter, isAllImagesSelection,
     mprViewportProps,
-    normalizedInspectorViewport, projectImageLookup, readOnly, selectedAnnotationId, selectedImageRef,
+    projectImageLookup, readOnly, selectedAnnotationId, selectedImageRef,
     selectedInspectionItem, selectedPart, selectedPartImageRefs,
     setFullscreenImageModal: fullscreenSession.setFullscreenImageModal,
     setSelectedImageRef, suppressNextTileClickRef, tileColumns,
