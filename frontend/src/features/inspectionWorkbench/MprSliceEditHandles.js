@@ -1,13 +1,14 @@
 import { getAnnotationBoxCornerViewBoxPosition, getMeasurementEndpointViewBoxPosition } from './inspectionAnnotationGeometry';
+import { DEFAULT_ANNOTATION_FRAME, projectAnnotationBox } from './annotationOverlayFrame';
 
-function MprLineEditHandles({ line, axis, currentSliceIndex, selectedAnnotationId, handlers }) {
+function MprLineEditHandles({ line, axis, currentSliceIndex, selectedAnnotationId, handlers, frame }) {
   const {
     startMprAnnotationGeometryDrag,
     handleMprAnnotationGeometryDragMove,
     finishMprAnnotationGeometryDrag,
     stopMprAnnotationGeometryClick,
   } = handlers;
-  const endpointPositions = getMeasurementEndpointViewBoxPosition(line);
+  const endpointPositions = getMeasurementEndpointViewBoxPosition(line, frame);
   const isSelected = String(selectedAnnotationId || '') === String(line.id || '');
   return (
     <g>
@@ -63,23 +64,20 @@ function MprLineEditHandles({ line, axis, currentSliceIndex, selectedAnnotationI
   );
 }
 
-function MprBoxEditHandles({ box, axis, currentSliceIndex, selectedAnnotationId, handlers }) {
+function MprBoxEditHandles({ box, axis, currentSliceIndex, selectedAnnotationId, handlers, frame }) {
   const {
     startMprAnnotationGeometryDrag,
     handleMprAnnotationGeometryDragMove,
     finishMprAnnotationGeometryDrag,
     stopMprAnnotationGeometryClick,
   } = handlers;
-  const cornerPositions = getAnnotationBoxCornerViewBoxPosition(box);
+  const cornerPositions = getAnnotationBoxCornerViewBoxPosition(box, frame);
   const isSelected = String(selectedAnnotationId || '') === String(box.id || '');
   return (
     <g>
       <rect
         className="inspection-annotation-drag-target mpr-annotation-drag-target"
-        x={(box.x / box.imageWidth) * 1000}
-        y={(box.y / box.imageHeight) * 1000}
-        width={(box.width / box.imageWidth) * 1000}
-        height={(box.height / box.imageHeight) * 1000}
+        {...projectAnnotationBox(box, frame)}
         fill="transparent"
         pointerEvents="all"
         aria-label={`Move ${box.name || 'MPR bounding box'}`}
@@ -133,6 +131,7 @@ export function MprSliceEditHandles({
   mprEditableSliceBoxes,
   selectedAnnotationId,
   handlers,
+  frame = DEFAULT_ANNOTATION_FRAME,
 }) {
   if (readOnly) return null;
   return (
@@ -145,6 +144,7 @@ export function MprSliceEditHandles({
           currentSliceIndex={currentSliceIndex}
           selectedAnnotationId={selectedAnnotationId}
           handlers={handlers}
+          frame={frame}
         />
       ))}
       {mprEditableSliceBoxes.map((box) => (
@@ -155,6 +155,7 @@ export function MprSliceEditHandles({
           currentSliceIndex={currentSliceIndex}
           selectedAnnotationId={selectedAnnotationId}
           handlers={handlers}
+          frame={frame}
         />
       ))}
     </>

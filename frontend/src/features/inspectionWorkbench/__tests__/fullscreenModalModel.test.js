@@ -48,7 +48,6 @@ describe('buildFullscreenModalModel', () => {
       ['box', 'Box 1'],
     ]);
     expect(model.fullscreenOverlayViewBox).toBe('0 0 200 100');
-    expect(model.fullscreenOverlayContentTransform).toBe('scale(0.2 0.1)');
     expect(model.fullscreenMprSlicePosition).toBeNull();
     expect(model.fullscreenSegmentAnnotations).toEqual([]);
   });

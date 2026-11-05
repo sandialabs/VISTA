@@ -205,7 +205,6 @@ function buildFullscreenMprLayout(ctx) {
 	    const fullscreenOverlayHeight = fullscreenMprImageDimensions?.height
 	      || Math.max(1, Number(fullscreenOverlayGeometry?.imageHeight) || 1000);
 	    const fullscreenOverlayViewBox = `0 0 ${fullscreenOverlayWidth} ${fullscreenOverlayHeight}`;
-	    const fullscreenOverlayContentTransform = `scale(${fullscreenOverlayWidth / 1000} ${fullscreenOverlayHeight / 1000})`;
 	    const fullscreenCanonicalSliceIndex = isMprFullscreen
 	      ? getSegmentationCanonicalSliceIndex(
 	        fullscreenImageModal.axis,
@@ -229,7 +228,6 @@ function buildFullscreenMprLayout(ctx) {
     fullscreenOverlayWidth,
     fullscreenOverlayHeight,
     fullscreenOverlayViewBox,
-    fullscreenOverlayContentTransform,
     fullscreenCanonicalSliceIndex,
     fullscreenSegmentAnnotations,
   };

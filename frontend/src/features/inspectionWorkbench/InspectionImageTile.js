@@ -2,14 +2,14 @@ import { isFiniteAnnotationBox, isFiniteMeasurementLine } from './inspectionAnno
 import { getExternalOverlayOpacity } from './inspectionAnnotationDisplay';
 import { getProjectImageRecord, getInspectionTileFilename, getImageMetadataOverlayLines } from './imageLookup';
 import { safeDecodeFilename } from './inspectionUtils';
-import { getAnnotationSourceImageId, isInspectionItemForImageEntry } from './partImageRefs';
+import { getAnnotationSourceImageId } from './partImageRefs';
 import { renderAnnotationOverlay, renderTileAnnotationEditingTargets } from './annotationOverlayRendering';
+import { AnnotationOverlaySvg } from './AnnotationOverlaySvg';
 
-export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileView, handlers }) {
+export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = false, selection, tileView, handlers }) {
   const {
     isAllImagesSelection,
     selectedImageRef,
-    selectedInspectionItem,
     projectImageLookup,
   } = selection;
   const {
@@ -89,13 +89,40 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                 const tileOverlayGeometry = [...tileMeasurementLines, ...tileBoxes, ...tilePreviewLines, ...tilePreviewBoxes][0];
                 const tileOverlayWidth = Math.max(1, Number(tileOverlayGeometry?.imageWidth) || 1000);
                 const tileOverlayHeight = Math.max(1, Number(tileOverlayGeometry?.imageHeight) || 1000);
-                const isSelectedInspectionTile = isInspectionItemForImageEntry(selectedInspectionItem, entry, projectImageLookup);
+                const tileAnnotationOverlay = (
+                  <AnnotationOverlaySvg
+                    imageWidth={tileOverlayWidth}
+                    imageHeight={tileOverlayHeight}
+                    ariaLabel="tile measurement overlay"
+                    renderContent={(frame) => (
+                      <>
+                        {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId, opacityMultiplier: annotationOpacityMultiplier, unit: tileAnnotationUnit, frame })}
+                        {!readOnly && renderTileAnnotationEditingTargets({
+                          measurementLines: tileMeasurementLines,
+                          boxes: tileBoxes,
+                          selectedAnnotationId,
+                          frame,
+                          onStartDrag: (event, kind, operation, geometry) => startTileAnnotationGeometryDrag(
+                            event,
+                            kind,
+                            operation,
+                            geometry,
+                            tileAnnotationSourceImageId,
+                          ),
+                          onDragMove: handleTileAnnotationGeometryDragMove,
+                          onDragFinish: finishTileAnnotationGeometryDrag,
+                          onDragCancel: (event) => finishTileAnnotationGeometryDrag(event, { cancel: true }),
+                        })}
+                      </>
+                    )}
+                  />
+                );
                 const tileOverlayOpacity = Math.min(1, annotationOpacityMultiplier * getExternalOverlayOpacity(entry, 1));
                 const metadataImageOpacity = tabKey === 'image_metadata' ? 0.5 : 1;
                 return (
                   <div
                     key={entry.id}
-                    className={`view-cell ${isSelectedTileImage ? 'selected' : ''} ${isSelectedInspectionTile ? 'inspection-item-highlighted' : ''} ${tabKey === 'image_metadata' ? 'inspection-tile-metadata-mode' : ''}`}
+                    className={`view-cell ${isSelectedTileImage ? 'selected' : ''} ${isHighlighted ? 'inspection-item-highlighted' : ''} ${tabKey === 'image_metadata' ? 'inspection-tile-metadata-mode' : ''}`}
                     role="button"
                     tabIndex={0}
                     onClick={() => {
@@ -203,26 +230,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                               ))}
                             </div>
                           )}
-	                          <svg className="inspection-fullscreen-measurement-overlay" viewBox={`0 0 ${tileOverlayWidth} ${tileOverlayHeight}`} preserveAspectRatio="xMidYMid meet" aria-label="tile measurement overlay">
-	                            <g transform={`scale(${tileOverlayWidth / 1000} ${tileOverlayHeight / 1000})`}>
-	                              {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId, opacityMultiplier: annotationOpacityMultiplier, unit: tileAnnotationUnit })}
-                                  {!readOnly && renderTileAnnotationEditingTargets({
-                                    measurementLines: tileMeasurementLines,
-                                    boxes: tileBoxes,
-                                    selectedAnnotationId,
-                                    onStartDrag: (event, kind, operation, geometry) => startTileAnnotationGeometryDrag(
-                                      event,
-                                      kind,
-                                      operation,
-                                      geometry,
-                                      tileAnnotationSourceImageId,
-                                    ),
-                                    onDragMove: handleTileAnnotationGeometryDragMove,
-                                    onDragFinish: finishTileAnnotationGeometryDrag,
-                                    onDragCancel: (event) => finishTileAnnotationGeometryDrag(event, { cancel: true }),
-                                  })}
-	                            </g>
-	                          </svg>
+	                          {tileAnnotationOverlay}
 	                        </div>
 	                      ) : imageId ? (
                         <div
@@ -259,26 +267,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                               ))}
                             </div>
                           )}
-	                          <svg className="inspection-fullscreen-measurement-overlay" viewBox={`0 0 ${tileOverlayWidth} ${tileOverlayHeight}`} preserveAspectRatio="xMidYMid meet" aria-label="tile measurement overlay">
-	                            <g transform={`scale(${tileOverlayWidth / 1000} ${tileOverlayHeight / 1000})`}>
-	                              {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId, opacityMultiplier: annotationOpacityMultiplier, unit: tileAnnotationUnit })}
-                                  {!readOnly && renderTileAnnotationEditingTargets({
-                                    measurementLines: tileMeasurementLines,
-                                    boxes: tileBoxes,
-                                    selectedAnnotationId,
-                                    onStartDrag: (event, kind, operation, geometry) => startTileAnnotationGeometryDrag(
-                                      event,
-                                      kind,
-                                      operation,
-                                      geometry,
-                                      tileAnnotationSourceImageId,
-                                    ),
-                                    onDragMove: handleTileAnnotationGeometryDragMove,
-                                    onDragFinish: finishTileAnnotationGeometryDrag,
-                                    onDragCancel: (event) => finishTileAnnotationGeometryDrag(event, { cancel: true }),
-                                  })}
-	                            </g>
-	                          </svg>
+	                          {tileAnnotationOverlay}
 	                        </div>
                       ) : imageRef ? (
                         <span className="view-cell-empty">Image not found: {safeDecodeFilename(imageRef)}</span>

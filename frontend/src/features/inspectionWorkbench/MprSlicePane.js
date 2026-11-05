@@ -2,6 +2,7 @@ import { MprSliceCanvas } from './MprSliceCanvas';
 import { MprSliceEditHandles } from './MprSliceEditHandles';
 import { MprWindowedImage } from './MprWindowedImage';
 import { renderAnnotationOverlay } from './annotationOverlayRendering';
+import { AnnotationOverlaySvg } from './AnnotationOverlaySvg';
 import { MPR_AXIS_CONFIG, MPR_AXIS_LABELS } from './mprConstants';
 import { getFallbackProjectionImage, getMprCrosshairStyle } from './mprGeometry';
 import { buildMprSliceOverlays } from './mprSliceOverlays';
@@ -174,31 +175,35 @@ export function MprSlicePane({ axis, readOnly, navigation, volume, display, anno
         <span className="mpr-crosshair-h" />
         <span className="mpr-crosshair-v" />
         <span className="mpr-crosshair-center" />
-        <svg
+        <AnnotationOverlaySvg
           className="inspection-fullscreen-measurement-overlay mpr-annotation-overlay mpr-projection-overlay"
-          viewBox={`0 0 ${mprImageDimensions.width} ${mprImageDimensions.height}`}
-          preserveAspectRatio="xMidYMid meet"
-          aria-label={`${label} annotation overlay`}
+          imageWidth={mprImageDimensions.width}
+          imageHeight={mprImageDimensions.height}
+          ariaLabel={`${label} annotation overlay`}
+          renderContent={(frame) => (
+            <>
+              {renderAnnotationOverlay({
+                measurementLines: [...mprSliceLines, ...mprPreviewLines],
+                boxes: [...mprSliceBoxes, ...pendingCubeBoxes, ...mprPreviewBoxes],
+                fontSize: 26,
+                selectedAnnotationId,
+                opacityMultiplier: annotationOpacityMultiplier,
+                unit: mprAnnotationUnit,
+                frame,
+              })}
+              <MprSliceEditHandles
+                readOnly={readOnly}
+                axis={axis}
+                currentSliceIndex={currentSliceIndex}
+                mprSliceLines={mprSliceLines}
+                mprEditableSliceBoxes={mprEditableSliceBoxes}
+                selectedAnnotationId={selectedAnnotationId}
+                handlers={handlers}
+                frame={frame}
+              />
+            </>
+          )}
         >
-          <g transform={`scale(${mprImageDimensions.width / 1000} ${mprImageDimensions.height / 1000})`}>
-            {renderAnnotationOverlay({
-              measurementLines: [...mprSliceLines, ...mprPreviewLines],
-              boxes: [...mprSliceBoxes, ...pendingCubeBoxes, ...mprPreviewBoxes],
-              fontSize: 26,
-              selectedAnnotationId,
-              opacityMultiplier: annotationOpacityMultiplier,
-              unit: mprAnnotationUnit,
-            })}
-            <MprSliceEditHandles
-              readOnly={readOnly}
-              axis={axis}
-              currentSliceIndex={currentSliceIndex}
-              mprSliceLines={mprSliceLines}
-              mprEditableSliceBoxes={mprEditableSliceBoxes}
-              selectedAnnotationId={selectedAnnotationId}
-              handlers={handlers}
-            />
-          </g>
           {mprSliceSegments.map((segment) => (
             <g
               key={`mpr-segment-${segment.id}`}
@@ -219,7 +224,7 @@ export function MprSlicePane({ axis, readOnly, navigation, volume, display, anno
               })}
             </g>
           ))}
-        </svg>
+        </AnnotationOverlaySvg>
       </div>
       <label className="mpr-slice-control" htmlFor={`mpr-slice-${axis}`}>
         Slice

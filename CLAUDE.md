@@ -428,6 +428,17 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 - Do not run a plain `uv sync` inside the image; it reinstalls the PyPI wheel. Use `uv sync --frozen --inexact --no-install-package opencv-python-headless` (the CI container test does).
 - A cold build compiles OpenCV, which adds substantial time (more on small CI runners). The layer is cached while the pinned inputs are unchanged.
 
+## Inspection Tile Highlight (Single Selection)
+
+- In the Inspection View Parts board, the selected annotation or overlay item highlights exactly one tile (`inspection-item-highlighted`). `InspectionViewBoard` resolves it with `findHighlightedInspectionTileId` (`features/inspectionWorkbench/inspectionTileHighlight.js`): the selected tile if it shows the item, then the tile for the item's exact image, then the first match. Tiles receive it as the `isHighlighted` prop.
+- Overlays assigned to a base image still render the base's annotations, but they are no longer all highlighted together. Do not reintroduce per-tile `isInspectionItemForImageEntry` checks for highlighting; that matched every same-view overlay across modalities.
+
+## Inspection Annotation Overlay Scaling (Aspect-Ratio Independent)
+
+- Tile, fullscreen, and MPR annotation overlays render through `AnnotationOverlaySvg` (`features/inspectionWorkbench/AnnotationOverlaySvg.js`). The SVG viewBox is the image's pixel size; annotation content is drawn in "design units" inside a single uniform `scale(k)` group, where 1000 units equal the short side of the measured overlay container (`getAnnotationOverlayFrame` in `annotationOverlayFrame.js`, ResizeObserver-driven, square-container fallback when unmeasured).
+- Renderers (`renderAnnotationOverlay`, `renderTileAnnotationEditingTargets`, `FullscreenMeasurementLines`, `FullscreenBoxHandles`, `MprSliceEditHandles`) take a `frame` prop and project image coordinates with `projectAnnotationLine` / `projectAnnotationBox` / the `*ViewBoxPosition(geometry, ..., frame)` helpers. Square images render exactly as before.
+- Do not reintroduce a non-uniform `scale(w/1000 h/1000)` group or per-text counter-scaling; that squished endpoint/corner dots into ovals, changed line thickness by orientation, and changed text size with image aspect ratio.
+
 ## Local Services, OpenCV Adapter, and E2E Notes
 
 - **MinIO image:** the compose files and `deployment-test/minio.yaml` use `cgr.dev/chainguard/minio:latest` because pulls of `minio/minio` were denied on Docker Hub and Quay. It runs as uid 65532 (host bind mounts need `:U` or `chown 65532`), has no `curl`, and is health-checked with `mc ready local`. `test_container_build_config.py` guards against reverting.

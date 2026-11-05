@@ -12,7 +12,6 @@ import {
   getMeasurementLabelViewBoxPosition,
   getMeasurementLineLabel,
   getMeasurementLineWithDerivedLength,
-  getTextCounterScaleTransform,
   isBoundingBoxAnnotation,
   isFiniteAnnotationBox,
   isFiniteMeasurementLine,
@@ -89,23 +88,14 @@ describe('inspection annotation geometry helpers', () => {
     });
   });
 
-  test('counter-scales text to its native aspect ratio without moving its anchor', () => {
-    // Square image: ambient scale(1, 1) in the 1000-unit viewBox, so no correction is needed.
-    expect(getTextCounterScaleTransform(500, 500, 1000, 1000)).toBe(
-      'translate(500 500) scale(1 1) translate(-500 -500)',
-    );
-    // Wide image: ambient scale(2, 1) would stretch glyphs horizontally; the correction
-    // narrows them back by the same factor the geometric mean needs to cancel the distortion,
-    // and leaves (x, y) fixed so the anchor point stays pixel-perfect.
-    const wide = getTextCounterScaleTransform(400, 300, 2000, 1000);
-    expect(wide).toBe('translate(400 300) scale(0.7071067811865476 1.4142135623730951) translate(-400 -300)');
-    // Tall image: ambient scale(1, 2) would stretch glyphs vertically.
-    const tall = getTextCounterScaleTransform(400, 300, 1000, 2000);
-    expect(tall).toBe('translate(400 300) scale(1.4142135623730951 0.7071067811865476) translate(-400 -300)');
-    // A rotation composes after the counter-scale, pivoting on the same fixed anchor.
-    expect(getTextCounterScaleTransform(400, 300, 2000, 1000, 90)).toBe(
-      'translate(400 300) scale(0.7071067811865476 1.4142135623730951) translate(-400 -300) rotate(90 400 300)',
-    );
+  test('projects controls into a non-square design frame', () => {
+    const frame = { width: 500, height: 1000, scale: 1 };
+    const line = { x1: 10, y1: 20, x2: 90, y2: 80, imageWidth: 100, imageHeight: 100 };
+    expect(getMeasurementEndpointViewBoxPosition(line, frame)).toEqual({
+      start: { x: 50, y: 200 },
+      end: { x: 450, y: 800 },
+    });
+    expect(getMeasurementLabelViewBoxPosition({ ...line, x1: 99, x2: 99 }, 20, frame).x).toBe(480);
   });
 
   test('derives calibrated line lengths and MPR cube vertices', () => {

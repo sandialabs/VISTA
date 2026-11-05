@@ -1,6 +1,7 @@
-import { getAnnotationBoxCornerViewBoxPosition, getMeasurementEndpointViewBoxPosition, getMeasurementLabelViewBoxPosition, getMeasurementLineLabel, getTextCounterScaleTransform } from './inspectionAnnotationGeometry';
+import { getAnnotationBoxCornerViewBoxPosition, getMeasurementEndpointViewBoxPosition, getMeasurementLabelViewBoxPosition, getMeasurementLineLabel } from './inspectionAnnotationGeometry';
+import { DEFAULT_ANNOTATION_FRAME, projectAnnotationBox, projectAnnotationLine } from './annotationOverlayFrame';
 
-export function FullscreenMeasurementLines({ readOnly, model, tools, display, fullscreenHandlers }) {
+export function FullscreenMeasurementLines({ readOnly, model, tools, display, fullscreenHandlers, frame = DEFAULT_ANNOTATION_FRAME }) {
   const {
     renderedFullscreenMeasurementLines,
     fullscreenPreviewLines,
@@ -22,17 +23,14 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
   return (
     <>
 	                    {[...renderedFullscreenMeasurementLines, ...fullscreenPreviewLines].map((line) => {
-                      const labelPosition = getMeasurementLabelViewBoxPosition(line, 20);
-                      const endpointPositions = getMeasurementEndpointViewBoxPosition(line);
+                      const labelPosition = getMeasurementLabelViewBoxPosition(line, 20, frame);
+                      const endpointPositions = getMeasurementEndpointViewBoxPosition(line, frame);
                       const endpointActive = fullscreenEditingEndpoint?.lineId === String(line.id)
                         || String(fullscreenBoundsEditAnnotationId || '') === String(line.id);
                       return (
                         <g key={line.id}>
                           <line
-                            x1={(line.x1 / line.imageWidth) * 1000}
-                            y1={(line.y1 / line.imageHeight) * 1000}
-                            x2={(line.x2 / line.imageWidth) * 1000}
-                            y2={(line.y2 / line.imageHeight) * 1000}
+                            {...projectAnnotationLine(line, frame)}
                             stroke={line.color}
                             strokeWidth="3"
                             pointerEvents="none"
@@ -45,17 +43,13 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
                             fontSize="20"
                             pointerEvents="none"
                             opacity={annotationOpacityMultiplier}
-                            transform={getTextCounterScaleTransform(labelPosition.x, labelPosition.y, line.imageWidth, line.imageHeight)}
                           >
                             {getMeasurementLineLabel(line, fullscreenAnnotationUnit)}
                           </text>
 	                          {!readOnly && line.id !== 'fullscreen-measure-preview' && (
                             <line
                               className="inspection-annotation-drag-target"
-                              x1={(line.x1 / line.imageWidth) * 1000}
-                              y1={(line.y1 / line.imageHeight) * 1000}
-                              x2={(line.x2 / line.imageWidth) * 1000}
-                              y2={(line.y2 / line.imageHeight) * 1000}
+                              {...projectAnnotationLine(line, frame)}
                               stroke="transparent"
                               strokeWidth="24"
                               pointerEvents="stroke"
@@ -101,7 +95,7 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
   );
 }
 
-export function FullscreenBoxHandles({ readOnly, model, tools, fullscreenHandlers }) {
+export function FullscreenBoxHandles({ readOnly, model, tools, fullscreenHandlers, frame = DEFAULT_ANNOTATION_FRAME }) {
   const {
     renderedFullscreenBoxAnnotations,
   } = model;
@@ -118,17 +112,14 @@ export function FullscreenBoxHandles({ readOnly, model, tools, fullscreenHandler
   return (
     <>
                     {renderedFullscreenBoxAnnotations.map((box) => {
-                      const cornerPositions = getAnnotationBoxCornerViewBoxPosition(box);
+                      const cornerPositions = getAnnotationBoxCornerViewBoxPosition(box, frame);
                       const cornerActive = fullscreenEditingBoxCorner?.boxId === String(box.id)
                         || String(fullscreenBoundsEditAnnotationId || '') === String(box.id);
                       return (
                         <g key={`box-corners-${box.id}`}>
                           <rect
                             className="inspection-annotation-drag-target"
-                            x={(box.x / box.imageWidth) * 1000}
-                            y={(box.y / box.imageHeight) * 1000}
-                            width={(box.width / box.imageWidth) * 1000}
-                            height={(box.height / box.imageHeight) * 1000}
+                            {...projectAnnotationBox(box, frame)}
                             fill="transparent"
                             pointerEvents={readOnly ? 'none' : 'all'}
                             onPointerDown={(event) => startFullscreenAnnotationDrag(event, 'box', 'translate', box)}
