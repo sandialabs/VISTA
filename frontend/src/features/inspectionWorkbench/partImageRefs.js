@@ -425,44 +425,16 @@ export function isInspectionImageRefLoaded(entry, projectImageLookup = {}) {
   return Boolean(record && !isDeletedProjectImageRecord(record));
 }
 
+// Returns the image id that owns annotations drawn on a tile: always the
+// tile's own image. Overlays assigned to a base image (and other images that
+// share a view across modalities) do not inherit or share that base image's
+// annotations, so an annotation drawn on one tile renders only on that tile.
 export function getAnnotationSourceImageId(entry, projectImageLookup) {
   const imageRecord = getProjectImageRecord(projectImageLookup, {
     image_id: entry?.imageId,
     filename: entry?.filename || entry?.imageRef,
   });
-  const imageId = imageRecord?.id ? String(imageRecord.id) : '';
-  if (!imageId) return '';
-  if (!entry?.overlay) return imageId;
-  const explicitBaseImageId = String(
-    entry?.overlayBaseImageId
-      || imageRecord?.metadata?.overlay_base_image_id
-      || imageRecord?.metadata?.analysis_source_image_id
-      || '',
-  );
-  const baseFilename = String(
-    entry?.overlayBaseFilename
-      || imageRecord?.metadata?.overlay_base_filename
-      || '',
-  );
-  const baseRecord = getProjectImageRecord(projectImageLookup, {
-    image_id: explicitBaseImageId,
-    filename: baseFilename,
-  });
-  return baseRecord?.id ? String(baseRecord.id) : imageId;
-}
-
-export function getAnnotationSourceImageIdLookup(imageEntries, projectImageLookup) {
-  return imageEntries.reduce((acc, entry) => {
-    const imageRecord = getProjectImageRecord(projectImageLookup, {
-      image_id: entry?.imageId,
-      filename: entry?.filename || entry?.imageRef,
-    });
-    const imageId = imageRecord?.id ? String(imageRecord.id) : '';
-    const sourceImageId = getAnnotationSourceImageId(entry, projectImageLookup);
-    if (imageId && sourceImageId) acc[imageId] = sourceImageId;
-    if (sourceImageId) acc[sourceImageId] = sourceImageId;
-    return acc;
-  }, {});
+  return imageRecord?.id ? String(imageRecord.id) : '';
 }
 
 function getInspectionItemImageIdentities(item) {
@@ -505,7 +477,6 @@ export function isInspectionItemForImageEntry(item, entry, projectImageLookup) {
     image_id: entry?.imageId,
     filename: entry?.filename || entry?.imageRef,
   });
-  const sourceImageId = getAnnotationSourceImageId(entry, projectImageLookup);
   return [
     entry?.imageId,
     entry?.imageRef,
@@ -513,6 +484,5 @@ export function isInspectionItemForImageEntry(item, entry, projectImageLookup) {
     record?.id,
     record?.filename,
     record?.displayName,
-    sourceImageId,
   ].some((value) => itemIdentities.has(String(value || '').trim()));
 }

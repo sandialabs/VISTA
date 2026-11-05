@@ -2,7 +2,6 @@ import { isFiniteAnnotationBox, isFiniteMeasurementLine } from './inspectionAnno
 import { getExternalOverlayOpacity } from './inspectionAnnotationDisplay';
 import { getProjectImageRecord, getInspectionTileFilename, getImageMetadataOverlayLines } from './imageLookup';
 import { safeDecodeFilename } from './inspectionUtils';
-import { getAnnotationSourceImageId } from './partImageRefs';
 import { renderAnnotationOverlay, renderTileAnnotationEditingTargets } from './annotationOverlayRendering';
 import { AnnotationOverlaySvg } from './AnnotationOverlaySvg';
 
@@ -58,8 +57,9 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
                 const metadataOverlayLines = tabKey === 'image_metadata'
                   ? getImageMetadataOverlayLines(entry, projectImageLookup)
                   : [];
-                const annotationSourceImageId = getAnnotationSourceImageId(entry, projectImageLookup);
-                const tileAnnotationSourceImageId = String(annotationSourceImageId || imageId);
+                // Annotations belong to this tile's own image only; they are not
+                // shared with overlays or other images of the same view.
+                const tileAnnotationSourceImageId = imageId;
 	                const tileMeasurementLines = (measurementLinesByImageId[tileAnnotationSourceImageId] || [])
 	                  .filter(isFiniteMeasurementLine)
                       .map((line) => (

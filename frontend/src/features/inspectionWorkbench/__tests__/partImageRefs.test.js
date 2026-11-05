@@ -1,4 +1,9 @@
-import { getAggregatePartImageRefs, getPartImageRefs } from '../partImageRefs';
+import {
+  getAggregatePartImageRefs,
+  getAnnotationSourceImageId,
+  getPartImageRefs,
+  isInspectionItemForImageEntry,
+} from '../partImageRefs';
 
 // An Analyze output stored in source_images and another in analysis_outputs
 // both sit at index 0 of their list; their tile ids (React keys) must differ.
@@ -45,5 +50,30 @@ describe('part image ref ids', () => {
     const refs = getAggregatePartImageRefs([part, { ...part, id: 'part-2' }], lookup);
     expect(refs).toHaveLength(8);
     expectUniqueIds(refs);
+  });
+});
+
+// Annotations are owned by the exact image drawn on. Overlays assigned to a
+// base image, and other images sharing the same view, never inherit them.
+describe('annotation image ownership', () => {
+  const ownershipLookup = {
+    base: { id: 'base', filename: 'sn1_front_xray.png', metadata: {} },
+    heat: { id: 'heat', filename: 'sn1_front_heatmap.png', metadata: { overlay_base_image_id: 'base' } },
+  };
+  const baseEntry = { imageRef: 'base', imageId: 'base', overlay: false, viewName: 'front' };
+  const heatEntry = { imageRef: 'heat', imageId: 'heat', overlay: true, overlayBaseImageId: 'base', viewName: 'front' };
+  const measurementOn = (imageId) => ({ kind: 'annotation', annotation: { id: 'm1', image_id: imageId } });
+
+  test('resolves an overlay tile to its own image id, not its base', () => {
+    expect(getAnnotationSourceImageId(heatEntry, ownershipLookup)).toBe('heat');
+    expect(getAnnotationSourceImageId(baseEntry, ownershipLookup)).toBe('base');
+    expect(getAnnotationSourceImageId({ imageId: 'missing' }, ownershipLookup)).toBe('');
+  });
+
+  test('matches an annotation only to the tile of the image it was drawn on', () => {
+    expect(isInspectionItemForImageEntry(measurementOn('base'), baseEntry, ownershipLookup)).toBe(true);
+    expect(isInspectionItemForImageEntry(measurementOn('base'), heatEntry, ownershipLookup)).toBe(false);
+    expect(isInspectionItemForImageEntry(measurementOn('heat'), heatEntry, ownershipLookup)).toBe(true);
+    expect(isInspectionItemForImageEntry(measurementOn('heat'), baseEntry, ownershipLookup)).toBe(false);
   });
 });

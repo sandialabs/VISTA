@@ -5725,7 +5725,7 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
-  test('shares source-image annotations across Analyze overlays and saves overlay measurements to the source image', async () => {
+  test('keeps source-image annotations off Analyze overlays and saves overlay measurements to the overlay image', async () => {
     mockWorkbenchFetch({
       user: 'overlay-measurements',
       batches: [{ id: 'batch-overlay', name: 'Batch Overlay' }],
@@ -5766,10 +5766,16 @@ describe('InspectionWorkbenchPanel', () => {
     });
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
     await waitFor(() => expect(screen.getAllByText('5.00 mm').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getAllByText('5.00 mm').length).toBeGreaterThan(1));
+    // The measurement belongs to the source image only; the overlay tile that
+    // shares its view must not render a duplicate.
+    expect(screen.getAllByText('5.00 mm')).toHaveLength(1);
+    expect(screen.getByTestId('inspection-overlay-composite')).not.toHaveTextContent('5.00 mm');
 
     fireEvent.click(screen.getByTestId('inspection-overlay-composite'));
     await waitFor(() => expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('Shared source length'));
+    // The part-wide list still names the source measurement, but the overlay's
+    // fullscreen view does not draw its geometry.
+    expect(screen.getAllByText('5.00 mm')).toHaveLength(1);
     expect(screen.getByAltText('Segmentation Overlay source fullscreen')).toHaveAttribute('src', '/api/images/source-image-1/content');
     expect(screen.getByAltText('Segmentation Overlay fullscreen')).toHaveAttribute('src', '/api/images/overlay-image-1/content');
 
@@ -5814,7 +5820,7 @@ describe('InspectionWorkbenchPanel', () => {
       const postCall = global.fetch.mock.calls.find((call) => call[0].includes('/annotations') && call[1]?.method === 'POST');
       expect(postCall).toBeDefined();
       const body = JSON.parse(postCall[1].body);
-      expect(body.image_id).toBe('source-image-1');
+      expect(body.image_id).toBe('overlay-image-1');
     });
   });
 

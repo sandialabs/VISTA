@@ -431,7 +431,14 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 ## Inspection Tile Highlight (Single Selection)
 
 - In the Inspection View Parts board, the selected annotation or overlay item highlights exactly one tile (`inspection-item-highlighted`). `InspectionViewBoard` resolves it with `findHighlightedInspectionTileId` (`features/inspectionWorkbench/inspectionTileHighlight.js`): the selected tile if it shows the item, then the tile for the item's exact image, then the first match. Tiles receive it as the `isHighlighted` prop.
-- Overlays assigned to a base image still render the base's annotations, but they are no longer all highlighted together. Do not reintroduce per-tile `isInspectionItemForImageEntry` checks for highlighting; that matched every same-view overlay across modalities.
+- Do not reintroduce per-tile `isInspectionItemForImageEntry` checks for highlighting; that matched every same-view overlay across modalities.
+
+## Inspection Annotation Ownership (One Image Per Annotation)
+
+- An annotation belongs only to the image it was drawn on. `getAnnotationSourceImageId` (`partImageRefs.js`) returns the tile's own image id, and `getAnnotationSourceImageIdForImage` (`useInspectionCalibration.js`) only normalizes the id. Overlays assigned to a base image (`overlay_base_image_id`), Analyze outputs, and same-view images in other modalities no longer render, save to, or highlight their base image's annotations.
+- The base image is still drawn under an overlay as a visual backdrop (tile composite and fullscreen `baseImageId`); that is presentation only. Calibration for an overlay resolves from its own record, then project defaults.
+- Annotations created on overlay tiles before this change were saved with the base image's id, so they now render only on the base tile. The backend stores the `image_id` it receives and had no view-linking logic.
+- Do not reintroduce a base-image lookup for annotation ownership; that duplicated every annotation across all same-view tiles.
 
 ## Inspection Annotation Overlay Scaling (Aspect-Ratio Independent)
 

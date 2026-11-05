@@ -19,11 +19,9 @@ function resolveFullscreenIdentity(ctx) {
     const fullscreenAnnotationLookupKey = isMprFullscreen
       ? fullscreenMprSliceKey
       : fullscreenAnnotationSourceImageId;
-    const fullscreenBaseImageId = String(fullscreenImageModal.baseImageId || (
-      fullscreenAnnotationSourceImageId && fullscreenAnnotationSourceImageId !== fullscreenImageId
-        ? fullscreenAnnotationSourceImageId
-        : ''
-    ));
+    // The base image is only a visual backdrop for an overlay; annotations
+    // stay keyed to the overlay's own image id.
+    const fullscreenBaseImageId = String(fullscreenImageModal.baseImageId || '');
     const fullscreenImageRecord = projectImageLookup[fullscreenImageId] || {};
   return {
     isMprFullscreen,

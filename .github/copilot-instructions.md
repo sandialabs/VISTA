@@ -200,6 +200,10 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 
 - The Inspection View Parts board highlights only one tile for the selected annotation/overlay item, resolved once per board by `findHighlightedInspectionTileId` in `frontend/src/features/inspectionWorkbench/inspectionTileHighlight.js` and passed to tiles as `isHighlighted`. Same-view overlays sharing a base image are not highlighted together.
 
+## Inspection Annotation Ownership
+
+- Each annotation belongs only to the image it was drawn on. `getAnnotationSourceImageId` (`frontend/src/features/inspectionWorkbench/partImageRefs.js`) returns the tile's own image id; overlays with `overlay_base_image_id`, Analyze outputs, and same-view images in other modalities do not render, save to, or highlight the base image's annotations. The base image is still drawn under an overlay as a visual backdrop only. Do not reintroduce a base-image lookup for annotation ownership.
+
 ## Inspection Annotation Overlay Scaling
 
 - Annotation overlays (tile, fullscreen, MPR) use `AnnotationOverlaySvg` and a uniform design-unit frame from `frontend/src/features/inspectionWorkbench/annotationOverlayFrame.js`, so line thickness, handle dots, and label text are identical across image aspect ratios. Pass `frame` to the annotation renderers and project coordinates with the frame helpers; never wrap annotation content in a non-uniform `scale(w/1000 h/1000)` group.

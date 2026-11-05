@@ -1,6 +1,5 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { isValidCalibration, resolveMeasurementCalibration } from '../../utils/calibration';
-import { getAnnotationSourceImageIdLookup } from './partImageRefs';
 
 /**
  * Resolves the measurement calibration for an image from project metadata, image records, configuration, and session overrides.
@@ -26,29 +25,23 @@ export function useInspectionCalibrationLookup({
 }
 
 /**
- * Annotation source-image lookup, session calibration updates, and the calibration requirement check for annotation tools.
+ * Annotation image-id normalization, session calibration updates, and the calibration requirement check for annotation tools.
  */
 export function useInspectionCalibrationActions({
   annotationToolMode,
   fullscreenSession,
   getCalibrationForImage,
-  projectImageLookup,
   readOnly,
-  selectedPartImageRefs,
   setProjectMetadata,
   setSessionCalibrationByImageId,
   setTileCalibrationPromptImageId,
   tileCalibrationPromptImageId,
 }) {
   const { fullscreenBackingImageId, promptFullscreenCalibration, resumeFullscreenMeasure } = fullscreenSession;
-  const annotationSourceImageIdLookup = useMemo(
-    () => getAnnotationSourceImageIdLookup(selectedPartImageRefs, projectImageLookup),
-    [projectImageLookup, selectedPartImageRefs],
-  );
-  const getAnnotationSourceImageIdForImage = useCallback((imageId) => {
-    const key = String(imageId || '');
-    return annotationSourceImageIdLookup[key] || key;
-  }, [annotationSourceImageIdLookup]);
+  // Annotations and calibration prompts are owned by the exact image that was
+  // drawn on. Overlays and same-view images are never mapped to a shared base
+  // image, so this only normalizes the id.
+  const getAnnotationSourceImageIdForImage = useCallback((imageId) => String(imageId || ''), []);
   const applySessionCalibration = useCallback((imageId, calibration) => {
     if (readOnly) return false;
     if (!imageId || !isValidCalibration(calibration)) return false;

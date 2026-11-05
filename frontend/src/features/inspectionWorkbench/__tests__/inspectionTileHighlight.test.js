@@ -34,24 +34,26 @@ describe('findHighlightedInspectionTileId', () => {
     expect(findHighlightedInspectionTileId(measurementOn('other'), [baseEntry, backEntry], 'base', lookup)).toBe('');
   });
 
-  test('highlights only the selected overlay when several same-view overlays share a base', () => {
+  test('does not highlight same-view overlays for an annotation on their base image', () => {
     const entries = [heatEntry, segEntry, backEntry];
-    expect(findHighlightedInspectionTileId(measurementOn('base'), entries, 'seg', lookup)).toBe('p-analysis-2');
-    expect(findHighlightedInspectionTileId(measurementOn('base'), entries, 'heat', lookup)).toBe('p-analysis-1');
+    expect(findHighlightedInspectionTileId(measurementOn('base'), entries, 'seg', lookup)).toBe('');
+    expect(findHighlightedInspectionTileId(measurementOn('base'), entries, 'heat', lookup)).toBe('');
   });
 
-  test('prefers the exact image tile over related overlays when the selection is elsewhere', () => {
+  test('highlights the exact image tile even when another tile is selected', () => {
     const entries = [heatEntry, baseEntry, segEntry];
     expect(findHighlightedInspectionTileId(measurementOn('base'), entries, 'back', lookup)).toBe('p-source-0');
+    expect(findHighlightedInspectionTileId(measurementOn('heat'), entries, 'base', lookup)).toBe('p-analysis-1');
   });
 
-  test('falls back to one related tile when the exact image is not visible', () => {
-    expect(findHighlightedInspectionTileId(measurementOn('base'), [heatEntry, segEntry], '', lookup)).toBe('p-analysis-1');
+  test('prefers the selected tile when the same image appears in several tiles', () => {
+    const aggregateBase = { ...baseEntry, id: 'all-p-source-0' };
+    expect(findHighlightedInspectionTileId(measurementOn('base'), [aggregateBase, baseEntry], 'base', lookup)).toBe('all-p-source-0');
   });
 });
 
 describe('InspectionViewBoard highlight', () => {
-  test('marks exactly one tile highlighted for a measurement on a shared base image', () => {
+  test('highlights only the tile whose own image owns the measurement', () => {
     render(
       <InspectionViewBoard
         tabKey="view_parts"
@@ -60,14 +62,15 @@ describe('InspectionViewBoard highlight', () => {
         tileView={{}}
         handlers={{}}
         selection={{
-          visibleSelectedPartImageRefs: [heatEntry, segEntry, backEntry],
-          selectedInspectionItem: measurementOn('base'),
-          selectedImageRef: 'heat',
+          visibleSelectedPartImageRefs: [baseEntry, heatEntry, segEntry, backEntry],
+          selectedInspectionItem: measurementOn('heat'),
+          selectedImageRef: 'base',
           projectImageLookup: lookup,
         }}
       />,
     );
     expect(screen.getByTestId('tile-p-analysis-1')).toHaveAttribute('data-highlighted', 'true');
+    expect(screen.getByTestId('tile-p-source-0')).toHaveAttribute('data-highlighted', 'false');
     expect(screen.getByTestId('tile-p-analysis-2')).toHaveAttribute('data-highlighted', 'false');
     expect(screen.getByTestId('tile-p-source-3')).toHaveAttribute('data-highlighted', 'false');
   });
