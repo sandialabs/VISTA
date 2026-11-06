@@ -7,7 +7,6 @@ import {
 import {
   computeDraggedGeometry,
   getLineLengthPx,
-  hasDraggedGeometryChanged,
   scalePointToGeometrySpace,
 } from './annotationPointerGeometry';
 import {
@@ -18,6 +17,7 @@ import {
   isCommittableDraftLine,
 } from './annotationDraftReducer';
 import { MEASUREMENT_COLORS } from './inspectionAnnotationDisplay';
+import { commitDraggedGeometry } from './annotationDragCommit';
 
 export function useTileAnnotationPointer({
   tileGeometryDragPreviewRef,
@@ -163,17 +163,17 @@ export function useTileAnnotationPointer({
     event.preventDefault();
     event.stopPropagation();
     safeReleasePointerCapture(drag.captureTarget, drag.pointerId);
-    const preview = tileGeometryDragPreviewRef.current;
     tileAnnotationGeometryDragRef.current = null;
-    setTileAnnotationGeometryDragPreview(null);
     suppressNextTileClickRef.current = true;
-    if (cancel || !preview?.geometry) return;
-    if (!hasDraggedGeometryChanged(preview, drag.source)) return;
-    if (preview.kind === 'line') {
-      await updateMeasurementAnnotationLine(preview.geometry.id, preview.geometry);
-    } else if (preview.kind === 'box') {
-      await updateBoxAnnotationGeometry(preview.geometry.id, preview.geometry);
-    }
+    await commitDraggedGeometry({
+      preview: tileGeometryDragPreviewRef.current,
+      source: drag.source,
+      cancel,
+      previewRef: tileGeometryDragPreviewRef,
+      setPreview: setTileAnnotationGeometryDragPreview,
+      updateMeasurementAnnotationLine,
+      updateBoxAnnotationGeometry,
+    });
   };
 
   // Tile click handler. Measure, box, and crop are all drawn by press-drag-release

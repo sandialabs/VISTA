@@ -844,7 +844,7 @@ function InspectionWorkbenchPanel({
     volumeMetadataProbeState, volumePreviewLayers,
   });
   const centerPaneProps = buildCenterPaneProps({
-    annotationDrafts, annotationLayers, annotationOpacityMultiplier, calibratedGeometry,
+    annotationDrafts, annotationLayers, annotationOpacityMultiplier, annotationToolMode, calibratedGeometry,
     deleteAnalyzeOverlay, deletingOverlayId, imageEnabled, imageSortFilter, isAllImagesSelection,
     mprViewportProps,
     projectImageLookup, readOnly, selectedAnnotationId, selectedImageRef,

@@ -36,6 +36,8 @@ const buildTileView = (input) => ({
   tileGeometryDragPreview: input.tileGeometryDragPreview,
   tileAnnotationPreview: input.annotationDrafts.tile.preview,
   selectedAnnotationId: input.selectedAnnotationId,
+  // A draw tool owns the pointer, so tiles drop the shapes' move/edit targets.
+  annotationDrawToolActive: ['measure', 'box', 'crop'].includes(input.annotationToolMode),
   deletingOverlayId: input.deletingOverlayId,
   suppressNextTileClickRef: input.suppressNextTileClickRef,
   getBoxWithDerivedDimensions: input.calibratedGeometry.getBoxWithDerivedDimensions,

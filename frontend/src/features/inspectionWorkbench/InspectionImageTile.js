@@ -19,6 +19,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
     tileGeometryDragPreview,
     tileAnnotationPreview,
     selectedAnnotationId,
+    annotationDrawToolActive = false,
     deletingOverlayId,
     suppressNextTileClickRef,
     getBoxWithDerivedDimensions,
@@ -97,7 +98,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
                     renderContent={(frame) => (
                       <>
                         {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId, opacityMultiplier: annotationOpacityMultiplier, unit: tileAnnotationUnit, frame })}
-                        {!readOnly && renderTileAnnotationEditingTargets({
+                        {!readOnly && !annotationDrawToolActive && renderTileAnnotationEditingTargets({
                           measurementLines: tileMeasurementLines,
                           boxes: tileBoxes,
                           selectedAnnotationId,

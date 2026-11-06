@@ -204,6 +204,14 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 
 - Each annotation belongs only to the image it was drawn on. `getAnnotationSourceImageId` (`frontend/src/features/inspectionWorkbench/partImageRefs.js`) returns the tile's own image id; overlays with `overlay_base_image_id`, Analyze outputs, and same-view images in other modalities do not render, save to, or highlight the base image's annotations. The base image is still drawn under an overlay as a visual backdrop only. Do not reintroduce a base-image lookup for annotation ownership.
 
+## Inspection Draw Tools Own the Pointer
+
+- While Measure, Draw box, or Crop is active, existing shapes render without move/edit hit targets in both fullscreen (`FullscreenAnnotationHandles.js`) and tiles (`annotationDrawToolActive` in `centerPaneProps.js`), so users can draw over existing annotations. Any hit target layered above the fullscreen `<img>` triggers its `onMouseLeave` and cancels the tool.
+
+## Inspection Shape Drag Commit
+
+- Tile, fullscreen, and MPR shape drags save through `commitDraggedGeometry` (`frontend/src/features/inspectionWorkbench/annotationDragCommit.js`), which keeps the drag preview at the drop position until the PATCH resolves. Clearing the preview before the save lands makes the shape flash back to its original position.
+
 ## Inspection Annotation Overlay Scaling
 
 - Annotation overlays (tile, fullscreen, MPR) use `AnnotationOverlaySvg` and a uniform design-unit frame from `frontend/src/features/inspectionWorkbench/annotationOverlayFrame.js`, so line thickness, handle dots, and label text are identical across image aspect ratios. Pass `frame` to the annotation renderers and project coordinates with the frame helpers; never wrap annotation content in a non-uniform `scale(w/1000 h/1000)` group.

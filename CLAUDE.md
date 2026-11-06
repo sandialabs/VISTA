@@ -440,6 +440,16 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 - Annotations created on overlay tiles before this change were saved with the base image's id, so they now render only on the base tile. The backend stores the `image_id` it receives and had no view-linking logic.
 - Do not reintroduce a base-image lookup for annotation ownership; that duplicated every annotation across all same-view tiles.
 
+## Inspection Draw Tools Own the Pointer
+
+- While Measure, Draw box, or Crop is active, existing measurement lines and boxes render without their move/edit hit targets (`.inspection-annotation-drag-target`, endpoint and corner dots), so new shapes can be drawn over existing ones. Fullscreen: `FullscreenMeasurementLines` / `FullscreenBoxHandles` check `isFullscreenDrawToolActive(tools)`. Tiles: `buildTileView` sets `annotationDrawToolActive` from `annotationToolMode` and `InspectionImageTile` skips `renderTileAnnotationEditingTargets`.
+- Fullscreen draw handlers live on the `<img>`/canvas, whose `onMouseLeave` cancels the box tool. A hit target above the image counts as leaving it, so hovering a shape used to cancel Draw box / Measure. To move or reshape an annotation, turn the draw tool off first.
+
+## Inspection Shape Drag Commit (No Snap-Back)
+
+- Tile, fullscreen, and MPR move/resize drags finish through `commitDraggedGeometry` (`features/inspectionWorkbench/annotationDragCommit.js`). The drag preview stays at the drop position until the PATCH settles, then clears in the same render that applies the saved annotation. A failed save clears the preview, so the shape returns to its saved position. Unmoved and cancelled drags clear immediately without a request.
+- Do not clear the drag preview on pointer-up before awaiting the save: the shape then renders from stale `annotations` state (its original position) for the whole round trip, which looks like a flash back to the start.
+
 ## Inspection Annotation Overlay Scaling (Aspect-Ratio Independent)
 
 - Tile, fullscreen, and MPR annotation overlays render through `AnnotationOverlaySvg` (`features/inspectionWorkbench/AnnotationOverlaySvg.js`). The SVG viewBox is the image's pixel size; annotation content is drawn in "design units" inside a single uniform `scale(k)` group, where 1000 units equal the short side of the measured overlay container (`getAnnotationOverlayFrame` in `annotationOverlayFrame.js`, ResizeObserver-driven, square-container fallback when unmeasured).

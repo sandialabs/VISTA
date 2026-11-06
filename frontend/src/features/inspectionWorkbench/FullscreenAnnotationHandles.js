@@ -1,6 +1,13 @@
 import { getAnnotationBoxCornerViewBoxPosition, getMeasurementEndpointViewBoxPosition, getMeasurementLabelViewBoxPosition, getMeasurementLineLabel } from './inspectionAnnotationGeometry';
 import { DEFAULT_ANNOTATION_FRAME, projectAnnotationBox, projectAnnotationLine } from './annotationOverlayFrame';
 
+// While Draw Box, Measure, or Crop is active the tool owns the pointer:
+// existing shapes render without hit targets, so hovering or pressing on them
+// neither leaves the drawing surface (which cancels the tool) nor grabs them.
+function isFullscreenDrawToolActive(tools) {
+  return Boolean(tools.fullscreenMeasureActive || tools.fullscreenBoxActive || tools.fullscreenCropActive);
+}
+
 export function FullscreenMeasurementLines({ readOnly, model, tools, display, fullscreenHandlers, frame = DEFAULT_ANNOTATION_FRAME }) {
   const {
     renderedFullscreenMeasurementLines,
@@ -20,6 +27,7 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
     finishFullscreenAnnotationDrag,
     handleFullscreenEndpointDotClick,
   } = fullscreenHandlers;
+  const editTargetsEnabled = !readOnly && !isFullscreenDrawToolActive(tools);
   return (
     <>
 	                    {[...renderedFullscreenMeasurementLines, ...fullscreenPreviewLines].map((line) => {
@@ -46,7 +54,7 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
                           >
                             {getMeasurementLineLabel(line, fullscreenAnnotationUnit)}
                           </text>
-	                          {!readOnly && line.id !== 'fullscreen-measure-preview' && (
+	                          {editTargetsEnabled && line.id !== 'fullscreen-measure-preview' && (
                             <line
                               className="inspection-annotation-drag-target"
                               {...projectAnnotationLine(line, frame)}
@@ -59,7 +67,7 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
                               onPointerCancel={(event) => finishFullscreenAnnotationDrag(event, { cancel: true })}
                             />
                           )}
-                          {!readOnly && endpointActive && ['start', 'end'].map((endpoint) => (
+                          {editTargetsEnabled && endpointActive && ['start', 'end'].map((endpoint) => (
                             <circle
                               key={endpoint}
                               className="inspection-measurement-endpoint-dot"
@@ -109,6 +117,7 @@ export function FullscreenBoxHandles({ readOnly, model, tools, fullscreenHandler
     finishFullscreenAnnotationDrag,
     handleFullscreenBoxCornerDotClick,
   } = fullscreenHandlers;
+  if (isFullscreenDrawToolActive(tools)) return null;
   return (
     <>
                     {renderedFullscreenBoxAnnotations.map((box) => {

@@ -8,10 +8,10 @@ import {
 import {
   computeDraggedGeometry,
   getLineLengthPx,
-  hasDraggedGeometryChanged,
   scalePointToGeometrySpace,
 } from './annotationPointerGeometry';
 import { getDraftBox, getDraftLine, isCommittableDraftBox } from './annotationDraftReducer';
+import { commitDraggedGeometry } from './annotationDragCommit';
 import {
   DEFAULT_ANNOTATION_COLOR,
   DEFAULT_ANNOTATION_FILL_OPACITY,
@@ -292,13 +292,16 @@ export function useMprAnnotationPointer({
     event.preventDefault();
     event.stopPropagation();
     safeReleasePointerCapture(drag.captureTarget, drag.pointerId);
-    const preview = mprGeometryDragPreviewRef.current;
     mprAnnotationGeometryDragRef.current = null;
-    setMprAnnotationGeometryDragPreview(null);
-    if (cancel || !preview?.geometry) return;
-    if (!hasDraggedGeometryChanged(preview, drag.source)) return;
-    if (preview.kind === 'line') await updateMeasurementAnnotationLine(preview.geometry.id, preview.geometry);
-    if (preview.kind === 'box') await updateBoxAnnotationGeometry(preview.geometry.id, preview.geometry);
+    await commitDraggedGeometry({
+      preview: mprGeometryDragPreviewRef.current,
+      source: drag.source,
+      cancel,
+      previewRef: mprGeometryDragPreviewRef,
+      setPreview: setMprAnnotationGeometryDragPreview,
+      updateMeasurementAnnotationLine,
+      updateBoxAnnotationGeometry,
+    });
   };
 
   const stopMprAnnotationGeometryClick = (event) => {

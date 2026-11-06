@@ -5170,6 +5170,69 @@ describe('InspectionWorkbenchPanel', () => {
     });
   });
 
+  test('keeps a dragged tile measurement at its drop position while the save is in flight', async () => {
+    mockWorkbenchFetch({
+      ...scenarioByUser[0],
+      parts: [{
+        ...scenarioByUser[0].parts[0],
+        metadata: {
+          ...scenarioByUser[0].parts[0].metadata,
+          annotations: [{
+            id: 'drop-line',
+            image_id: 'part-basic-1-image-1',
+            annotation_kind: 'measurement',
+            defect_class: 'Measurement',
+            comment: 'Drop line',
+            geometry: { line: { x1: 100, y1: 80, x2: 280, y2: 160, imageWidth: 400, imageHeight: 200 } },
+            measurements: { length_px: 196.98 },
+            metadata: { measurement_color: '#06b6d4' },
+            hidden: false,
+          }],
+        },
+      }],
+    });
+    // Hold the PATCH open so the frame between pointer-up and the saved
+    // response can be inspected.
+    const defaultFetch = global.fetch;
+    let releasePatch;
+    const patchGate = new Promise((resolve) => { releasePatch = resolve; });
+    global.fetch = jest.fn((url, options = {}) => (
+      url.endsWith('/annotations/drop-line') && options.method === 'PATCH'
+        ? patchGate.then(() => defaultFetch(url, options))
+        : defaultFetch(url, options)
+    ));
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+
+    const tileImage = await screen.findByAltText('front view');
+    Object.defineProperty(tileImage, 'naturalWidth', { configurable: true, value: 400 });
+    Object.defineProperty(tileImage, 'naturalHeight', { configurable: true, value: 200 });
+    tileImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
+
+    const lineTarget = await screen.findByLabelText('Move tile measurement Drop line');
+    const position = () => ['x1', 'y1', 'x2', 'y2'].map((attr) => (
+      screen.getByLabelText('Move tile measurement Drop line').getAttribute(attr)
+    ));
+    const originalPosition = position();
+    fireCoordinatePointerEvent(lineTarget, 'pointerdown', { clientX: 190, clientY: 120, button: 0, pointerId: 41 });
+    fireCoordinatePointerEvent(lineTarget, 'pointermove', { clientX: 230, clientY: 140, buttons: 1, pointerId: 41 });
+    const droppedPosition = position();
+    expect(droppedPosition).not.toEqual(originalPosition);
+    fireCoordinatePointerEvent(lineTarget, 'pointerup', { clientX: 230, clientY: 140, button: 0, pointerId: 41 });
+
+    await waitFor(() => expect(global.fetch.mock.calls.some(([url, options]) => (
+      url.endsWith('/annotations/drop-line') && options?.method === 'PATCH'
+    ))).toBe(true));
+    // While the save is pending the line stays where it was dropped.
+    expect(position()).toEqual(droppedPosition);
+
+    await act(async () => {
+      releasePatch();
+      await patchGate;
+    });
+    await waitFor(() => expect(screen.getByLabelText('Move tile measurement Drop line').getAttribute('x1')).toBe(droppedPosition[0]));
+    expect(position()).toEqual(droppedPosition);
+  });
+
   test('ignores middle-mouse drags on tiles: no pan transform and no annotations', async () => {
     mockWorkbenchFetch(scenarioByUser[0]);
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
@@ -5821,6 +5884,74 @@ describe('InspectionWorkbenchPanel', () => {
       expect(postCall).toBeDefined();
       const body = JSON.parse(postCall[1].body);
       expect(body.image_id).toBe('overlay-image-1');
+    });
+  });
+
+  test('lets fullscreen Draw box and Measure draw over existing annotations without cancelling', async () => {
+    mockWorkbenchFetch({
+      ...scenarioByUser[0],
+      parts: [{
+        ...scenarioByUser[0].parts[0],
+        metadata: {
+          ...scenarioByUser[0].parts[0].metadata,
+          annotations: [
+            {
+              id: 'existing-line',
+              image_id: 'part-basic-1-image-1',
+              comment: 'Existing line',
+              geometry: { line: { x1: 50, y1: 100, x2: 350, y2: 100, imageWidth: 400, imageHeight: 200 } },
+              measurements: { length_mm: 15 },
+            },
+            {
+              id: 'existing-box',
+              image_id: 'part-basic-1-image-1',
+              comment: 'Existing box',
+              defect_class: 'Bounding Box',
+              bbox: { x: 100, y: 40, width: 200, height: 120 },
+              geometry: { box: { x: 100, y: 40, width: 200, height: 120, imageWidth: 400, imageHeight: 200 } },
+            },
+          ],
+        },
+      }],
+    });
+    render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+    await waitFor(() => expect(screen.getByAltText('front view')).toBeInTheDocument());
+    fireEvent.click(screen.getByAltText('front view'));
+
+    const fullscreenImage = screen.getByAltText(/fullscreen$/i);
+    Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 400 });
+    Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 200 });
+    fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
+    const overlay = () => screen.getByLabelText('fullscreen measurement overlay');
+    const dragTargetCount = () => overlay().querySelectorAll('.inspection-annotation-drag-target').length;
+    await waitFor(() => expect(dragTargetCount()).toBe(2));
+
+    // Draw box: existing shapes drop their move targets, so passing over them
+    // never leaves the image surface, and a drag that starts inside the
+    // existing box draws a new box instead of grabbing the old one.
+    const drawBox = screen.getByRole('button', { name: 'Draw box' });
+    fireEvent.click(drawBox);
+    expect(dragTargetCount()).toBe(0);
+    expect(drawBox).toHaveClass('active');
+    dragFullscreenMouse(fullscreenImage, { clientX: 150, clientY: 60 }, { clientX: 250, clientY: 140 });
+    await waitFor(() => {
+      const boxPost = global.fetch.mock.calls.find((call) => (
+        call[0].includes('/annotations') && call[1]?.method === 'POST' && JSON.parse(call[1].body).geometry?.box
+      ));
+      expect(boxPost).toBeDefined();
+      expect(JSON.parse(boxPost[1].body).bbox).toEqual({ x: 150, y: 60, width: 100, height: 80 });
+    });
+
+    // Measure: a line drawn across the existing line and box is created.
+    fireEvent.click(screen.getByRole('button', { name: 'Measure' }));
+    expect(dragTargetCount()).toBe(0);
+    dragFullscreenMouse(fullscreenImage, { clientX: 200, clientY: 20 }, { clientX: 200, clientY: 180 });
+    await waitFor(() => {
+      const linePost = global.fetch.mock.calls.find((call) => (
+        call[0].includes('/annotations') && call[1]?.method === 'POST' && JSON.parse(call[1].body).geometry?.line
+      ));
+      expect(linePost).toBeDefined();
+      expect(JSON.parse(linePost[1].body).geometry.line).toEqual(expect.objectContaining({ x1: 200, y1: 20, x2: 200, y2: 180 }));
     });
   });
 
