@@ -35,6 +35,11 @@ def is_user_in_group(user_email: str, group_id: str) -> bool:
     user_email = user_email.lower().strip()
     group_id = group_id.strip()
 
+    # The custom backend answers from the request's own groups, in memory: a
+    # cache would only return an earlier request's answer for this user.
+    if (settings.VISTA_AUTH_BACKEND or "").strip().lower() == "custom":
+        return _core_is_user_in_group(user_email, group_id)
+
     # Include debug mode in cache key since behavior changes based on DEBUG setting
     debug_mode = settings.DEBUG or settings.SKIP_HEADER_CHECK
     cache_key = (user_email, group_id, debug_mode)

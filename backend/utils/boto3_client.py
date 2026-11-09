@@ -89,15 +89,24 @@ else:
             },
         )
 
+        # Static keys only when both are set (MinIO, or an IAM user's keys).
+        # With either empty, boto3's default credential chain applies: the
+        # pod's EKS Pod Identity or IRSA credentials, an instance role, or the
+        # AWS_* environment variables. Passing "" would sign with an empty key.
+        static_keys = {}
+        if settings.S3_ACCESS_KEY and settings.S3_SECRET_KEY:
+            static_keys = {
+                "aws_access_key_id": settings.S3_ACCESS_KEY,
+                "aws_secret_access_key": settings.S3_SECRET_KEY,
+            }
         boto3_client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
             region_name=settings.S3_REGION,
             config=boto3.session.Config(
                 signature_version="s3v4", s3={"addressing_style": "path"}
             ),
+            **static_keys,
         )
         # print("Boto3 S3 client initialized successfully")
     except ClientError as e:

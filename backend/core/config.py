@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     PROXY_SHARED_SECRET: str | None = None
     X_USER_ID_HEADER: str = "X-User-Email"
     X_PROXY_SECRET_HEADER: str = "X-Proxy-Secret"
+    # The header the authenticating proxy puts the user's groups in, comma
+    # separated (oauth2-proxy's X-Forwarded-Groups). Read by the "custom"
+    # group-auth backend, and only on a request whose X-Proxy-Secret matched.
+    X_USER_GROUPS_HEADER: str = "X-Forwarded-Groups"
 
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"

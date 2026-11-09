@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core import models
 from core.config import settings
 from core.database import get_db
+from core.group_auth import (
+    clear_request_identity,
+    parse_groups_header,
+    set_request_identity,
+)
 from core.group_auth_helper import is_user_in_group
 from repositories import api_keys as api_key_repository
 from repositories import images as image_repository
@@ -127,6 +132,9 @@ async def get_current_user(
     2. Debug / test mode -- header email or MOCK_USER_EMAIL fallback
     3. Production proxy headers (X-User-Email + X-Proxy-Secret)
     """
+    # Only the proxy path below binds the user's groups to this request.
+    clear_request_identity()
+
     # 1. Bearer token -> API key
     if credentials:
         user = await _resolve_from_api_key(credentials, db)
@@ -161,6 +169,13 @@ async def get_current_user(
             detail="Authentication required. Provide API key or ensure proxy auth headers are present.",
         )
     request.state.auth_method = "proxy"
+    # The proxy's groups header is as trustworthy as its user header: only when
+    # the shared secret was checked above.
+    if settings.PROXY_SHARED_SECRET:
+        set_request_identity(
+            email,
+            parse_groups_header(request.headers.getlist(settings.X_USER_GROUPS_HEADER)),
+        )
     return await _ensure_user_in_db(email, db)
 
 

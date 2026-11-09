@@ -11,11 +11,55 @@ The built-in ``demo`` backend is for development and automated tests only and
 is refused in production (see ``Settings.validate_production_safety``).
 """
 
+import contextvars
 import logging
-from typing import Dict, List
+from typing import Dict, Iterable, List
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# The signed-in user and their groups, as the authenticating proxy asserted them
+# on this request: (email, groups). utils.dependencies.get_current_user sets it,
+# only after the request's X-Proxy-Secret matched. It is None everywhere else:
+# an API-key request, a background task, the startup self-test. Each request runs
+# in its own task, whose context holds its own value.
+_request_identity: contextvars.ContextVar[tuple[str, frozenset[str]] | None] = (
+    contextvars.ContextVar("vista_request_identity", default=None)
+)
+
+
+def parse_groups_header(values: Iterable[str] | None) -> frozenset[str]:
+    """Group names from the proxy's groups header: every value, comma separated."""
+    groups = set()
+    for value in values or ():
+        for name in str(value).split(","):
+            name = name.strip()
+            if name:
+                groups.add(name)
+    return frozenset(groups)
+
+
+def set_request_identity(user_email: str | None, groups: Iterable[str]) -> None:
+    """Bind the proxy-asserted user and groups to the current request."""
+    if not user_email:
+        _request_identity.set(None)
+        return
+    _request_identity.set((user_email.lower().strip(), frozenset(groups)))
+
+
+def clear_request_identity() -> None:
+    _request_identity.set(None)
+
+
+def _custom_check_group_membership(user_email: str, group_id: str) -> bool:
+    """Membership from the request's own proxy-asserted groups. Fail closed: no
+    identity on this request, or a different user, is not a member."""
+    identity = _request_identity.get()
+    if identity is None:
+        return False
+    email, groups = identity
+    return user_email == email and group_id in groups
 
 
 # Hardcoded demo emails that must never resolve as members in a non-demo
@@ -122,14 +166,9 @@ def _check_group_membership(user_email: str, group_id: str) -> bool:
         return _demo_check_group_membership(user_email, group_id)
 
     if backend == "custom":
-        # Integrators replace this branch with their real auth-system lookup.
-        # Kept as NotImplementedError so an unreplaced deployment fails
-        # closed at the first check rather than silently denying access.
-        raise NotImplementedError(
-            "VISTA_AUTH_BACKEND=custom requires replacing "
-            "core.group_auth._check_group_membership with a real auth-system "
-            "integration. See docs/production/proxy-setup.md."
-        )
+        # The groups the authenticating proxy passed on this request
+        # (X_USER_GROUPS_HEADER), for this request's own user only.
+        return _custom_check_group_membership(user_email, group_id)
 
     raise NotImplementedError(
         "Group authorization is not configured. Set VISTA_AUTH_BACKEND=demo "
