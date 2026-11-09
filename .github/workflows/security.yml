@@ -1,0 +1,40 @@
+name: SBOM and Vulnerability Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  security-events: write # Needed to upload SARIF results to GitHub Security tab
+
+jobs:
+  syft-and-grype:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          path: "."
+          format: "spdx-json"
+          output-file: "sbom.spdx.json"
+
+      - name: Scan SBOM for vulnerabilities with Grype
+        id: scan
+        uses: anchore/scan-action@v7
+        with:
+          sbom: "sbom.spdx.json"
+          fail-build: true
+          severity-cutoff: "high"
+
+      - name: Upload Grype SARIF report to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+
