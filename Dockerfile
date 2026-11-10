@@ -1,9 +1,14 @@
 # RHEL 9 / UBI 9 Minimal based production image
 # Multi-stage build for optimized production image
 # Container contract tests parse these named stages; keep the base, builder, and final aliases stable.
+# The frontend is built in its own stage and only the compiled bundle ships: Node, npm and
+# node_modules stay out of the runtime image. Pinned by digest (ubi9/nodejs-22:latest on
+# 2026-11-05); the UI needs Node 20 or newer (react-router 7).
+ARG UBI_NODEJS=registry.access.redhat.com/ubi9/nodejs-22@sha256:18efae02a19cdfbda303ff98d096cfcc2e123f300aff146e7dab1e75b9116dec
+
 FROM registry.access.redhat.com/ubi9/ubi-minimal AS base
 
-# Install Python 3.11, Node.js, and system dependencies
+# Install Python 3.11 and system dependencies
 RUN microdnf install -y --nodocs \
     python3.11 \
     python3.11-pip \
@@ -14,8 +19,6 @@ RUN microdnf install -y --nodocs \
     git \
     wget \
     ca-certificates \
-    nodejs \
-    npm \
     atk \
     at-spi2-atk \
     alsa-lib \
@@ -59,6 +62,19 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# ---- ui: the React build. Only /app/frontend/build is copied out of this stage. ----
+FROM ${UBI_NODEJS} AS ui
+USER 0
+WORKDIR /app/frontend
+# Copy package.json and package-lock.json first for better caching
+COPY ./frontend/package.json ./frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+# Copy frontend source and config files (not node_modules)
+COPY ./frontend/public ./public
+COPY ./frontend/src ./src
+COPY ./frontend/config-overrides.js ./
+RUN npm run build
+
 FROM base AS builder
 
 # Install Python dependencies
@@ -84,23 +100,6 @@ RUN uv pip uninstall --python /opt/venv/bin/python opencv-python-headless && \
 # Copy backend code
 COPY ./backend /app/backend
 # COPY .env /app/.env
-
-# Copy frontend files selectively (excluding node_modules)
-WORKDIR /app
-# Copy package.json and package-lock.json first for better caching
-COPY ./frontend/package.json ./frontend/package-lock.json ./frontend/
-# Copy frontend source and config files
-COPY ./frontend/public ./frontend/public
-COPY ./frontend/src ./frontend/src
-COPY ./frontend/config-overrides.js ./frontend/
-
-# Install frontend dependencies and build
-WORKDIR /app/frontend
-RUN npm ci --no-audit --no-fund
-RUN npm run build
-RUN ls -la build || echo "Build directory not found"
-
-# Return to app directory
 WORKDIR /app
 
 # Final stage
@@ -141,7 +140,7 @@ RUN mkdir -p /app/checkpoints && \
 # Copy the only root test-tree asset needed at runtime by Project Data's built-in example loader.
 COPY ./test/data /app/test/data
 # Copy frontend build files
-COPY --from=builder /app/frontend/build /app/ui2
+COPY --from=ui /app/frontend/build /app/ui2
 # Set frontend build path environment variable
 ENV FRONTEND_BUILD_PATH=/app/ui2
 ENV GITLAB_COMMIT_SHA=$GITLAB_COMMIT_SHA

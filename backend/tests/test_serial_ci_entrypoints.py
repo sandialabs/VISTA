@@ -53,7 +53,7 @@ def test_historical_production_build_keeps_runtime_and_safe_context() -> None:
     assert "COPY ./backend /app/backend" in dockerfile
     assert "RUN npm ci --no-audit --no-fund" in dockerfile
     assert "RUN npm run build" in dockerfile
-    assert "COPY --from=builder /app/frontend/build /app/ui2" in dockerfile
+    assert "COPY --from=ui /app/frontend/build /app/ui2" in dockerfile
     assert "ENV FRONTEND_BUILD_PATH=/app/ui2" in dockerfile
     assert (
         'CMD ["bash", "/app/backend/scripts/start_production_server.sh"]' in dockerfile

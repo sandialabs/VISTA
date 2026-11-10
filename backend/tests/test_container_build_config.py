@@ -43,6 +43,18 @@ def _locked_version(package: str) -> str:
     return lock[start : lock.index('"', start)]
 
 
+def _dockerfile_stage(dockerfile: str, name: str) -> str:
+    """Return the instructions of one named build stage."""
+    stages = re.split(r"^(?=FROM )", dockerfile, flags=re.MULTILINE)
+    matches = [
+        stage
+        for stage in stages
+        if re.match(rf"FROM \S+ AS {re.escape(name)}\s*$", stage.splitlines()[0])
+    ]
+    assert len(matches) == 1, f"expected one stage named {name}"
+    return matches[0]
+
+
 def _prebuilt_opencv_wheel() -> Path:
     vendor = REPO_ROOT / OPENCV_VENDOR_DIR
     wheels = sorted(vendor.glob("opencv_python_headless-*.whl"))
@@ -153,6 +165,38 @@ def test_ci_container_steps_configure_the_group_auth_backend():
     runs = workflow.count("docker run")
     assert runs >= 2
     assert workflow.count("-e VISTA_AUTH_BACKEND=demo") == runs
+
+
+def test_frontend_is_built_in_its_own_node_stage():
+    """Build the UI in a pinned Node 22 stage and ship only the bundle."""
+    dockerfile = _read_repo_file("Dockerfile")
+    ui = _dockerfile_stage(dockerfile, "ui")
+
+    pinned_node_image = (
+        r"^ARG UBI_NODEJS=registry\.access\.redhat\.com/ubi9/nodejs-22"
+        r"@sha256:[0-9a-f]{64}"
+    )
+    assert re.search(pinned_node_image, dockerfile, flags=re.MULTILINE)
+    assert "FROM ${UBI_NODEJS} AS ui" in dockerfile
+    assert "RUN npm ci --no-audit --no-fund" in ui
+    assert "RUN npm run build" in ui
+    assert "COPY --from=ui /app/frontend/build /app/ui2" in dockerfile
+
+
+def test_runtime_stages_carry_no_node_toolchain():
+    """Keep Node, npm and the UI sources out of every Python stage."""
+    dockerfile = _read_repo_file("Dockerfile")
+
+    for name in ("base", "builder", "final"):
+        stage = _dockerfile_stage(dockerfile, name)
+        instructions = "\n".join(
+            line for line in stage.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert not re.search(r"\b(nodejs|npm)\b", instructions), name
+        assert "COPY ./frontend" not in instructions, name
+        assert "/app/frontend" not in instructions.replace(
+            "COPY --from=ui /app/frontend/build /app/ui2", ""
+        ), name
 
 
 def test_image_scan_script_parses_and_documents_its_usage():

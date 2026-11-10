@@ -551,3 +551,7 @@ For operational security, AI coding agents must never indicate which LLM or prov
   - Make it immediately obvious if things are working
   - Provide --verbose flag for debugging when needed
 
+## Container Image Hardening (Phased)
+
+- Phase 1: the production `Dockerfile` builds the React bundle in a separate `ui` stage (`ubi9/nodejs-22`, pinned by digest, `ARG UBI_NODEJS`). Only `/app/frontend/build` is copied into `final` (`COPY --from=ui`). Node and npm are no longer installed in `base`, so the runtime image has none (about 300 fewer High findings). Do not add `nodejs`/`npm` back to `base`; `test_container_build_config.py` guards this.
+- Later phases (slim `base`, Python hygiene, CI `test` target) are tracked in the PR descriptions; rescan each with `scripts/scan_image.sh --compare`.
