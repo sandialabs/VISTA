@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -141,6 +142,30 @@ def test_ci_container_sync_preserves_ffmpeg_free_opencv():
         " && uvicorn"
     ) in workflow
     assert "uv sync --frozen && uvicorn" not in workflow
+
+
+def test_ci_container_steps_configure_the_group_auth_backend():
+    """Give every CI container run a group-auth backend so the app can start."""
+    workflow = _read_repo_file(".github/workflows/docker-image.yml")
+
+    # The app refuses to start without VISTA_AUTH_BACKEND (the startup self-test
+    # fails closed); the demo backend is the one allowed outside production.
+    runs = workflow.count("docker run")
+    assert runs >= 2
+    assert workflow.count("-e VISTA_AUTH_BACKEND=demo") == runs
+
+
+def test_image_scan_script_parses_and_documents_its_usage():
+    """Keep the image scan helper runnable and its usage documented."""
+    script = REPO_ROOT / "scripts" / "scan_image.sh"
+
+    assert script.is_file()
+    subprocess.run(["bash", "-n", str(script)], check=True)
+    help_text = subprocess.run(
+        ["bash", str(script), "--help"], check=True, capture_output=True, text=True
+    ).stdout
+    for option in ("--out", "--compare", "--fail-on", "SCAN_CA_BUNDLE"):
+        assert option in help_text
 
 
 def test_minio_services_use_a_pullable_image_and_a_curl_free_healthcheck():

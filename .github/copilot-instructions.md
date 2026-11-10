@@ -174,6 +174,10 @@ The UI uses `react-router-dom` 7.x (imports come only from `react-router-dom`; t
 - Router 7 needs `TextEncoder`/`TextDecoder`, which jsdom omits; `frontend/src/setupTests.js` defines them.
 - Lockfiles (`uv.lock`, `frontend/package-lock.json`) must resolve only from public indexes (`pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`). Never commit internal mirror URLs or insecure-host/TLS-skipping settings; pass such flags only on a local command line.
 
+## Container Image Scan
+
+`scripts/scan_image.sh IMAGE` exports an image's filesystem and scans it with Syft and Grype (run as containers), printing severity counts and the unfixed Critical and High total. `--compare PREVIOUS_grype.json` shows the change from an earlier scan, `--fail-on high` makes it exit non-zero, `--verbose` lists the worst packages. On networks that inspect TLS, point `SCAN_CA_BUNDLE` at a PEM bundle that includes the proxy's CA (verification is never disabled). Directory scans are used because Syft rejects the PyTorch layers of a full image archive as a decompression bomb. Test: `backend/tests/test_container_build_config.py`.
+
 ## Container OpenCV Build (No FFmpeg)
 
 The production `Dockerfile` installs a prebuilt `opencv-python-headless` wheel from `vendor/opencv/` (offline, `--require-hashes`), compiled from the hash-pinned PyPI source distribution with `-DWITH_FFMPEG=OFF`, because the PyPI wheels bundle FFmpeg libraries (and OpenSSL 1.1.1k) that carry unpatched CVEs. The image build no longer compiles OpenCV. Things to keep in mind:
