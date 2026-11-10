@@ -25,7 +25,7 @@ function getVolumeShapeFromEntry(entry, projectImageLookup = {}) {
   return isValidShape(authoritative) ? authoritative : null;
 }
 
-function isVolumeFileEntry(entry, projectImageLookup = {}) {
+export function isVolumeFileEntry(entry, projectImageLookup = {}) {
   const record = getProjectImageRecord(projectImageLookup, entry) || {};
   const filename = String(entry?.filename || record.filename || '').toLowerCase();
   const hasExplicitSliceIndex = [

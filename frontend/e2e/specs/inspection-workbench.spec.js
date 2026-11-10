@@ -295,13 +295,13 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
               await expect(page.locator('.inspection-fullscreen-modal')).toHaveCount(0);
             }
           };
-          const topViewButton = inspectionPanel.getByRole('button', { name: /^TOP\b/ }).first();
+          const topViewButton = inspectionPanel.getByRole('button', { name: 'top', exact: true }).first();
           await topViewButton.click();
           // View toggles mark selection with the Bootstrap 'active' class; 'selected' is the
           // part-row convention and never appears on these buttons.
           await expect(topViewButton).toHaveClass(/\bactive\b/);
           await closeFullscreenIfOpen();
-          const frontViewButton = inspectionPanel.getByRole('button', { name: /^FRONT\b/ }).first();
+          const frontViewButton = inspectionPanel.getByRole('button', { name: 'front', exact: true }).first();
           await frontViewButton.click();
           await expect(frontViewButton).toHaveClass(/\bactive\b/);
           await closeFullscreenIfOpen();
@@ -315,14 +315,13 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         await expect(page.getByTestId('annotation-list')).toContainText(`${simulatedUser}-surface-note`);
 
         await expect.poll(() => getWorkspaceStates().length).toBeGreaterThan(0);
+        // Multi-image tiles have no zoom or pan (zoom lives in the fullscreen view),
+        // so the saved inspector workspace no longer carries a viewport transform.
         await expect.poll(() => {
           const states = getWorkspaceStates();
-          return states[states.length - 1]?.state?.inspector?.viewport_transform || null;
-        }).toEqual(expect.objectContaining({
-          zoom: expect.any(Number),
-          panX: expect.any(Number),
-          panY: expect.any(Number),
-        }));
+          const inspector = states[states.length - 1]?.state?.inspector;
+          return inspector ? Object.prototype.hasOwnProperty.call(inspector, 'viewport_transform') : null;
+        }).toBe(false);
         await expect.poll(() => getIngestValidationRequests().length).toBeGreaterThan(0);
       });
     });
@@ -339,10 +338,6 @@ test('image sort dropdown persists a full ordered sequence across an inspection 
     metadata: {
       configured_views: ['front', 'back'],
       modalities: ['visual'],
-      view_images: {
-        front: 'order-front.png',
-        back: 'order-back.png',
-      },
       source_images: [
         {
           filename: 'order-front.png',
@@ -400,10 +395,11 @@ test('image sort dropdown persists a full ordered sequence across an inspection 
   await expect(sortMenu).toBeVisible();
   await expect(sortButton).toHaveAttribute('aria-expanded', 'true');
   const primarySort = sortMenu.getByRole('combobox', { name: 'Primary image sort' });
-  // The four static sorts always lead the list; metadata-derived sorts are appended
-  // from whatever keys the loaded images expose, so only the static prefix is fixed.
-  const staticSortLabels = ['Filename A-Z', 'Filename Z-A', 'View A-Z', 'Image type'];
-  await expect.poll(async () => (await primarySort.locator('option').allTextContents()).slice(0, 4))
+  // The three static sorts always lead the list; metadata-derived sorts ("Metadata: <key>",
+  // there is no fixed View sort) are appended from whatever keys the loaded images expose,
+  // so only the static prefix is fixed.
+  const staticSortLabels = ['Filename A-Z', 'Filename Z-A', 'Image type'];
+  await expect.poll(async () => (await primarySort.locator('option').allTextContents()).slice(0, staticSortLabels.length))
     .toEqual(staticSortLabels);
   await sortMenu.screenshot({ path: imageSortMenuScreenshotPath });
 
@@ -439,7 +435,7 @@ test('image sort dropdown persists a full ordered sequence across an inspection 
   await page.getByRole('button', { name: 'Sort images' }).click();
   const persistedMenu = page.getByRole('dialog', { name: 'Image sorting options' });
   const persistedSort = persistedMenu.getByRole('combobox', { name: 'Primary image sort' });
-  await expect.poll(async () => (await persistedSort.locator('option').allTextContents()).slice(0, 4))
+  await expect.poll(async () => (await persistedSort.locator('option').allTextContents()).slice(0, staticSortLabels.length))
     .toEqual(staticSortLabels);
 });
 
@@ -455,7 +451,6 @@ test('All inspection row aggregates views and modalities across visible parts', 
       metadata: {
         configured_views: ['top', 'side'],
         modalities: ['optical', 'thermal'],
-        view_images: { top: 'all-e2e-a-top-optical.png' },
         source_images: [
           { filename: 'all-e2e-a-top-optical.png', image_id: 'all-e2e-a-top-optical', side: 'top', modality: 'optical', overlay: false },
           { filename: 'all-e2e-a-side-thermal.png', image_id: 'all-e2e-a-side-thermal', side: 'side', modality: 'thermal', overlay: false },
@@ -472,7 +467,6 @@ test('All inspection row aggregates views and modalities across visible parts', 
       metadata: {
         configured_views: ['top', 'side'],
         modalities: ['optical', 'thermal'],
-        view_images: { top: 'all-e2e-b-top-optical.png' },
         source_images: [
           { filename: 'all-e2e-b-top-optical.png', image_id: 'all-e2e-b-top-optical', side: 'top', modality: 'optical', overlay: false },
           { filename: 'all-e2e-b-side-thermal.png', image_id: 'all-e2e-b-side-thermal', side: 'side', modality: 'thermal', overlay: false },
@@ -532,7 +526,7 @@ test('All inspection row aggregates views and modalities across visible parts', 
   await expect(allRow).toContainText('All Images');
   await expect(allRow).toContainText('2 parts');
   await expect(allRow).toHaveClass(/selected/);
-  await expect(inspectionPanel.getByAltText('top view')).toHaveCount(2);
+  await expect(inspectionPanel.getByAltText(/top-optical\.png view/)).toHaveCount(2);
   await expect(inspectionPanel.getByText('All E2E Part A').first()).toBeVisible();
   await expect(inspectionPanel.getByText('All E2E Part B').first()).toBeVisible();
 
@@ -542,18 +536,18 @@ test('All inspection row aggregates views and modalities across visible parts', 
   const modalityToggles = allRow.locator('[aria-label="All Images modality toggles"]');
 
   await modalityToggles.getByRole('button', { name: 'THERMAL' }).click();
-  await expect(inspectionPanel.getByAltText('side view')).toHaveCount(2);
-  await expect(inspectionPanel.getByAltText('top view')).toHaveCount(0);
+  await expect(inspectionPanel.getByAltText(/side-thermal\.png view/)).toHaveCount(2);
+  await expect(inspectionPanel.getByAltText(/top-optical\.png view/)).toHaveCount(0);
 
   await viewToggles.getByRole('button', { name: 'TOP' }).click();
   await modalityToggles.getByRole('button', { name: 'OPTICAL' }).click();
-  await expect(inspectionPanel.getByAltText('top view')).toHaveCount(2);
-  await expect(inspectionPanel.getByAltText('side view')).toHaveCount(0);
+  await expect(inspectionPanel.getByAltText(/top-optical\.png view/)).toHaveCount(2);
+  await expect(inspectionPanel.getByAltText(/side-thermal\.png view/)).toHaveCount(0);
 
   await viewToggles.getByRole('button', { name: 'ALL' }).click();
   await modalityToggles.getByRole('button', { name: 'ALL' }).click();
-  await expect(inspectionPanel.getByAltText('top view')).toHaveCount(2);
-  await expect(inspectionPanel.getByAltText('side view')).toHaveCount(2);
+  await expect(inspectionPanel.getByAltText(/top-optical\.png view/)).toHaveCount(2);
+  await expect(inspectionPanel.getByAltText(/side-thermal\.png view/)).toHaveCount(2);
 
   await allRow.getByRole('button', { name: 'Collapse row' }).click();
   await expect(allRow).toHaveClass(/collapsed/);

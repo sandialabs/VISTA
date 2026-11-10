@@ -58,7 +58,7 @@ test.describe('Full inspection workflow end-to-end', () => {
     await expect(workbench).toBeVisible();
 
     await expect(workbench.locator('.flexlayout__tab_button', { hasText: 'Part Summary' }).first()).toBeVisible();
-    const frontImageButton = workbench.getByRole('button', { name: /^FRONT\b/ }).first();
+    const frontImageButton = workbench.getByRole('button', { name: 'front', exact: true }).first();
     await expect(frontImageButton).toBeVisible();
     await frontImageButton.click();
     await expect(frontImageButton).toHaveClass(/\bactive\b/);
