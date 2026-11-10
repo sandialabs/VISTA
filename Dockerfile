@@ -8,36 +8,16 @@ ARG UBI_NODEJS=registry.access.redhat.com/ubi9/nodejs-22@sha256:18efae02a19cdfbd
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal AS base
 
-# Install Python 3.11 and system dependencies
-RUN microdnf install -y --nodocs \
+# Runtime base: Python 3.11 and CA certificates only. Compilers, headers, git, wget and the
+# GTK/X11/browser libraries are deliberately absent. Every dependency installs from a prebuilt
+# wheel (psycopg2-binary bundles its own libpq), and nothing in the image launches a browser.
+# Keep this list minimal: the final stage inherits everything installed here, and each extra OS
+# package adds image scan findings. test_container_build_config.py guards the denylist.
+RUN microdnf upgrade -y --nodocs && \
+    microdnf install -y --nodocs \
     python3.11 \
     python3.11-pip \
-    python3.11-devel \
-    gcc \
-    gcc-c++ \
-    libpq-devel \
-    git \
-    wget \
     ca-certificates \
-    atk \
-    at-spi2-atk \
-    alsa-lib \
-    cups-libs \
-    gtk3 \
-    libX11-xcb \
-    libXcomposite \
-    libXcursor \
-    libXdamage \
-    libXext \
-    libXfixes \
-    libXi \
-    libXrandr \
-    libXScrnSaver \
-    libXtst \
-    libdrm \
-    libgbm \
-    libxcb \
-    pango \
     && microdnf clean all
 
 # Create symlinks for python
@@ -74,6 +54,14 @@ COPY ./frontend/public ./public
 COPY ./frontend/src ./src
 COPY ./frontend/config-overrides.js ./
 RUN npm run build
+
+# ---- checkpoints: public default weights, verified by SHA-256. Only the file is copied out. ----
+FROM registry.access.redhat.com/ubi9/ubi-minimal AS checkpoints
+ARG SAM_VIT_B_SHA256=ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912
+RUN mkdir -p /checkpoints && \
+    curl -fsSL -o /checkpoints/sam_vit_b_01ec64.pth \
+        https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth && \
+    echo "${SAM_VIT_B_SHA256}  /checkpoints/sam_vit_b_01ec64.pth" | sha256sum -c -
 
 FROM base AS builder
 
@@ -134,9 +122,7 @@ COPY --from=builder /app/backend /app/backend
 # SAM checkpoint needs an explicit download. No default Anomalib checkpoint
 # ships; its public PatchCore-like fallback is dependency-free and has no
 # pretrained weights to bundle.
-RUN mkdir -p /app/checkpoints && \
-    wget -q -O /app/checkpoints/sam_vit_b_01ec64.pth \
-        https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
+COPY --from=checkpoints /checkpoints /app/checkpoints
 # Copy the only root test-tree asset needed at runtime by Project Data's built-in example loader.
 COPY ./test/data /app/test/data
 # Copy frontend build files

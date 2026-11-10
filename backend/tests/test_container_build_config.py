@@ -199,6 +199,37 @@ def test_runtime_stages_carry_no_node_toolchain():
         ), name
 
 
+def test_runtime_base_installs_only_python_and_certificates():
+    """Keep compilers, headers, git, wget and GUI libraries out of the runtime image."""
+    base = _dockerfile_stage(_read_repo_file("Dockerfile"), "base")
+    installed = re.search(r"microdnf install[^\n]*\\\n((?:.*\\\n)*.*)", base)
+    assert installed, "base stage must install its packages with microdnf"
+    packages = set(re.findall(r"[A-Za-z0-9_.+-]+", installed.group(1).replace("\\", " ")))
+    packages.discard("microdnf")
+    assert {"python3.11", "ca-certificates"} <= packages
+    denied = re.compile(
+        r"^(gcc|gcc-c\+\+|git|wget|gtk3|webkit.*|atk|at-spi2-atk|alsa-lib|cups-libs|pango"
+        r"|libX.*|libxcb|libdrm|libgbm|.*-devel)$"
+    )
+    assert not [name for name in packages if denied.match(name)]
+
+
+def test_sam_checkpoint_is_downloaded_in_its_own_stage_with_a_pinned_hash():
+    """Download weights outside the runtime stages and verify them by SHA-256."""
+    dockerfile = _read_repo_file("Dockerfile")
+    stage = _dockerfile_stage(dockerfile, "checkpoints")
+    assert re.search(r"ARG SAM_VIT_B_SHA256=[0-9a-f]{64}\b", stage)
+    assert "sha256sum -c -" in stage
+    assert "COPY --from=checkpoints /checkpoints /app/checkpoints" in dockerfile
+    for name in ("base", "builder", "final"):
+        instructions = "\n".join(
+            line
+            for line in _dockerfile_stage(dockerfile, name).splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        assert "wget" not in instructions, name
+
+
 def test_image_scan_script_parses_and_documents_its_usage():
     """Keep the image scan helper runnable and its usage documented."""
     script = REPO_ROOT / "scripts" / "scan_image.sh"
