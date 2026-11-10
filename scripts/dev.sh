@@ -17,6 +17,10 @@ set -euo pipefail
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.dev.yml}"
 LOG_DIR_REL="${LOG_DIR_REL:-logs}"
 HEALTH_POLL_SECONDS="${HEALTH_POLL_SECONDS:-3}"
+# Services started by `up` and built by `build`. Listed explicitly because older
+# podman-compose releases ignore `profiles:` and would start the GPU toolbox-models service.
+DEV_SERVICES="${DEV_SERVICES:-postgres minio pgadmin backend-dev frontend-dev}"
+DEV_BUILD_SERVICES="${DEV_BUILD_SERVICES:-backend-dev frontend-dev}"
 POSTGRES_HEALTH_TIMEOUT="${POSTGRES_HEALTH_TIMEOUT:-180}"
 MINIO_HEALTH_TIMEOUT="${MINIO_HEALTH_TIMEOUT:-180}"
 BACKEND_HEALTH_TIMEOUT="${BACKEND_HEALTH_TIMEOUT:-300}"
@@ -26,6 +30,11 @@ FRONTEND_HEALTH_TIMEOUT="${FRONTEND_HEALTH_TIMEOUT:-240}"
 HOST_FRONTEND_URL="${HOST_FRONTEND_URL:-http://localhost:3000}"
 HOST_BACKEND_HEALTH_URL="${HOST_BACKEND_HEALTH_URL:-http://localhost:8000/api/health}"
 HOST_MINIO_LIVE_URL="${HOST_MINIO_LIVE_URL:-http://localhost:9000/minio/health/live}"
+
+# Extra CA certificates for networks with TLS inspection (corporate proxies).
+# Host CAs from EXTRA_CA_CERT_SOURCE are staged into certs/ before builds.
+EXTRA_CA_CERT_SOURCE="${EXTRA_CA_CERT_SOURCE:-/usr/local/share/ca-certificates}"
+EXTRA_CA_CERTS_AUTO="${EXTRA_CA_CERTS_AUTO:-true}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -74,6 +83,17 @@ can_run() {
 }
 
 sense_container_engine() {
+  # Allow an explicit override for machines with both engines installed
+  # (e.g. podman kept around for unrelated tooling, Docker Desktop for this project).
+  if [[ -n "${CONTAINER_RUNTIME:-}" ]]; then
+    if ! command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1 || ! can_run "$CONTAINER_RUNTIME" info; then
+      echo "Error: CONTAINER_RUNTIME=$CONTAINER_RUNTIME is set but '$CONTAINER_RUNTIME' is not installed/reachable." >&2
+      exit 1
+    fi
+    RUNTIME_CMD="$CONTAINER_RUNTIME"
+    return
+  fi
+
   local docker_ok=0 podman_ok=0
   if command -v docker >/dev/null 2>&1 && can_run docker info; then docker_ok=1; fi
   if command -v podman >/dev/null 2>&1 && can_run podman info; then podman_ok=1; fi
@@ -129,45 +149,83 @@ print_environment_summary() {
   echo "  Runtime CLI:           $RUNTIME_CMD"
   echo "  Compose mode:          $COMPOSE_MODE (${COMPOSE_BIN[*]})"
   echo "  Compose file:          $COMPOSE_FILE"
+  echo "  Extra CA certs:        $(count_extra_ca_certs) in certs/"
+}
+
+count_extra_ca_certs() {
+  find "$PROJECT_ROOT/certs" -maxdepth 1 -type f \( -name '*.crt' -o -name '*.pem' \) 2>/dev/null | wc -l | tr -d ' '
+}
+
+stage_extra_ca_certs() {
+  # Copy host CA certificates into certs/ so Dockerfile.dev can trust them.
+  # Identical files are skipped to keep the build cache valid.
+  [[ "$EXTRA_CA_CERTS_AUTO" == "true" ]] || return 0
+  [[ -d "$EXTRA_CA_CERT_SOURCE" ]] || return 0
+  mkdir -p "$PROJECT_ROOT/certs"
+  local src dest staged=0
+  while IFS= read -r -d '' src; do
+    dest="$PROJECT_ROOT/certs/$(basename "$src")"
+    if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
+      cp "$src" "$dest"
+      staged=$((staged + 1))
+    fi
+  done < <(find -L "$EXTRA_CA_CERT_SOURCE" -maxdepth 1 -type f \( -name '*.crt' -o -name '*.pem' \) -print0 2>/dev/null)
+  if [[ "$staged" -gt 0 ]]; then
+    echo "Staged $staged CA certificate(s) from $EXTRA_CA_CERT_SOURCE into certs/"
+  fi
+}
+
+service_container() {
+  # Resolve a compose service to its container name via the standard compose label.
+  # Works with docker compose and every podman-compose version (no `compose ps` flags needed).
+  "$RUNTIME_CMD" ps -a --filter "label=com.docker.compose.service=$1" --format '{{.Names}}' 2>/dev/null | head -n 1
+}
+
+container_health() {
+  # Prints "<state> <health>", e.g. "running healthy" or "running " (no healthcheck).
+  local name="$1"
+  "$RUNTIME_CMD" inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name" 2>/dev/null ||
+    "$RUNTIME_CMD" inspect --format '{{.State.Status}} {{.State.Healthcheck.Status}}' "$name" 2>/dev/null ||
+    echo "unknown "
 }
 
 wait_for_service_health() {
-  local service="$1" timeout_seconds="${2:-180}" elapsed=0
-  printf " ✔ Container %-20s Waiting                                    0.0s\n" "$service"
+  local service="$1" timeout_seconds="${2:-180}" elapsed=0 name="" state="" health=""
+  printf "  Container %-20s Waiting\n" "$service"
 
   while [[ "$elapsed" -lt "$timeout_seconds" ]]; do
-    local status
-    status="$(compose ps --format json "$service" 2>/dev/null | python -c "import json,sys,re
-raw=json.load(sys.stdin)
-rows=raw if isinstance(raw,list) else ([raw] if isinstance(raw,dict) else [])
-row=rows[0] if rows else {}
-health=(str(row.get('Health') or '')).strip().lower()
-state=(str(row.get('State') or '')).strip().lower()
-status=(str(row.get('Status') or '')).strip().lower()
-if health:
-    print(health)
-elif 'healthy' in status or '(healthy)' in status:
-    print('healthy')
-elif 'unhealthy' in status or '(unhealthy)' in status:
-    print('unhealthy')
-elif state:
-    print(state)
-else:
-    print('unknown')" 2>/dev/null || echo unknown)"
-    case "$status" in
-      healthy) printf " ✔ Container %-20s Healthy                                    %ss\n" "$service" "$elapsed"; return 0 ;;
-      unhealthy)
-        echo "  ✗ $service is unhealthy. Recent logs:"
-        compose logs --tail=50 "$service" || true
-        return 1
-        ;;
-      *) sleep "$HEALTH_POLL_SECONDS"; elapsed=$((elapsed + HEALTH_POLL_SECONDS)) ;;
-    esac
+    name="$(service_container "$service")"
+    if [[ -n "$name" ]]; then
+      # Podman only runs healthchecks on a timer when systemd is available, which is
+      # often not the case under WSL2. Run the check directly so status advances.
+      if [[ "$RUNTIME_CMD" == "podman" ]]; then
+        podman healthcheck run "$name" >/dev/null 2>&1 || true
+      fi
+      read -r state health <<<"$(container_health "$name")"
+      case "$state" in
+        exited|dead|stopped)
+          echo "  $service container ($name) is $state. Recent logs:"
+          "$RUNTIME_CMD" logs --tail 50 "$name" 2>&1 || true
+          return 1
+          ;;
+        running)
+          if [[ "$health" == "healthy" || -z "$health" ]]; then
+            printf "  Container %-20s Ready (%ss)\n" "$service" "$elapsed"
+            return 0
+          fi
+          ;;
+      esac
+    fi
+    sleep "$HEALTH_POLL_SECONDS"
+    elapsed=$((elapsed + HEALTH_POLL_SECONDS))
   done
 
-  echo "Timed out waiting for $service to become healthy."
-  compose ps "$service" || true
-  compose logs --tail=50 "$service" || true
+  echo "Timed out after ${timeout_seconds}s waiting for $service (state: ${state:-not created}, health: ${health:-none})."
+  if [[ -n "$name" ]]; then
+    "$RUNTIME_CMD" logs --tail 50 "$name" 2>&1 || true
+  else
+    echo "No container exists for $service. Check the compose output above for the error."
+  fi
   return 1
 }
 
@@ -225,8 +283,10 @@ sense_compose_mode
 
 case "${1:-up}" in
   up)
+    stage_extra_ca_certs
     print_environment_summary
-    compose up -d
+    # shellcheck disable=SC2086
+    compose up -d $DEV_SERVICES
     wait_for_service_health postgres "$POSTGRES_HEALTH_TIMEOUT"
     wait_for_service_health minio "$MINIO_HEALTH_TIMEOUT"
     wait_for_service_health backend-dev "$BACKEND_HEALTH_TIMEOUT"
@@ -248,7 +308,8 @@ case "${1:-up}" in
   test) compose exec backend-dev bash -c "cd /app/backend && pytest tests/"; compose exec frontend-dev npm test -- --watchAll=false ;;
   shell) compose exec "${2:-backend-dev}" bash ;;
   migrate) compose exec backend-dev bash -c "cd /app/backend && alembic upgrade head" ;;
-  build) compose build "${2:-}" ;;
+  # shellcheck disable=SC2086
+  build) stage_extra_ca_certs; compose build ${2:-$DEV_BUILD_SERVICES} ;;
   ps) compose ps ;;
   *) echo "Usage: $0 {up|down|restart|logs|test|shell|migrate|build|ps|verify}"; exit 1 ;;
 esac

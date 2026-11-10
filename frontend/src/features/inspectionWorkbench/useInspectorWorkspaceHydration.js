@@ -5,7 +5,6 @@ import {
   DEFAULT_PRIMARY_IMAGE_FILTER_KEY,
   DEFAULT_SECONDARY_IMAGE_FILTER_KEY,
 } from './inspectionConstants';
-import { normalizeTileViewportTransform } from './inspectionUtils';
 import { getDiscoveredModalities, getModalities } from './partImageRefs';
 
 /**
@@ -21,7 +20,6 @@ export default function useInspectorWorkspaceHydration({
   setHiddenPrimaryImageFilterValues,
   setHiddenSecondaryImageFilterValues,
   setImageEnabled,
-  setInspectorViewport,
   setMeasurementEntries,
   setModalityImageFilterKey,
   setNormalizationTriageField,
@@ -78,11 +76,10 @@ export default function useInspectorWorkspaceHydration({
     );
     setImageEnabled(typeof savedInspector.image_enabled === 'boolean' ? savedInspector.image_enabled : true);
     setMeasurementEntries(normalizeSavedMeasurements(savedInspector.measurements));
-    const savedInspectorViewport = savedInspector.viewport_transform || {};
-    setInspectorViewport(normalizeTileViewportTransform(savedInspectorViewport));
     setAnnotationDraft({
       defect_class: '',
-      modality: (isAllImagesSelection ? aggregateLoadedModalities[0] : getModalities(selectedPart)[0]) || 'visual',
+      // Pre-select a modality the user's own images use; never invent one.
+      modality: (isAllImagesSelection ? aggregateLoadedModalities[0] : getModalities(selectedPart)[0]) || '',
       comment: '',
       disposition: 'open',
       measurement_name: '',
@@ -99,8 +96,7 @@ export default function useInspectorWorkspaceHydration({
     setHiddenSecondaryImageFilterValues,
     setImageEnabled,
     workspaceHydration,
-    setInspectorViewport,
-    setMeasurementEntries,
+      setMeasurementEntries,
     setModalityImageFilterKey,
     setNormalizationTriageField,
     setPrimaryImageFilterKey,

@@ -19,11 +19,9 @@ function resolveFullscreenIdentity(ctx) {
     const fullscreenAnnotationLookupKey = isMprFullscreen
       ? fullscreenMprSliceKey
       : fullscreenAnnotationSourceImageId;
-    const fullscreenBaseImageId = String(fullscreenImageModal.baseImageId || (
-      fullscreenAnnotationSourceImageId && fullscreenAnnotationSourceImageId !== fullscreenImageId
-        ? fullscreenAnnotationSourceImageId
-        : ''
-    ));
+    // The base image is only a visual backdrop for an overlay; annotations
+    // stay keyed to the overlay's own image id.
+    const fullscreenBaseImageId = String(fullscreenImageModal.baseImageId || '');
     const fullscreenImageRecord = projectImageLookup[fullscreenImageId] || {};
   return {
     isMprFullscreen,
@@ -205,7 +203,6 @@ function buildFullscreenMprLayout(ctx) {
 	    const fullscreenOverlayHeight = fullscreenMprImageDimensions?.height
 	      || Math.max(1, Number(fullscreenOverlayGeometry?.imageHeight) || 1000);
 	    const fullscreenOverlayViewBox = `0 0 ${fullscreenOverlayWidth} ${fullscreenOverlayHeight}`;
-	    const fullscreenOverlayContentTransform = `scale(${fullscreenOverlayWidth / 1000} ${fullscreenOverlayHeight / 1000})`;
 	    const fullscreenCanonicalSliceIndex = isMprFullscreen
 	      ? getSegmentationCanonicalSliceIndex(
 	        fullscreenImageModal.axis,
@@ -229,7 +226,6 @@ function buildFullscreenMprLayout(ctx) {
     fullscreenOverlayWidth,
     fullscreenOverlayHeight,
     fullscreenOverlayViewBox,
-    fullscreenOverlayContentTransform,
     fullscreenCanonicalSliceIndex,
     fullscreenSegmentAnnotations,
   };

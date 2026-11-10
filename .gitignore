@@ -235,3 +235,7 @@ yolov8n.pt
 .claude/
 .opencode-workspace/
 .codex/
+# Local extra CA certificates for dev container builds (never commit)
+certs/*
+!certs/.gitkeep
+!certs/README.md

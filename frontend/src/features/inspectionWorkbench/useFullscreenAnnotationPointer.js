@@ -14,6 +14,7 @@ import useFullscreenImageViewport from './useFullscreenImageViewport';
 import { isMiddleMousePanEvent, stopMiddleMouseDefault } from './inspectionUtils';
 import { FULLSCREEN_IMAGE_ZOOM_MAX, FULLSCREEN_IMAGE_ZOOM_MIN, MIDDLE_MOUSE_BUTTON } from './inspectionConstants';
 import { makeBoxFromPoints } from './inspectionAnnotationGeometry';
+import { commitDraggedGeometry } from './annotationDragCommit';
 
 export function useFullscreenAnnotationPointer({
   fullscreenSession,
@@ -229,12 +230,16 @@ export function useFullscreenAnnotationPointer({
     event.preventDefault();
     event.stopPropagation();
     safeReleasePointerCapture(drag.captureTarget, drag.pointerId);
-    const preview = fullscreenGeometryDragPreviewRef.current;
     fullscreenAnnotationDragRef.current = null;
-    setFullscreenDragPreview(null);
-    if (cancel || !preview?.geometry) return;
-    if (preview.kind === 'line') await updateMeasurementAnnotationLine(preview.geometry.id, preview.geometry);
-    if (preview.kind === 'box') await updateBoxAnnotationGeometry(preview.geometry.id, preview.geometry);
+    await commitDraggedGeometry({
+      preview: fullscreenGeometryDragPreviewRef.current,
+      source: drag.source,
+      cancel,
+      previewRef: fullscreenGeometryDragPreviewRef,
+      setPreview: setFullscreenDragPreview,
+      updateMeasurementAnnotationLine,
+      updateBoxAnnotationGeometry,
+    });
   };
 
   const closeFullscreenImageModal = () => {

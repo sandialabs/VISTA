@@ -162,13 +162,16 @@ def test_overlay_assignment_moves_overlay_and_detaches_stale_copy(client):
     target_records = parts[target_part]["metadata"]["source_images"]
     overlay_record = next(r for r in target_records if r["filename"] == "heat.png")
     assert overlay_record["overlay"] is True
-    assert overlay_record["side"] == "back"
-    assert overlay_record["modality"] == "heat"
+    # Pairing is explicit; the overlay's own metadata is kept verbatim and is
+    # neither lower-cased nor inherited from the base image.
+    assert "side" not in overlay_record
+    assert overlay_record["modality"] == "Heat"
     assert overlay_record["overlay_base_filename"] == "base.png"
     assert overlay_record["overlay_base_image_id"] == base["id"]
-    assert parts[target_part]["metadata"]["overlay_images"] == {
-        "back": {"heat": "heat.png"}
-    }
+    base_record = next(r for r in target_records if r["filename"] == "base.png")
+    assert base_record["side"] == "Back"
+    assert base_record["modality"] == "vis"
+    assert "overlay_images" not in parts[target_part]["metadata"]
 
 
 def test_overlay_assignment_without_base_detaches_overlay(client):

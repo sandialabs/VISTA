@@ -4,7 +4,6 @@ import {
   getAggregateLayerAvailability,
   getAggregateModalities,
   getAggregatePartImageRefs,
-  getAggregateViews,
   getAllLoadedImageRefModalities,
   getModalities,
   getPartImageRefs,
@@ -25,10 +24,6 @@ export default function useInspectionImageCollection({
   const aggregatePartImageRefs = useMemo(
     () => getAggregatePartImageRefs(filteredParts, projectImageLookup),
     [filteredParts, projectImageLookup],
-  );
-  const aggregateViews = useMemo(
-    () => getAggregateViews(aggregatePartImageRefs),
-    [aggregatePartImageRefs],
   );
   const aggregateModalities = useMemo(
     () => getAggregateModalities(aggregatePartImageRefs, projectConfiguration),
@@ -65,7 +60,6 @@ export default function useInspectionImageCollection({
     aggregateLoadedModalities,
     aggregateModalities,
     aggregatePartImageRefs,
-    aggregateViews,
     modalityOptions,
     selectedPartImageRefs,
   };

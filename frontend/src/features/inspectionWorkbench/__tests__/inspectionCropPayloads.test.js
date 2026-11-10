@@ -19,11 +19,13 @@ describe('inspectionCropPayloads', () => {
     const parent = resolveCropParent({
       parentImageId: ' img-1 ', cropBox, title: '', selectedPart, projectImageLookup: { 'img-1': { filename: 'part.png' } },
     });
-    expect(parent).toMatchObject({ canonicalParentImageId: 'img-1', parentFilename: 'part.png', parentModality: 'xray' });
+    // The parent's user modality is inherited verbatim (not lower-cased).
+    expect(parent).toMatchObject({ canonicalParentImageId: 'img-1', parentFilename: 'part.png', parentModality: 'XRay' });
     expect(typeof parent.cropFilename).toBe('string');
     expect(parent.cropTitle).toBeTruthy();
     expect(resolveCropParent({ parentImageId: 'x', cropBox, title: 'Mine', selectedPart, projectImageLookup: {} }))
-      .toMatchObject({ parentFilename: 'x', parentModality: 'visual', cropTitle: 'Mine' });
+      // No modality is invented when the parent has none.
+      .toMatchObject({ parentFilename: 'x', parentModality: '', cropTitle: 'Mine' });
   });
 
   test('scales and clamps the source rectangle to the natural image size', () => {
@@ -38,10 +40,16 @@ describe('inspectionCropPayloads', () => {
     });
     expect(metadata).toMatchObject({
       crop_child_image: true, parent_image_id: 'img-1', crop_annotation_id: '5', crop_subtitle: '', part_id: 'p1',
-      serial_number: 'SN', modality: 'visual', side: 'crop', crop_bbox: { x: 10, imageWidth: 640, imageHeight: 200 },
+      serial_number: 'SN', modality: 'visual', crop_bbox: { x: 10, imageWidth: 640, imageHeight: 200 },
     });
+    // Crops are identified by crop_child_image, not by a fabricated side value.
+    expect(metadata).not.toHaveProperty('side');
     const entry = buildCropSourceEntry({ createdImage: { id: 9 }, parent, cropAnnotationId: '', cropBbox: metadata.crop_bbox });
     expect(entry).toMatchObject({ filename: 'crop.png', image_id: '9', overlay: false, crop_annotation_id: '', crop_bbox: metadata.crop_bbox });
+    expect(entry).not.toHaveProperty('side');
+    const noModalityParent = { ...parent, parentModality: '' };
+    expect(buildCropSourceEntry({ createdImage: { id: 10 }, parent: noModalityParent, cropAnnotationId: '', cropBbox: {} }))
+      .not.toHaveProperty('modality');
     const parts = [{ id: 'p1', metadata: { source_images: [{ image_id: '9' }, { filename: 'a.png' }] } }, { id: 'p2' }];
     const next = appendCropSourceEntry(parts, 'p1', entry);
     expect(next[0].metadata.source_images).toEqual([{ filename: 'a.png' }, entry]);

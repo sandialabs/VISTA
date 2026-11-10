@@ -192,9 +192,38 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 - **Native segmentation tests** (`VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true`) are off in the default suite and pass when enabled. The SAM and Anomalib smoke tests assert the built-in runtimes' own names (`RuntimeSAMSegmentation`, `RuntimeSAMSegmentationInput`, `vista.patchcore`). The YOLO tests need `yolo11n-seg.pt` (a segmentation model, not `yolov8n.pt`) in `checkpoints/`, the repository root, and `backend/`, or network access to download it; they compare boxes and confidences with a tolerance because inference output varies by machine.
 - **E2E specs run against the production container** (`E2E_BASE_URL`), whose Content-Security-Policy is `connect-src 'self'`: do not `fetch()` `data:` URLs in page code or helpers; decode with `atob` and `createImageBitmap`.
 
+## Dev Container Extra CA Certificates
+
+- On networks with TLS inspection (Zscaler), dev image builds fail with `CERTIFICATE_VERIFY_FAILED`. `scripts/dev.sh` stages host CAs from `EXTRA_CA_CERT_SOURCE` (default `/usr/local/share/ca-certificates`; disable with `EXTRA_CA_CERTS_AUTO=false`) into the gitignored `certs/` directory before `up`/`build`.
+- `Dockerfile.dev` copies `certs/` into the trust store before any network fetch and sets `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`, `NODE_EXTRA_CA_CERTS`, and `UV_NATIVE_TLS=true`. With no certs staged it behaves as before. `certs/.gitkeep` must stay tracked (`.dockerignore` drops `*.md`).
+- Fix TLS errors by adding CAs, never with `--trusted-host`, `--insecure`, or `strict-ssl=false`. `backend/tests/test_dev_container_ca_config.py` guards this. The production `Dockerfile` does not consume `certs/`.
+- Compose files and `deployment-test/` use fully qualified image names (`docker.io/library/postgres:15`); Podman without unqualified-search registries rejects short names. `test_container_build_config.py` guards this.
+- `scripts/dev.sh` works with podman-compose 1.0.6: it starts `DEV_SERVICES` / builds `DEV_BUILD_SERVICES` explicitly (old podman-compose ignores `profiles:`, which would start the GPU `toolbox-models` service), and waits for health via `podman|docker inspect` on the `com.docker.compose.service` label, running `podman healthcheck run` each poll because Podman healthcheck timers need systemd (often absent in WSL2).
+- Podman passes host `http_proxy`/`no_proxy` into containers by default, which sends `http://minio:9000` to a corporate proxy (`RemoteDisconnected`). `backend-dev`, `frontend-dev`, and `backend-test` set `NO_PROXY`/`no_proxy` listing the compose hostnames; add new service hostnames there.
+
 ## Useful References
 
 - High‑level overview & quick start: `README.md`.
 - Detailed backend/frontend/infra docs: `docs/developer-guide.md`.
 - ML API details: `docs/api-ml-guide.md` and `scripts/README_YOLOV8.md`.
 - Existing AI guidance for this repo: `CLAUDE.md` (good architectural summary -- keep new patterns aligned).
+
+## Inspection Tile Highlight
+
+- The Inspection View Parts board highlights only one tile for the selected annotation/overlay item, resolved once per board by `findHighlightedInspectionTileId` in `frontend/src/features/inspectionWorkbench/inspectionTileHighlight.js` and passed to tiles as `isHighlighted`. Same-view overlays sharing a base image are not highlighted together.
+
+## Inspection Annotation Ownership
+
+- Each annotation belongs only to the image it was drawn on. `getAnnotationSourceImageId` (`frontend/src/features/inspectionWorkbench/partImageRefs.js`) returns the tile's own image id; overlays with `overlay_base_image_id`, Analyze outputs, and same-view images in other modalities do not render, save to, or highlight the base image's annotations. The base image is still drawn under an overlay as a visual backdrop only. Do not reintroduce a base-image lookup for annotation ownership.
+
+## Inspection Draw Tools Own the Pointer
+
+- While Measure, Draw box, or Crop is active, existing shapes render without move/edit hit targets in both fullscreen (`FullscreenAnnotationHandles.js`) and tiles (`annotationDrawToolActive` in `centerPaneProps.js`), so users can draw over existing annotations. Any hit target layered above the fullscreen `<img>` triggers its `onMouseLeave` and cancels the tool.
+
+## Inspection Shape Drag Commit
+
+- Tile, fullscreen, and MPR shape drags save through `commitDraggedGeometry` (`frontend/src/features/inspectionWorkbench/annotationDragCommit.js`), which keeps the drag preview at the drop position until the PATCH resolves. Clearing the preview before the save lands makes the shape flash back to its original position.
+
+## Inspection Annotation Overlay Scaling
+
+- Annotation overlays (tile, fullscreen, MPR) use `AnnotationOverlaySvg` and a uniform design-unit frame from `frontend/src/features/inspectionWorkbench/annotationOverlayFrame.js`, so line thickness, handle dots, and label text are identical across image aspect ratios. Pass `frame` to the annotation renderers and project coordinates with the frame helpers; never wrap annotation content in a non-uniform `scale(w/1000 h/1000)` group.

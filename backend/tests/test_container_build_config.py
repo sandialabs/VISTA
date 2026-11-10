@@ -1,5 +1,6 @@
 """Contract tests for the production container build configuration."""
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -105,3 +106,17 @@ def test_minio_services_use_a_pullable_image_and_a_curl_free_healthcheck():
         assert "image: cgr.dev/chainguard/minio" in content, relative_path
         # The Chainguard image ships no curl; use MinIO's own readiness check.
         assert "minio/health/live" not in content, relative_path
+
+
+def test_compose_and_manifest_images_use_fully_qualified_names():
+    """Podman without unqualified-search registries rejects short names like postgres:15."""
+    for relative_path in (
+        "docker-compose.yml",
+        "docker-compose.dev.yml",
+        "docker-compose.test.yml",
+        "deployment-test/postgres.yaml",
+        "deployment-test/minio.yaml",
+    ):
+        for image in re.findall(r"^\s*image:\s*(\S+)", _read_repo_file(relative_path), re.MULTILINE):
+            registry = image.split("/", 1)[0]
+            assert "/" in image and ("." in registry or ":" in registry), f"{relative_path}: {image}"

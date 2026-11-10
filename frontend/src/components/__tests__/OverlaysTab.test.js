@@ -134,6 +134,36 @@ describe('OverlaysTab', () => {
     expect(buckets.unassignedOverlays.map((image) => image.filename)).toEqual(['loose.png']);
   });
 
+  test('never infers an overlay base from matching side or from a single base image', () => {
+    const buckets = buildOverlayBuckets({
+      parts: [{
+        id: 'part-1',
+        metadata: { source_images: [
+          { filename: 'front.png', image_id: 'front-id', side: 'front', overlay: false },
+          { filename: 'mask.png', image_id: 'mask-id', side: 'FRONT', overlay: true },
+        ] },
+      }, {
+        id: 'part-2',
+        metadata: { source_images: [
+          { filename: 'only.png', image_id: 'only-id', overlay: false },
+          { filename: 'loose.png', image_id: 'loose-id', overlay: true },
+        ] },
+      }],
+      images: [
+        { id: 'front-id', filename: 'front.png' },
+        { id: 'mask-id', filename: 'mask.png' },
+        { id: 'only-id', filename: 'only.png' },
+        { id: 'loose-id', filename: 'loose.png' },
+      ],
+    });
+
+    expect(buckets.baseBuckets.every((bucket) => bucket.overlays.length === 0)).toBe(true);
+    expect(buckets.baseBuckets.map((bucket) => bucket.image)).toEqual(
+      expect.arrayContaining([expect.not.objectContaining({ side: expect.anything() })]),
+    );
+    expect(buckets.unassignedOverlays.map((image) => image.filename).sort()).toEqual(['loose.png', 'mask.png']);
+  });
+
   test('treats Analyze outputs as assigned overlays for their source image', () => {
     const buckets = buildOverlayBuckets({
       parts: [{

@@ -625,8 +625,9 @@ def test_soft_delete_image_removes_inspection_part_references(client):
     assert parts_r.status_code == 200
     metadata = parts_r.json()[0]["metadata"]
     assert metadata["source_images"] == []
-    assert metadata["view_images"] == {}
-    assert metadata["overlay_images"] == {}
+    # No derived grouping keys are synthesized from user metadata.
+    for derived_key in ("configured_views", "modalities", "view_images", "overlay_images"):
+        assert derived_key not in metadata
 
 
 def test_reference_cleanup_preserves_different_image_with_duplicate_filename():
@@ -674,8 +675,60 @@ def test_reference_cleanup_preserves_different_image_with_duplicate_filename():
             "overlay": False,
         }
     ]
-    assert updated["configured_views"] == ["back"]
-    assert updated["view_images"] == {"back": "duplicate.png"}
+    assert "configured_views" not in updated
+    assert "modalities" not in updated
+    assert "view_images" not in updated
+
+
+def test_reference_cleanup_preserves_user_metadata_and_prunes_only_removed_legacy_refs():
+    deleted_image_id = uuid.uuid4()
+    retained_image_id = uuid.uuid4()
+
+    updated = image_deletion_service._metadata_without_image_reference(
+        {
+            "source_images": [
+                {"image_id": str(deleted_image_id), "filename": "gone.png", "side": "A"},
+                {
+                    "image_id": str(retained_image_id),
+                    "filename": "kept.png",
+                    "side": "B",
+                    "view": 18,
+                    "modality": "Optical",
+                    "overlay": "false",
+                },
+            ],
+            "configured_views": ["a", "b"],
+            "modalities": ["optical"],
+            "view_images": {
+                "a": "gone.png",
+                "b": {"image_id": str(retained_image_id), "filename": "kept.png"},
+                "legacy": "never-mirrored.png",
+            },
+            "overlay_images": {"a": {"heat": "gone.png"}, "b": {"heat": "kept.png"}},
+        },
+        filename="gone.png",
+        image_id=deleted_image_id,
+    )
+
+    assert updated is not None
+    assert updated["source_images"] == [
+        {
+            "image_id": str(retained_image_id),
+            "filename": "kept.png",
+            "side": "B",
+            "view": 18,
+            "modality": "Optical",
+            "overlay": False,
+        }
+    ]
+    assert updated["view_images"] == {
+        "b": {"image_id": str(retained_image_id), "filename": "kept.png"},
+        "legacy": "never-mirrored.png",
+    }
+    assert updated["overlay_images"] == {"b": {"heat": "kept.png"}}
+    # Pre-existing legacy group keys are left as stored, never recomputed.
+    assert updated["configured_views"] == ["a", "b"]
+    assert updated["modalities"] == ["optical"]
 
 
 def test_soft_delete_image_removes_unreferenced_associated_project_metadata(client):

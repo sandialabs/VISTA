@@ -19,7 +19,14 @@ export const resolveCropParent = ({ parentImageId, cropBox, title, selectedPart,
     .find((record) => (
       String(record?.image_id || '').trim() === canonicalParentImageId
     ));
-  const parentModality = String(parentImage.modality || parentImage.metadata?.modality || parentSourceRecord?.modality || parentSourceRecord?.metadata?.modality || 'visual').trim().toLowerCase() || 'visual';
+  // A crop inherits its parent's user-supplied modality verbatim when one
+  // exists; VISTA never invents a value for it.
+  const parentModality = [
+    parentSourceRecord?.modality,
+    parentSourceRecord?.metadata?.modality,
+    parentImage.modality,
+    parentImage.metadata?.modality,
+  ].find((value) => value !== undefined && value !== null && value !== '') ?? '';
   return {
     canonicalParentImageId,
     parentFilename,
@@ -76,15 +83,13 @@ export const buildCropMetadata = ({ parent, cropAnnotationId, cropBox, naturalWi
   },
   part_id: String(selectedPart.id),
   serial_number: selectedPart.serial_number || '',
-  modality: parent.parentModality,
-  side: 'crop',
+  ...(parent.parentModality !== '' ? { modality: parent.parentModality } : {}),
 });
 
 export const buildCropSourceEntry = ({ createdImage, parent, cropAnnotationId, cropBbox }) => ({
   filename: createdImage.filename || parent.cropFilename,
   image_id: String(createdImage.id || ''),
-  side: 'crop',
-  modality: parent.parentModality,
+  ...(parent.parentModality !== '' ? { modality: parent.parentModality } : {}),
   overlay: false,
   crop_child_image: true,
   parent_image_id: parent.canonicalParentImageId,

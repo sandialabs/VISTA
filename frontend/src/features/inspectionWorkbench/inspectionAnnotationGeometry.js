@@ -1,3 +1,9 @@
+import {
+  DEFAULT_ANNOTATION_FRAME,
+  projectAnnotationLine,
+  projectAnnotationX,
+  projectAnnotationY,
+} from './annotationOverlayFrame';
 import { MM_PER_INCH } from '../../utils/calibration';
 
 export function makeMprCubeVertices(axis, firstBox, secondBox) {
@@ -121,41 +127,21 @@ export function getCropUploadFilename(annotation, parentImageName) {
   return `${sanitizeCropFilename(title)}.png`;
 }
 
-export function getTextCounterScaleTransform(x, y, imageWidth, imageHeight, rotationDegrees = 0) {
-  const scaleX = Number(imageWidth) / 1000;
-  const scaleY = Number(imageHeight) / 1000;
-  const safeScaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1;
-  const safeScaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1;
-  // Counter-scale glyphs by the inverse aspect ratio so the ambient non-uniform
-  // scale(scaleX, scaleY) applied by the parent <g> stops stretching text, while
-  // the geometric-mean target keeps the rendered size unchanged for square images
-  // (scaleX === scaleY) and keeps (x, y) fixed so registration stays pixel-perfect.
-  const sx = Math.sqrt(safeScaleY / safeScaleX);
-  const sy = Math.sqrt(safeScaleX / safeScaleY);
-  const rotation = rotationDegrees ? ` rotate(${rotationDegrees} ${x} ${y})` : '';
-  return `translate(${x} ${y}) scale(${sx} ${sy}) translate(${-x} ${-y})${rotation}`;
-}
-
-export function getMeasurementLabelViewBoxPosition(line, fontSize = 20) {
-  const x = ((Number(line.x1) + Number(line.x2)) / (2 * Number(line.imageWidth))) * 1000;
-  const y = ((Number(line.y1) + Number(line.y2)) / (2 * Number(line.imageHeight))) * 1000 - 6;
+export function getMeasurementLabelViewBoxPosition(line, fontSize = 20, frame = DEFAULT_ANNOTATION_FRAME) {
+  const x = projectAnnotationX((Number(line.x1) + Number(line.x2)) / 2, line.imageWidth, frame);
+  const y = projectAnnotationY((Number(line.y1) + Number(line.y2)) / 2, line.imageHeight, frame) - 6;
   const inset = Math.max(12, fontSize + 4);
   return {
-    x: Math.min(980, Math.max(20, x)),
-    y: Math.min(980, Math.max(inset, y)),
+    x: Math.min(frame.width - 20, Math.max(20, x)),
+    y: Math.min(frame.height - 20, Math.max(inset, y)),
   };
 }
 
-export function getMeasurementEndpointViewBoxPosition(line) {
+export function getMeasurementEndpointViewBoxPosition(line, frame = DEFAULT_ANNOTATION_FRAME) {
+  const projected = projectAnnotationLine(line, frame);
   return {
-    start: {
-      x: (Number(line.x1) / Number(line.imageWidth)) * 1000,
-      y: (Number(line.y1) / Number(line.imageHeight)) * 1000,
-    },
-    end: {
-      x: (Number(line.x2) / Number(line.imageWidth)) * 1000,
-      y: (Number(line.y2) / Number(line.imageHeight)) * 1000,
-    },
+    start: { x: projected.x1, y: projected.y1 },
+    end: { x: projected.x2, y: projected.y2 },
   };
 }
 
@@ -172,13 +158,11 @@ export function getAnnotationBoxCornerPoints(box) {
   };
 }
 
-export function getAnnotationBoxCornerViewBoxPosition(box) {
-  const imageWidth = Number(box?.imageWidth);
-  const imageHeight = Number(box?.imageHeight);
+export function getAnnotationBoxCornerViewBoxPosition(box, frame = DEFAULT_ANNOTATION_FRAME) {
   return Object.entries(getAnnotationBoxCornerPoints(box)).reduce((acc, [corner, point]) => {
     acc[corner] = {
-      x: (point.x / imageWidth) * 1000,
-      y: (point.y / imageHeight) * 1000,
+      x: projectAnnotationX(point.x, box?.imageWidth, frame),
+      y: projectAnnotationY(point.y, box?.imageHeight, frame),
     };
     return acc;
   }, {});

@@ -4730,7 +4730,10 @@ def test_overlay_assignment_maps_overlay_to_base_image(client):
     assert overlay_records[0]["filename"] == "overlay.png"
     assert overlay_records[0]["overlay_base_filename"] == "base.png"
     assert overlay_records[0]["overlay_base_image_id"] == base["id"]
-    assert overlay_records[0]["side"] == "front"
+    # Explicit pairing only: the overlay keeps its own metadata and does not
+    # inherit the base image's side.
+    assert "side" not in overlay_records[0]
+    assert overlay_records[0]["modality"] == "heatmap"
 
 
 def test_volume_assignment_preserves_scalar_source_and_rgba_overlay_layout(client):
@@ -6023,7 +6026,10 @@ def test_part_image_assignments_transform_fresh_locked_source_records(
     if assignment_kind == "overlay":
         assert moved_record["overlay_base_image_id"] == base["id"]
         assert moved_record["overlay"] is True
-        assert moved_record["side"] == "fresh-front"
+        # The overlay is paired explicitly by id and keeps its own metadata;
+        # it does not inherit the base image's side.
+        assert "side" not in moved_record
+        assert moved_record["modality"] == "mask"
 
 
 def _png_bytes(color):
@@ -6192,13 +6198,14 @@ def test_multi_part_multi_modality_overlay_project_can_be_reset_to_empty(
     for part in populated_parts_resp.json():
         metadata = part["metadata"]
         assert len(metadata["source_images"]) == 3
-        expected_top_view = next(
-            record["filename"]
-            for record in metadata["source_images"]
-            if not record.get("overlay")
+        assert "view_images" not in metadata
+        assert "overlay_images" not in metadata
+        overlay_record = next(
+            record for record in metadata["source_images"] if record.get("overlay")
         )
-        assert metadata["view_images"] == {"top": expected_top_view}
-        assert metadata["overlay_images"]["top"]["mask"].endswith("mask-overlay.png")
+        assert overlay_record["filename"].endswith("mask-overlay.png")
+        assert overlay_record["side"] == "top"
+        assert overlay_record["modality"] == "mask"
         assert len(metadata["annotations"]) == 1
 
     images_resp = client.get(f"/api/projects/{project_id}/images", headers=headers)

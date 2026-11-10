@@ -1,4 +1,5 @@
 import { getMetadataFilterValue } from './imageLookup';
+import { isSystemPlaceholderModality } from './partImageRefs';
 
 function filterImageRefsByVisibility({
   annotationsVisible,
@@ -41,11 +42,13 @@ function filterImageRefsByVisibility({
       effectiveSecondaryImageFilterKey
       && hiddenSecondary.has(getMetadataFilterValue(entry, effectiveSecondaryImageFilterKey, projectImageLookup))
     ) return false;
-    const modality = String(entry.modality || '').toLowerCase();
+    const modality = String(entry.modality ?? '').trim().toLowerCase();
+    // Visibility toggles only hide images whose own modality the user turned
+    // off. Images without a modality, and VISTA's own placeholder modalities,
+    // are never hidden by the toggles.
     const modalityVisible = entry.cropChild
       || !modality
-      || modality === 'analyze-overlay'
-      || modality === 'overlay'
+      || isSystemPlaceholderModality(entry)
       || (entry.overlay && configuredModalityIds.size > 0 && !configuredModalityIds.has(modality))
       || enabled.has(modality);
     if (!modalityVisible) return false;

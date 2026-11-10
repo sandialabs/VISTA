@@ -1,9 +1,19 @@
 import { InspectionImageTile } from './InspectionImageTile';
+import { findHighlightedInspectionTileId } from './inspectionTileHighlight';
 
 export function InspectionViewBoard({ tabKey, readOnly, selection, tileColumns, tileView, handlers }) {
   const {
     visibleSelectedPartImageRefs,
+    selectedInspectionItem,
+    selectedImageRef,
+    projectImageLookup,
   } = selection;
+  const highlightedTileId = findHighlightedInspectionTileId(
+    selectedInspectionItem,
+    visibleSelectedPartImageRefs,
+    selectedImageRef,
+    projectImageLookup,
+  );
   const {
     normalizedTileColumnCount,
   } = tileColumns;
@@ -27,6 +37,7 @@ export function InspectionViewBoard({ tabKey, readOnly, selection, tileColumns, 
                   entry={entry}
                   tabKey={tabKey}
                   readOnly={readOnly}
+                  isHighlighted={highlightedTileId !== '' && String(entry.id) === highlightedTileId}
                   selection={selection}
                   tileView={tileView}
                   handlers={handlers}

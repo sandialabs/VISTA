@@ -1,25 +1,38 @@
-import { getImageMetadataFilterOptions, getPreferredMetadataFilterKey, getMetadataFilterValuesForKey, getMetadataFilterKeySelectOptions } from './imageLookup';
-import { DEFAULT_PRIMARY_IMAGE_FILTER_KEY, DEFAULT_SECONDARY_IMAGE_FILTER_KEY, DEFAULT_MODALITY_IMAGE_FILTER_KEY } from './inspectionConstants';
+import {
+  getDefaultMetadataFilterKeys,
+  getImageMetadataFilterOptions,
+  getMetadataFilterDisplayValue,
+  getPreferredMetadataFilterKey,
+  getMetadataFilterValuesForKey,
+  getMetadataFilterKeySelectOptions,
+  SYSTEM_CATEGORY_FILTER_KEYS,
+} from './imageLookup';
+import { DEFAULT_SECONDARY_IMAGE_FILTER_KEY, MODALITY_METADATA_KEY } from './inspectionConstants';
 
 export function buildPartSummaryChipModel({
-  imageRefs,
-  modalities,
-  enabledModalities,
+  imageRefs = [],
+  modalities = [],
+  enabledModalities = [],
   projectImageLookup,
   effectivePrimaryImageFilterKey,
   effectiveSecondaryImageFilterKey,
   effectiveModalityImageFilterKey,
-  hiddenPrimaryImageFilterValues,
-  hiddenModalityImageFilterValues,
-  hiddenSecondaryImageFilterValues,
+  hiddenPrimaryImageFilterValues = [],
+  hiddenModalityImageFilterValues = [],
+  hiddenSecondaryImageFilterValues = [],
+  configuredImageFilterKeys = [],
 }) {
-  const enabledModalityKeys = enabledModalities.map((entry) => String(entry).toLowerCase());
+  const safeModalities = Array.isArray(modalities) ? modalities : [];
+  const enabledModalityKeys = (Array.isArray(enabledModalities) ? enabledModalities : [])
+    .map((entry) => String(entry).toLowerCase());
   const rowMetadataFilterOptions = getImageMetadataFilterOptions(imageRefs, projectImageLookup);
   const rowMetadataKeys = rowMetadataFilterOptions.keys;
+  const rowDefaultKeys = getDefaultMetadataFilterKeys(rowMetadataFilterOptions, configuredImageFilterKeys);
   const primaryFilterKey = getPreferredMetadataFilterKey(
     rowMetadataFilterOptions,
     effectivePrimaryImageFilterKey,
-    DEFAULT_PRIMARY_IMAGE_FILTER_KEY,
+    rowDefaultKeys.primary,
+    { allowAnyKey: false },
   );
   const secondaryFilterKey = getPreferredMetadataFilterKey(
     rowMetadataFilterOptions,
@@ -30,10 +43,14 @@ export function buildPartSummaryChipModel({
   const modalityFilterKey = getPreferredMetadataFilterKey(
     rowMetadataFilterOptions,
     effectiveModalityImageFilterKey,
-    DEFAULT_MODALITY_IMAGE_FILTER_KEY,
+    rowDefaultKeys.modality,
+    { allowAnyKey: false },
   );
-  const modalityFilterValues = modalityFilterKey === DEFAULT_MODALITY_IMAGE_FILTER_KEY
-    ? modalities.map((modality) => String(modality).toLowerCase()).filter(Boolean)
+  // The modality-visibility toggles apply only when the row groups by the
+  // user's own "modality" key; values come from the images themselves.
+  const isDefaultModalityFilter = modalityFilterKey === MODALITY_METADATA_KEY;
+  const modalityFilterValues = isDefaultModalityFilter
+    ? safeModalities.map((modality) => String(modality).toLowerCase()).filter(Boolean)
     : getMetadataFilterValuesForKey(rowMetadataFilterOptions, modalityFilterKey);
   const secondaryFilterValues = getMetadataFilterValuesForKey(rowMetadataFilterOptions, secondaryFilterKey);
   const primaryFilterKeyOptions = getMetadataFilterKeySelectOptions(rowMetadataKeys, primaryFilterKey);
@@ -47,7 +64,6 @@ export function buildPartSummaryChipModel({
   const allViewsVisible = primaryFilterValues.length > 0
     && primaryFilterValues.every((value) => !hiddenPrimaryValueSet.has(value));
   const allViewsToggleActive = allViewsVisible && !selectedPrimaryOnlyVisible;
-  const isDefaultModalityFilter = modalityFilterKey === DEFAULT_MODALITY_IMAGE_FILTER_KEY;
   const selectedModalityOnlyVisible = isDefaultModalityFilter
     ? modalityFilterValues.length > 1
       && enabledModalityKeys.filter((modality) => modalityFilterValues.includes(modality)).length === 1
@@ -62,7 +78,20 @@ export function buildPartSummaryChipModel({
   const allLayersVisible = secondaryFilterValues.length > 0
     && secondaryFilterValues.every((value) => !hiddenSecondaryValueSet.has(value));
   const allLayersToggleActive = allLayersVisible && !(secondaryFilterValues.length > 1 && secondaryFilterValues.filter((value) => !hiddenSecondaryValueSet.has(value)).length === 1);
+  const modalityDisplayValues = new Map(
+    safeModalities.map((modality) => [String(modality).toLowerCase(), String(modality)]),
+  );
+  // User metadata values are displayed exactly as supplied. VISTA's own system
+  // fields (e.g. layer: source/overlay/crop) keep their upper-case styling.
+  const getDisplayValue = (key, value) => {
+    if (SYSTEM_CATEGORY_FILTER_KEYS.has(key)) return String(value || '').toUpperCase();
+    if (key === modalityFilterKey && isDefaultModalityFilter && modalityDisplayValues.has(value)) {
+      return modalityDisplayValues.get(value);
+    }
+    return getMetadataFilterDisplayValue(rowMetadataFilterOptions, key, value);
+  };
   return {
+    getDisplayValue,
     enabledModalityKeys,
     primaryFilterKey,
     secondaryFilterKey,

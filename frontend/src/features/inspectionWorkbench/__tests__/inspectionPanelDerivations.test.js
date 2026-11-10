@@ -5,7 +5,6 @@ import { findSelectedInspectionItem } from '../useInspectionAnnotationItems';
 import { findImageRefForAnnotation } from '../useInspectionFocusRequest';
 import { getMprTooltipValues } from '../useMprTooltipValues';
 import { createCalibratedAnnotationGeometry } from '../calibratedAnnotationGeometry';
-import { getTileViewportStyle } from '../centerPaneProps';
 
 describe('inspection panel derivations', () => {
   test('getConfiguredDefectTypes trims and de-duplicates case-insensitively', () => {
@@ -83,12 +82,5 @@ describe('inspection panel derivations', () => {
     expect(getBoxWithDerivedDimensions(box, 'img')).toEqual({ ...box, widthMm: 5, heightMm: 2 });
     expect(getBoxWithDerivedDimensions({ ...box, widthMm: 9 }, 'img').widthMm).toBe(9);
     expect(getBoxWithDerivedDimensions(box, 'uncalibrated')).toBe(box);
-  });
-
-  test('getTileViewportStyle composes pan and zoom', () => {
-    expect(getTileViewportStyle({ panX: 3, panY: -4, zoom: 2 })).toEqual({
-      transform: 'translate(3px, -4px) scale(2)',
-      transformOrigin: 'center center',
-    });
   });
 });

@@ -28,23 +28,16 @@ const buildImageSort = ({ imageSortFilter }) => ({
   imageOrderAnnouncement: imageSortFilter.imageOrderAnnouncement,
 });
 
-// CSS transform for the inspector tile viewport (pan, then zoom about the
-// tile center).
-export const getTileViewportStyle = (normalizedInspectorViewport) => ({
-  transform: `translate(${normalizedInspectorViewport.panX}px, ${normalizedInspectorViewport.panY}px) scale(${normalizedInspectorViewport.zoom})`,
-  transformOrigin: 'center center',
-});
-
 const buildTileView = (input) => ({
   imageEnabled: input.imageEnabled,
-  normalizedInspectorViewport: input.normalizedInspectorViewport,
-  tileViewportStyle: getTileViewportStyle(input.normalizedInspectorViewport),
   annotationOpacityMultiplier: input.annotationOpacityMultiplier,
   measurementLinesByImageId: input.annotationLayers.measurementLinesByImageId,
   boxAnnotationsByImageId: input.annotationLayers.boxAnnotationsByImageId,
   tileGeometryDragPreview: input.tileGeometryDragPreview,
   tileAnnotationPreview: input.annotationDrafts.tile.preview,
   selectedAnnotationId: input.selectedAnnotationId,
+  // A draw tool owns the pointer, so tiles drop the shapes' move/edit targets.
+  annotationDrawToolActive: ['measure', 'box', 'crop'].includes(input.annotationToolMode),
   deletingOverlayId: input.deletingOverlayId,
   suppressNextTileClickRef: input.suppressNextTileClickRef,
   getBoxWithDerivedDimensions: input.calibratedGeometry.getBoxWithDerivedDimensions,
@@ -68,7 +61,6 @@ export const buildCenterPaneProps = (input) => ({
     updateCropChildSubtitle: input.updateCropChildSubtitle,
     deleteAnalyzeOverlay: input.deleteAnalyzeOverlay,
     ...input.tilePointer,
-    handleTileImageWheel: input.viewportZoom.handleTileImageWheel,
     setFullscreenImageModal: input.setFullscreenImageModal,
   },
 });

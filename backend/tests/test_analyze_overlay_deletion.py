@@ -42,7 +42,7 @@ def _metadata():
     }
 
 
-def test_mark_overlay_metadata_as_delete_candidate_hides_active_overlay_maps():
+def test_mark_overlay_metadata_as_delete_candidate_keeps_legacy_maps_for_restore():
     now = datetime(2026, 4, 30, 12, 0, tzinfo=UTC)
 
     metadata, deleted = mark_overlay_deleted_in_metadata(
@@ -64,10 +64,12 @@ def test_mark_overlay_metadata_as_delete_candidate_hides_active_overlay_maps():
         == (now + timedelta(hours=48)).isoformat()
     )
     assert overlay_record["overlay_deleted_by"] == "operator@example.com"
-    assert metadata["overlay_images"] == {}
+    # Soft delete is reversible: legacy maps keep their reference (readers
+    # skip delete candidates) and are pruned only when the record is purged.
+    assert metadata["overlay_images"] == {"front": {"analyze-overlay": "overlay.png"}}
 
 
-def test_restore_overlay_metadata_clears_delete_candidate_and_rebuilds_maps():
+def test_restore_overlay_metadata_clears_delete_candidate_without_losing_maps():
     now = datetime(2026, 4, 30, 12, 0, tzinfo=UTC)
     deleted_metadata, _ = mark_overlay_deleted_in_metadata(
         _metadata(),
@@ -109,6 +111,8 @@ def test_purge_expired_overlay_metadata_removes_records_after_retention():
     ]
     assert purged_metadata["analysis_outputs"] == []
     assert purged_metadata["overlay_layers"] == []
+    assert purged_metadata["view_images"] == {"front": "source.png"}
+    assert purged_metadata["overlay_images"] == {}
 
 
 def test_rebuild_keeps_analysis_outputs_out_of_original_source_images():
@@ -148,7 +152,27 @@ def test_rebuild_keeps_analysis_outputs_out_of_original_source_images():
     assert [record["image_id"] for record in rebuilt["analysis_outputs"]] == [
         "overlay-image"
     ]
-    assert rebuilt["view_images"] == {"front": "front.png", "back": "back.png"}
-    assert rebuilt["overlay_images"] == {
-        "front": {"analyze-overlay": "front_overlay.png"}
-    }
+    # No grouping maps are synthesized from user side/modality metadata.
+    assert "view_images" not in rebuilt
+    assert "overlay_images" not in rebuilt
+    assert rebuilt["source_images"][0]["side"] == "front"
+
+
+def test_rebuild_preserves_user_descriptor_values_verbatim():
+    rebuilt = rebuild_analyze_part_image_maps(
+        {
+            "source_images": [
+                {"filename": "a.png", "image_id": "a", "side": "B", "view": 18},
+                {"filename": "b.png", "image_id": "b", "modality": "Optical"},
+                {"filename": "c.png", "image_id": "c", "overlay": True},
+            ],
+        }
+    )
+
+    assert rebuilt["source_images"] == [
+        {"filename": "a.png", "image_id": "a", "side": "B", "view": 18},
+        {"filename": "b.png", "image_id": "b", "modality": "Optical"},
+        {"filename": "c.png", "image_id": "c", "overlay": True},
+    ]
+    assert "modalities" not in rebuilt
+    assert "configured_views" not in rebuilt

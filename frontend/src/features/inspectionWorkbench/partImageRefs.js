@@ -1,18 +1,47 @@
 import { ALL_PARTS_ID } from './useInspectionPartSelection';
 import { parseMetadataBoolean } from '../../utils/imageIdentity';
-import { DEFAULT_MODALITIES } from './inspectionConstants';
 import { getProjectImageRecord, isDeletedProjectImageRecord } from './imageLookup';
 import { safeDecodeFilename } from './inspectionUtils';
 import { isServerVolumeDescriptor } from './volumeDescriptors';
 import { formatAnnotationTimestamp } from './annotationListHelpers';
 import { getInspectionImageOrderKey, applyInspectionImageDisplayOrder } from './imageSorting';
 
+// Modality values are user metadata. They are discovered from the part's own
+// image records (preserving the user's spelling) and never from a hardcoded
+// default list or a derived part-level "modalities" bin.
+function isPresentMetadataValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function addDistinctValue(values, seen, value) {
+  if (!isPresentMetadataValue(value)) return;
+  const display = String(value).trim();
+  const key = display.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  values.push(display);
+}
+
+// Placeholder modalities written by VISTA itself rather than by users:
+// "analyze-overlay" on Analyze outputs, and "overlay", which older VISTA
+// versions filled in on overlay records that had no modality. They are not
+// offered as user modality choices (and existing data is never rewritten).
+export function isSystemPlaceholderModality(entry) {
+  const modality = String(entry?.modality ?? '').trim().toLowerCase();
+  return modality === 'analyze-overlay' || (Boolean(entry?.overlay) && modality === 'overlay');
+}
+
+function isUserModalityEntry(entry) {
+  return isPresentMetadataValue(entry?.modality) && !isSystemPlaceholderModality(entry);
+}
+
 export function getModalities(part) {
-  const modalities = part?.metadata?.modalities;
-  if (Array.isArray(modalities) && modalities.length > 0) {
-    return modalities.map((value) => String(value));
-  }
-  return DEFAULT_MODALITIES;
+  const values = [];
+  const seen = new Set();
+  getPartImageRefs(part).forEach((entry) => {
+    if (isUserModalityEntry(entry)) addDistinctValue(values, seen, entry.modality);
+  });
+  return values;
 }
 
 function getConfiguredProjectModalities(projectConfiguration = null) {
@@ -26,9 +55,8 @@ function getConfiguredProjectModalities(projectConfiguration = null) {
 function getLoadedImageRefModalities(imageRefs = []) {
   const loadedModalities = new Set();
   imageRefs.forEach((entry) => {
-    const modality = String(entry?.modality || '').trim().toLowerCase();
-    if (!modality || modality === 'analyze-overlay' || modality === 'overlay') return;
-    loadedModalities.add(modality);
+    if (!isUserModalityEntry(entry)) return;
+    loadedModalities.add(String(entry.modality).trim().toLowerCase());
   });
   return loadedModalities;
 }
@@ -48,48 +76,27 @@ function orderLoadedModalities(loadedModalities, configuredModalities = [], incl
 export function getPartSummaryModalities(part, imageRefs = getPartImageRefs(part), projectConfiguration = null) {
   const loadedModalities = getLoadedImageRefModalities(imageRefs);
   const projectModalities = getConfiguredProjectModalities(projectConfiguration);
-  const configuredModalities = projectModalities.length > 0 ? projectModalities : getModalities(part);
-  if (loadedModalities.size === 0) {
-    return imageRefs.length > 0 && configuredModalities.length === 1
-      ? [configuredModalities[0]]
-      : [];
-  }
-  return orderLoadedModalities(loadedModalities, configuredModalities, projectModalities.length === 0);
+  return orderLoadedModalities(loadedModalities, projectModalities, projectModalities.length === 0);
 }
 
 export function getDiscoveredModalities(part) {
   if (!part) return [];
-  const discovered = [
-    ...getModalities(part),
-    ...getPartImageRefs(part).map((entry) => entry?.modality),
-  ];
-  const seen = new Set();
-  return discovered
-    .map((value) => String(value || '').trim().toLowerCase())
-    .filter((value) => {
-      if (!value || seen.has(value)) return false;
-      seen.add(value);
-      return true;
-    });
+  return getModalities(part).map((value) => value.toLowerCase());
 }
 
 export function getShellImageLayers(part, projectImageLookup = {}) {
-  const imagesByView = part?.metadata?.view_images;
-  if (!imagesByView || typeof imagesByView !== 'object') return [];
-  return Object.entries(imagesByView)
-    .map(([viewName, imageRef]) => {
-      const filename = String(
-        imageRef && typeof imageRef === 'object' ? imageRef.filename || '' : imageRef || '',
-      );
+  return getPartImageRefs(part, projectImageLookup)
+    .filter((entry) => !entry.overlay && !entry.cropChild)
+    .map((entry) => {
       const record = getProjectImageRecord(projectImageLookup, {
-        image_id: imageRef && typeof imageRef === 'object' ? imageRef.image_id : '',
-        filename,
+        image_id: entry.imageId,
+        filename: entry.filename || entry.imageRef,
       });
       const imageId = record?.id;
-      if (!imageId) return null;
+      if (!imageId || isDeletedProjectImageRecord(record)) return null;
       return {
-        viewName: String(viewName || '').toLowerCase(),
-        filename,
+        label: entry.label,
+        filename: entry.filename,
         id: String(imageId),
         url: `/api/images/${encodeURIComponent(String(imageId))}/content`,
       };
@@ -167,6 +174,32 @@ function getImageRecordMetadataSnapshot(record = {}, projectImageLookup = {}) {
   };
 }
 
+// Keys on a part source record that VISTA itself owns (identity, linkage,
+// display state). Everything else on the record is user metadata and is
+// exposed verbatim for filtering, sorting, and display.
+const SOURCE_RECORD_STRUCTURAL_KEYS = new Set([
+  'filename', 'image_id', 'id', 'image_ref', 'label', 'metadata',
+  'overlay', 'overlay_base_filename', 'overlay_base_image_id', 'overlay_color', 'overlay_opacity',
+  'overlay_delete_candidate', 'delete_candidate', 'deleted_at', 'deleted_by', 'overlay_deleted_at',
+  'overlay_deleted_by', 'pending_hard_delete_at', 'overlay_delete_after', 'hidden',
+  'crop_child_image', 'cropChildImage', 'parent_image_id', 'parent_image_filename',
+  'crop_annotation_id', 'crop_title', 'crop_subtitle', 'cropSubtitle', 'crop_bbox',
+  'analysis_output', 'analysis_source_image_id', 'analysis_source_filename', 'analysis_method_id',
+  'analysis_method_name', 'analysis_workflow_name', 'analysis_detections', 'analysis_label',
+  'associated_metadata', 'associated_metadata_ref', 'nsipro_metadata', 'nsipro_payload',
+  'content_type', 'concurrent_record_revision',
+]);
+
+export function getSourceRecordUserMetadata(record) {
+  if (!record || typeof record !== 'object') return {};
+  return Object.entries(record).reduce((acc, [key, value]) => {
+    if (SOURCE_RECORD_STRUCTURAL_KEYS.has(key)) return acc;
+    if (value !== null && typeof value === 'object') return acc;
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
 function isAnalysisOverlayRecord(record = {}) {
   return Boolean(
     parseMetadataBoolean(record.analysis_output)
@@ -203,7 +236,10 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
     if (!existingRecord) acc.get(filename).push(record);
     return acc;
   }, new Map());
-  const getRecordModality = (record) => String(record?.modality || record?.metadata?.modality || '').toLowerCase();
+  const getRecordModality = (record) => {
+    const value = isPresentMetadataValue(record?.modality) ? record.modality : record?.metadata?.modality;
+    return isPresentMetadataValue(value) ? String(value).trim() : '';
+  };
   const claimImageIdentity = (record = {}) => {
     const imageId = String(record.image_id || '').trim();
     const filename = String(record.filename || '').trim();
@@ -238,7 +274,9 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
       || modality === 'analyze-overlay'
     );
   };
-  const pushRecord = (record, index, forceOverlay = false) => {
+  // `listKey` keeps ids unique across source_images and analysis_outputs, whose
+  // indexes both start at 0 (an Analyze output can live in either list).
+  const pushRecord = (record, index, forceOverlay = false, listKey = 'source') => {
     if (!record || typeof record !== 'object') return;
     if (isDeleteCandidate(record)) return;
     const overlay = forceOverlay
@@ -254,14 +292,18 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
     if (!identity.claimed) return;
     const modality = getRecordModality(record);
     const metadataSnapshot = getImageRecordMetadataSnapshot(record, projectImageLookup);
+    const filenameLabel = safeDecodeFilename(String(record.filename || record.image_id || ''));
+    // Tile labels identify the image itself (title or filename). They are not
+    // synthesized from user metadata such as side or modality.
     const label = cropChild
-      ? String(record.crop_title || record.filename || `CROP ${index + 1}`)
+      ? String(record.crop_title || filenameLabel)
       : overlay
-        ? (getAssignedOverlayDisplayLabel(record) || getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || modality || 'Analyze Overlay'))
-        : String(record.side || record.modality || `IMAGE ${index + 1}`).toUpperCase();
+        ? (getAssignedOverlayDisplayLabel(record)
+          || (analysisOverlay ? getAnalyzeOverlayDisplayLabel(record.label || record.analysis_label || 'Analyze Overlay') : '')
+          || String(record.label || filenameLabel))
+        : String(record.label || filenameLabel);
     const imageReference = {
-      id: `${part.id}-${overlay ? 'analysis' : 'source'}-${index}`,
-      viewName: String(record.side || record.modality || (overlay ? 'overlay' : 'image')).toLowerCase(),
+      id: `${part.id}-${listKey === 'source' ? '' : `${listKey}-`}${overlay ? 'analysis' : 'source'}-${index}`,
       modality,
       label,
       imageRef,
@@ -279,6 +321,7 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
       opacity: record.overlay_opacity ?? record.metadata?.overlay_opacity,
       hidden: parseMetadataBoolean(record.hidden),
       metadata: record.metadata && typeof record.metadata === 'object' ? record.metadata : {},
+      sourceMetadata: getSourceRecordUserMetadata(record),
     };
     identity.entry.ref = imageReference;
     refs.push(imageReference);
@@ -287,7 +330,7 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
     pushRecord(record, index, isAnalyzeOutputRecord(record));
   });
   analysisOutputs.forEach((record, index) => {
-    pushRecord(record, index, true);
+    pushRecord(record, index, true, 'output');
   });
 
   // source_images and analysis_outputs carry persisted UUIDs and are
@@ -334,15 +377,15 @@ export function getPartImageRefs(part, projectImageLookup = {}) {
       const resolvedImageRef = String(identityRecord.image_id || identityRecord.filename || '');
       const imageReference = {
         id: `${part.id}-view-${viewName}`,
-        viewName: String(viewName || '').toLowerCase(),
         modality: getRecordModality(sourceRecord),
-        label: String(viewName || 'image').toUpperCase(),
+        label: safeDecodeFilename(String(identityRecord.filename || resolvedImageRef)),
         imageRef: resolvedImageRef,
         filename: String(identityRecord.filename || ''),
         imageId: identityRecord.image_id ? String(identityRecord.image_id) : '',
         overlay: false,
         hidden: parseMetadataBoolean(sourceRecord?.hidden),
         metadata: sourceRecord?.metadata && typeof sourceRecord.metadata === 'object' ? sourceRecord.metadata : {},
+        sourceMetadata: getSourceRecordUserMetadata(sourceRecord),
       };
       identity.entry.ref = imageReference;
       refs.push(imageReference);
@@ -378,29 +421,16 @@ export function getAggregatePartImageRefs(parts = [], projectImageLookup = {}) {
   });
 }
 
-export function getAggregateViews(imageRefs = []) {
-  const seen = new Set();
-  return imageRefs
-    .map((entry) => String(entry?.viewName || '').toLowerCase())
-    .filter((viewName) => {
-      if (!viewName || seen.has(viewName)) return false;
-      seen.add(viewName);
-      return true;
-    });
-}
-
 export function getAggregateModalities(imageRefs = [], projectConfiguration = null) {
   const loadedModalities = getLoadedImageRefModalities(imageRefs);
   const projectModalities = getConfiguredProjectModalities(projectConfiguration);
-  const configuredModalities = projectModalities.length > 0 ? projectModalities : DEFAULT_MODALITIES;
-  return orderLoadedModalities(loadedModalities, configuredModalities, projectModalities.length === 0);
+  return orderLoadedModalities(loadedModalities, projectModalities, projectModalities.length === 0);
 }
 
 export function getAllLoadedImageRefModalities(imageRefs = [], projectConfiguration = null) {
   const loadedModalities = getLoadedImageRefModalities(imageRefs);
   const projectModalities = getConfiguredProjectModalities(projectConfiguration);
-  const configuredModalities = projectModalities.length > 0 ? projectModalities : DEFAULT_MODALITIES;
-  return orderLoadedModalities(loadedModalities, configuredModalities, true);
+  return orderLoadedModalities(loadedModalities, projectModalities, true);
 }
 
 export function getAggregateLayerAvailability(imageRefs = [], parts = []) {
@@ -423,44 +453,16 @@ export function isInspectionImageRefLoaded(entry, projectImageLookup = {}) {
   return Boolean(record && !isDeletedProjectImageRecord(record));
 }
 
+// Returns the image id that owns annotations drawn on a tile: always the
+// tile's own image. Overlays assigned to a base image (and other images that
+// share a view across modalities) do not inherit or share that base image's
+// annotations, so an annotation drawn on one tile renders only on that tile.
 export function getAnnotationSourceImageId(entry, projectImageLookup) {
   const imageRecord = getProjectImageRecord(projectImageLookup, {
     image_id: entry?.imageId,
     filename: entry?.filename || entry?.imageRef,
   });
-  const imageId = imageRecord?.id ? String(imageRecord.id) : '';
-  if (!imageId) return '';
-  if (!entry?.overlay) return imageId;
-  const explicitBaseImageId = String(
-    entry?.overlayBaseImageId
-      || imageRecord?.metadata?.overlay_base_image_id
-      || imageRecord?.metadata?.analysis_source_image_id
-      || '',
-  );
-  const baseFilename = String(
-    entry?.overlayBaseFilename
-      || imageRecord?.metadata?.overlay_base_filename
-      || '',
-  );
-  const baseRecord = getProjectImageRecord(projectImageLookup, {
-    image_id: explicitBaseImageId,
-    filename: baseFilename,
-  });
-  return baseRecord?.id ? String(baseRecord.id) : imageId;
-}
-
-export function getAnnotationSourceImageIdLookup(imageEntries, projectImageLookup) {
-  return imageEntries.reduce((acc, entry) => {
-    const imageRecord = getProjectImageRecord(projectImageLookup, {
-      image_id: entry?.imageId,
-      filename: entry?.filename || entry?.imageRef,
-    });
-    const imageId = imageRecord?.id ? String(imageRecord.id) : '';
-    const sourceImageId = getAnnotationSourceImageId(entry, projectImageLookup);
-    if (imageId && sourceImageId) acc[imageId] = sourceImageId;
-    if (sourceImageId) acc[sourceImageId] = sourceImageId;
-    return acc;
-  }, {});
+  return imageRecord?.id ? String(imageRecord.id) : '';
 }
 
 function getInspectionItemImageIdentities(item) {
@@ -503,7 +505,6 @@ export function isInspectionItemForImageEntry(item, entry, projectImageLookup) {
     image_id: entry?.imageId,
     filename: entry?.filename || entry?.imageRef,
   });
-  const sourceImageId = getAnnotationSourceImageId(entry, projectImageLookup);
   return [
     entry?.imageId,
     entry?.imageRef,
@@ -511,6 +512,5 @@ export function isInspectionItemForImageEntry(item, entry, projectImageLookup) {
     record?.id,
     record?.filename,
     record?.displayName,
-    sourceImageId,
   ].some((value) => itemIdentities.has(String(value || '').trim()));
 }

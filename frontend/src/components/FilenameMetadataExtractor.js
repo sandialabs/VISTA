@@ -21,7 +21,9 @@ export const CONFIG_ID_TO_METADATA_KEY = {
   batch: 'batch_number',
   sub_batch: 'sub_batch',
   part_number: 'set_number',
-  view: 'side',
+  // Per-image descriptors keep the key the project configured; "view" and
+  // "side" are distinct keys and are never treated as synonyms.
+  view: 'view',
   side: 'side',
   modality: 'modality',
   overlay: 'overlay',

@@ -12,6 +12,7 @@ from schemas import inspection_parts as inspection_part_schemas
 from services.errors import NotFoundError
 from services.inspection import part_source_images
 from utils.metadata_values import parse_metadata_boolean
+from utils.part_image_maps import user_image_descriptor_fields
 
 ASSIGNED_SOURCE_IMAGE_METADATA_FIELDS = (
     "load_mode",
@@ -131,9 +132,7 @@ def metadata_for_overlay_assignment(image: Any) -> dict:
     return {
         "filename": image.filename,
         "image_id": str(image.id),
-        "side": str(image_metadata.get("side") or "").strip().lower(),
-        "modality": str(image_metadata.get("modality") or "overlay").strip().lower()
-        or "overlay",
+        **user_image_descriptor_fields(image_metadata),
         "overlay": True,
         "content_type": image.content_type,
         "slice_axis": image_metadata.get("slice_axis"),
@@ -150,8 +149,7 @@ def metadata_for_source_assignment(image: Any) -> dict:
     entry = {
         "filename": image.filename,
         "image_id": str(image.id),
-        "side": str(image_metadata.get("side") or "").strip().lower(),
-        "modality": str(image_metadata.get("modality") or "").strip().lower(),
+        **user_image_descriptor_fields(image_metadata),
         "overlay": parse_metadata_boolean(image_metadata.get("overlay")),
         "content_type": image.content_type,
         "slice_axis": image_metadata.get("slice_axis"),

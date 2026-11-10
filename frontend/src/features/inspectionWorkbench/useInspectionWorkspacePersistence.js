@@ -19,7 +19,6 @@ export default function useInspectionWorkspacePersistence({
   hiddenPrimaryImageFilterValues,
   hiddenSecondaryImageFilterValues,
   imageEnabled,
-  inspectorViewport,
   loading,
   measurementEntries,
   modalityImageFilterKey,
@@ -80,7 +79,6 @@ export default function useInspectionWorkspacePersistence({
             shortcut_help_visible: shortcutHelpVisible,
             normalization_triage_field: normalizationTriageField || '',
             measurements: measurementEntries,
-            viewport_transform: inspectorViewport,
           },
           panel_layout: panelLayout,
         }, { readOnly });
@@ -108,7 +106,6 @@ export default function useInspectionWorkspacePersistence({
     loading,
     measurementEntries,
     normalizationTriageField,
-    inspectorViewport,
     panelLayout,
     projectId,
     projectType,

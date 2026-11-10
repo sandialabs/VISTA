@@ -1,27 +1,25 @@
 import { isFiniteAnnotationBox, isFiniteMeasurementLine } from './inspectionAnnotationGeometry';
 import { getExternalOverlayOpacity } from './inspectionAnnotationDisplay';
 import { getProjectImageRecord, getInspectionTileFilename, getImageMetadataOverlayLines } from './imageLookup';
-import { safeDecodeFilename, stopMiddleMouseDefault } from './inspectionUtils';
-import { getAnnotationSourceImageId, isInspectionItemForImageEntry } from './partImageRefs';
+import { safeDecodeFilename } from './inspectionUtils';
 import { renderAnnotationOverlay, renderTileAnnotationEditingTargets } from './annotationOverlayRendering';
+import { AnnotationOverlaySvg } from './AnnotationOverlaySvg';
 
-export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileView, handlers }) {
+export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = false, selection, tileView, handlers }) {
   const {
     isAllImagesSelection,
     selectedImageRef,
-    selectedInspectionItem,
     projectImageLookup,
   } = selection;
   const {
     imageEnabled,
-    normalizedInspectorViewport,
-    tileViewportStyle,
     annotationOpacityMultiplier,
     measurementLinesByImageId,
     boxAnnotationsByImageId,
     tileGeometryDragPreview,
     tileAnnotationPreview,
     selectedAnnotationId,
+    annotationDrawToolActive = false,
     deletingOverlayId,
     suppressNextTileClickRef,
     getBoxWithDerivedDimensions,
@@ -34,30 +32,18 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
     handleTileBoxPointerDown,
     handleTileAnnotationPointerMove,
     handleTileBoxPointerUp,
-    finishTileViewportPan,
     handleTileBoxPointerCancel,
-    handleTileImageWheel,
     handleTileAnnotationPointerDown,
     setFullscreenImageModal,
     startTileAnnotationGeometryDrag,
     handleTileAnnotationGeometryDragMove,
     finishTileAnnotationGeometryDrag,
   } = handlers;
-                const viewName = entry.viewName || 'image';
+                // Accessible names use the image's own label (title/filename),
+                // not a value synthesized from user metadata.
+                const tileLabel = String(entry.label || entry.filename || entry.imageRef || '');
                 const imageRef = String(entry.imageRef || '');
                 const isSelectedTileImage = String(selectedImageRef || '') === imageRef;
-                const tileViewportAttributes = isSelectedTileImage
-                  ? {
-                    'data-viewport-zoom': normalizedInspectorViewport.zoom,
-                    'data-viewport-pan-x': normalizedInspectorViewport.panX,
-                    'data-viewport-pan-y': normalizedInspectorViewport.panY,
-                    style: tileViewportStyle,
-                  }
-                  : {
-                    'data-viewport-zoom': 1,
-                    'data-viewport-pan-x': 0,
-                    'data-viewport-pan-y': 0,
-                  };
                 const imageRecord = getProjectImageRecord(projectImageLookup, {
                   image_id: entry.imageId,
                   filename: entry.filename || imageRef,
@@ -71,11 +57,17 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                   : null;
                 const baseImageId = baseRecord?.id ? String(baseRecord.id) : '';
                 const imageDisplayName = getInspectionTileFilename(entry, projectImageLookup);
+                // Image alt text names the actual image files shown.
+                const imageAltName = safeDecodeFilename(imageDisplayName || tileLabel);
+                const baseAltName = safeDecodeFilename(
+                  baseRecord?.displayName || baseRecord?.filename || entry.overlayBaseFilename || '',
+                );
                 const metadataOverlayLines = tabKey === 'image_metadata'
                   ? getImageMetadataOverlayLines(entry, projectImageLookup)
                   : [];
-                const annotationSourceImageId = getAnnotationSourceImageId(entry, projectImageLookup);
-                const tileAnnotationSourceImageId = String(annotationSourceImageId || imageId);
+                // Annotations belong to this tile's own image only; they are not
+                // shared with overlays or other images of the same view.
+                const tileAnnotationSourceImageId = imageId;
 	                const tileMeasurementLines = (measurementLinesByImageId[tileAnnotationSourceImageId] || [])
 	                  .filter(isFiniteMeasurementLine)
                       .map((line) => (
@@ -105,13 +97,40 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                 const tileOverlayGeometry = [...tileMeasurementLines, ...tileBoxes, ...tilePreviewLines, ...tilePreviewBoxes][0];
                 const tileOverlayWidth = Math.max(1, Number(tileOverlayGeometry?.imageWidth) || 1000);
                 const tileOverlayHeight = Math.max(1, Number(tileOverlayGeometry?.imageHeight) || 1000);
-                const isSelectedInspectionTile = isInspectionItemForImageEntry(selectedInspectionItem, entry, projectImageLookup);
+                const tileAnnotationOverlay = (
+                  <AnnotationOverlaySvg
+                    imageWidth={tileOverlayWidth}
+                    imageHeight={tileOverlayHeight}
+                    ariaLabel="tile measurement overlay"
+                    renderContent={(frame) => (
+                      <>
+                        {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId, opacityMultiplier: annotationOpacityMultiplier, unit: tileAnnotationUnit, frame })}
+                        {!readOnly && !annotationDrawToolActive && renderTileAnnotationEditingTargets({
+                          measurementLines: tileMeasurementLines,
+                          boxes: tileBoxes,
+                          selectedAnnotationId,
+                          frame,
+                          onStartDrag: (event, kind, operation, geometry) => startTileAnnotationGeometryDrag(
+                            event,
+                            kind,
+                            operation,
+                            geometry,
+                            tileAnnotationSourceImageId,
+                          ),
+                          onDragMove: handleTileAnnotationGeometryDragMove,
+                          onDragFinish: finishTileAnnotationGeometryDrag,
+                          onDragCancel: (event) => finishTileAnnotationGeometryDrag(event, { cancel: true }),
+                        })}
+                      </>
+                    )}
+                  />
+                );
                 const tileOverlayOpacity = Math.min(1, annotationOpacityMultiplier * getExternalOverlayOpacity(entry, 1));
                 const metadataImageOpacity = tabKey === 'image_metadata' ? 0.5 : 1;
                 return (
                   <div
                     key={entry.id}
-                    className={`view-cell ${isSelectedTileImage ? 'selected' : ''} ${isSelectedInspectionTile ? 'inspection-item-highlighted' : ''} ${tabKey === 'image_metadata' ? 'inspection-tile-metadata-mode' : ''}`}
+                    className={`view-cell ${isSelectedTileImage ? 'selected' : ''} ${isHighlighted ? 'inspection-item-highlighted' : ''} ${tabKey === 'image_metadata' ? 'inspection-tile-metadata-mode' : ''}`}
                     role="button"
                     tabIndex={0}
                     onClick={() => {
@@ -158,7 +177,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                         <button
                           type="button"
                           className="inspection-overlay-delete"
-                          aria-label={`Delete overlay ${entry.label || viewName}`}
+                          aria-label={`Delete overlay ${tileLabel}`}
                           disabled={deletingOverlayId === String(entry.imageId)}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -176,13 +195,10 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                         <div
                           className="inspection-overlay-composite inspection-image-annotation-surface"
 	                          data-testid="inspection-overlay-composite"
-	                          {...tileViewportAttributes}
 	                          onPointerDown={(event) => handleTileBoxPointerDown(event, imageId)}
 	                          onPointerMove={(event) => handleTileAnnotationPointerMove(event, imageId)}
 	                          onPointerUp={(event) => handleTileBoxPointerUp(event, imageId)}
-	                          onPointerCancel={(event) => { if (!finishTileViewportPan(event)) handleTileBoxPointerCancel(event); }}
-		                          onAuxClick={stopMiddleMouseDefault}
-                              onWheel={(event) => handleTileImageWheel(event, imageRef)}
+	                          onPointerCancel={handleTileBoxPointerCancel}
 	                          onClick={(event) => {
 	                            event.stopPropagation();
 	                            if (suppressNextTileClickRef.current) {
@@ -194,21 +210,21 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
 	                            setFullscreenImageModal({
 	                              imageId: String(imageId),
 	                              baseImageId: String(baseImageId),
-                              label: entry.label || viewName.toUpperCase(),
+                              label: tileLabel,
                             });
                           }}
                         >
                           <img
                             className="inspection-view-image"
                             src={`/api/images/${encodeURIComponent(String(baseImageId))}/content`}
-                            alt={`${viewName} source`}
+                            alt={`${baseAltName} source`}
                             loading="lazy"
                             style={tabKey === 'image_metadata' ? { opacity: metadataImageOpacity } : undefined}
                           />
                           <img
                             className="inspection-view-image analysis-overlay-image"
                             src={`/api/images/${encodeURIComponent(String(imageId))}/content`}
-                            alt={`${viewName} overlay`}
+                            alt={`${imageAltName} overlay`}
                             loading="lazy"
                             style={{ opacity: tileOverlayOpacity * metadataImageOpacity }}
                           />
@@ -222,37 +238,15 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                               ))}
                             </div>
                           )}
-	                          <svg className="inspection-fullscreen-measurement-overlay" viewBox={`0 0 ${tileOverlayWidth} ${tileOverlayHeight}`} preserveAspectRatio="xMidYMid meet" aria-label="tile measurement overlay">
-	                            <g transform={`scale(${tileOverlayWidth / 1000} ${tileOverlayHeight / 1000})`}>
-	                              {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId, opacityMultiplier: annotationOpacityMultiplier, unit: tileAnnotationUnit })}
-                                  {!readOnly && renderTileAnnotationEditingTargets({
-                                    measurementLines: tileMeasurementLines,
-                                    boxes: tileBoxes,
-                                    selectedAnnotationId,
-                                    onStartDrag: (event, kind, operation, geometry) => startTileAnnotationGeometryDrag(
-                                      event,
-                                      kind,
-                                      operation,
-                                      geometry,
-                                      tileAnnotationSourceImageId,
-                                    ),
-                                    onDragMove: handleTileAnnotationGeometryDragMove,
-                                    onDragFinish: finishTileAnnotationGeometryDrag,
-                                    onDragCancel: (event) => finishTileAnnotationGeometryDrag(event, { cancel: true }),
-                                  })}
-	                            </g>
-	                          </svg>
+	                          {tileAnnotationOverlay}
 	                        </div>
 	                      ) : imageId ? (
                         <div
                           className="inspection-image-annotation-surface"
-	                          {...tileViewportAttributes}
 	                          onPointerDown={(event) => handleTileBoxPointerDown(event, imageId)}
 	                          onPointerMove={(event) => handleTileAnnotationPointerMove(event, imageId)}
 	                          onPointerUp={(event) => handleTileBoxPointerUp(event, imageId)}
-	                          onPointerCancel={(event) => { if (!finishTileViewportPan(event)) handleTileBoxPointerCancel(event); }}
-                          onAuxClick={stopMiddleMouseDefault}
-                          onWheel={(event) => handleTileImageWheel(event, imageRef)}
+	                          onPointerCancel={handleTileBoxPointerCancel}
                           onClick={(event) => {
                             event.stopPropagation();
                             if (suppressNextTileClickRef.current) {
@@ -261,13 +255,13 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                             }
                             if (handleTileAnnotationPointerDown(event, imageId)) return;
                             setSelectedImageRef(imageRef);
-                            setFullscreenImageModal({ imageId: String(imageId), label: entry.label || viewName.toUpperCase() });
+                            setFullscreenImageModal({ imageId: String(imageId), label: tileLabel });
                           }}
                         >
                           <img
                             className="inspection-view-image"
                             src={`/api/images/${encodeURIComponent(String(imageId))}/content`}
-                            alt={`${viewName} view`}
+                            alt={`${imageAltName} view`}
                             loading="lazy"
 	                            style={entry.overlay || tabKey === 'image_metadata' ? { opacity: entry.overlay ? tileOverlayOpacity * metadataImageOpacity : metadataImageOpacity } : undefined}
 	                          />
@@ -281,26 +275,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, selection, tileVi
                               ))}
                             </div>
                           )}
-	                          <svg className="inspection-fullscreen-measurement-overlay" viewBox={`0 0 ${tileOverlayWidth} ${tileOverlayHeight}`} preserveAspectRatio="xMidYMid meet" aria-label="tile measurement overlay">
-	                            <g transform={`scale(${tileOverlayWidth / 1000} ${tileOverlayHeight / 1000})`}>
-	                              {renderAnnotationOverlay({ measurementLines: [...tileMeasurementLines, ...tilePreviewLines], boxes: [...tileBoxes, ...tilePreviewBoxes], fontSize: 30, selectedAnnotationId, opacityMultiplier: annotationOpacityMultiplier, unit: tileAnnotationUnit })}
-                                  {!readOnly && renderTileAnnotationEditingTargets({
-                                    measurementLines: tileMeasurementLines,
-                                    boxes: tileBoxes,
-                                    selectedAnnotationId,
-                                    onStartDrag: (event, kind, operation, geometry) => startTileAnnotationGeometryDrag(
-                                      event,
-                                      kind,
-                                      operation,
-                                      geometry,
-                                      tileAnnotationSourceImageId,
-                                    ),
-                                    onDragMove: handleTileAnnotationGeometryDragMove,
-                                    onDragFinish: finishTileAnnotationGeometryDrag,
-                                    onDragCancel: (event) => finishTileAnnotationGeometryDrag(event, { cancel: true }),
-                                  })}
-	                            </g>
-	                          </svg>
+	                          {tileAnnotationOverlay}
 	                        </div>
                       ) : imageRef ? (
                         <span className="view-cell-empty">Image not found: {safeDecodeFilename(imageRef)}</span>

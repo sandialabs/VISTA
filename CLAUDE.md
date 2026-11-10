@@ -442,12 +442,49 @@ The production `Dockerfile` ships an `opencv-python-headless` wheel compiled fro
 - Do not run a plain `uv sync` inside the image; it reinstalls the PyPI wheel. Use `uv sync --frozen --inexact --no-install-package opencv-python-headless` (the CI container test does).
 - A cold build compiles OpenCV, which adds substantial time (more on small CI runners). The layer is cached while the pinned inputs are unchanged.
 
+## Inspection Tile Highlight (Single Selection)
+
+- In the Inspection View Parts board, the selected annotation or overlay item highlights exactly one tile (`inspection-item-highlighted`). `InspectionViewBoard` resolves it with `findHighlightedInspectionTileId` (`features/inspectionWorkbench/inspectionTileHighlight.js`): the selected tile if it shows the item, then the tile for the item's exact image, then the first match. Tiles receive it as the `isHighlighted` prop.
+- Do not reintroduce per-tile `isInspectionItemForImageEntry` checks for highlighting; that matched every same-view overlay across modalities.
+
+## Inspection Annotation Ownership (One Image Per Annotation)
+
+- An annotation belongs only to the image it was drawn on. `getAnnotationSourceImageId` (`partImageRefs.js`) returns the tile's own image id, and `getAnnotationSourceImageIdForImage` (`useInspectionCalibration.js`) only normalizes the id. Overlays assigned to a base image (`overlay_base_image_id`), Analyze outputs, and same-view images in other modalities no longer render, save to, or highlight their base image's annotations.
+- The base image is still drawn under an overlay as a visual backdrop (tile composite and fullscreen `baseImageId`); that is presentation only. Calibration for an overlay resolves from its own record, then project defaults.
+- Annotations created on overlay tiles before this change were saved with the base image's id, so they now render only on the base tile. The backend stores the `image_id` it receives and had no view-linking logic.
+- Do not reintroduce a base-image lookup for annotation ownership; that duplicated every annotation across all same-view tiles.
+
+## Inspection Draw Tools Own the Pointer
+
+- While Measure, Draw box, or Crop is active, existing measurement lines and boxes render without their move/edit hit targets (`.inspection-annotation-drag-target`, endpoint and corner dots), so new shapes can be drawn over existing ones. Fullscreen: `FullscreenMeasurementLines` / `FullscreenBoxHandles` check `isFullscreenDrawToolActive(tools)`. Tiles: `buildTileView` sets `annotationDrawToolActive` from `annotationToolMode` and `InspectionImageTile` skips `renderTileAnnotationEditingTargets`.
+- Fullscreen draw handlers live on the `<img>`/canvas, whose `onMouseLeave` cancels the box tool. A hit target above the image counts as leaving it, so hovering a shape used to cancel Draw box / Measure. To move or reshape an annotation, turn the draw tool off first.
+
+## Inspection Shape Drag Commit (No Snap-Back)
+
+- Tile, fullscreen, and MPR move/resize drags finish through `commitDraggedGeometry` (`features/inspectionWorkbench/annotationDragCommit.js`). The drag preview stays at the drop position until the PATCH settles, then clears in the same render that applies the saved annotation. A failed save clears the preview, so the shape returns to its saved position. Unmoved and cancelled drags clear immediately without a request.
+- Do not clear the drag preview on pointer-up before awaiting the save: the shape then renders from stale `annotations` state (its original position) for the whole round trip, which looks like a flash back to the start.
+
+## Inspection Annotation Overlay Scaling (Aspect-Ratio Independent)
+
+- Tile, fullscreen, and MPR annotation overlays render through `AnnotationOverlaySvg` (`features/inspectionWorkbench/AnnotationOverlaySvg.js`). The SVG viewBox is the image's pixel size; annotation content is drawn in "design units" inside a single uniform `scale(k)` group, where 1000 units equal the short side of the measured overlay container (`getAnnotationOverlayFrame` in `annotationOverlayFrame.js`, ResizeObserver-driven, square-container fallback when unmeasured).
+- Renderers (`renderAnnotationOverlay`, `renderTileAnnotationEditingTargets`, `FullscreenMeasurementLines`, `FullscreenBoxHandles`, `MprSliceEditHandles`) take a `frame` prop and project image coordinates with `projectAnnotationLine` / `projectAnnotationBox` / the `*ViewBoxPosition(geometry, ..., frame)` helpers. Square images render exactly as before.
+- Do not reintroduce a non-uniform `scale(w/1000 h/1000)` group or per-text counter-scaling; that squished endpoint/corner dots into ovals, changed line thickness by orientation, and changed text size with image aspect ratio.
+
 ## Local Services, OpenCV Adapter, and E2E Notes
 
 - **MinIO image:** the compose files and `deployment-test/minio.yaml` use `cgr.dev/chainguard/minio:latest` because pulls of `minio/minio` were denied on Docker Hub and Quay. It runs as uid 65532 (host bind mounts need `:U` or `chown 65532`), has no `curl`, and is health-checked with `mc ready local`. `test_container_build_config.py` guards against reverting.
 - **OpenCV adapter (`utils/segmentation_integrations/opencv_backend.py`):** the built-in watershed runtime returns an object whose masks are under `metadata`; `_normalize_runtime_result` converts it to the dict contract the Analyze consumer reads (top-level `backend`, `mode`, `masks`, `metrics`, with `default` mapped to `watershed`). The child process is started with `_subprocess_env()` (repository root and `backend/` on `PYTHONPATH`), so the image needs no `PYTHONPATH` setting. `native_runtime_disabled()` falls back to the `VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME` environment variable when `core` is not importable.
 - **Native segmentation tests** (`VISTA_RUN_NATIVE_SEGMENTATION_TESTS=true`) are off in the default suite and pass when enabled. The SAM and Anomalib smoke tests assert the built-in runtimes' own names (`RuntimeSAMSegmentation`, `RuntimeSAMSegmentationInput`, `vista.patchcore`). The YOLO tests need `yolo11n-seg.pt` (a segmentation model, not `yolov8n.pt`) in `checkpoints/`, the repository root, and `backend/`, or network access to download it; they compare boxes and confidences with a tolerance because inference output varies by machine.
 - **E2E specs run against the production container** (`E2E_BASE_URL`), whose Content-Security-Policy is `connect-src 'self'`: do not `fetch()` `data:` URLs in page code or helpers; decode with `atob` and `createImageBitmap`.
+
+## Dev Container Extra CA Certificates
+
+- On networks with TLS inspection (Zscaler), dev image builds fail with `CERTIFICATE_VERIFY_FAILED`. `scripts/dev.sh` stages host CAs from `EXTRA_CA_CERT_SOURCE` (default `/usr/local/share/ca-certificates`; disable with `EXTRA_CA_CERTS_AUTO=false`) into the gitignored `certs/` directory before `up`/`build`.
+- `Dockerfile.dev` copies `certs/` into the trust store before any network fetch and sets `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`, `NODE_EXTRA_CA_CERTS`, and `UV_NATIVE_TLS=true`. With no certs staged it behaves as before. `certs/.gitkeep` must stay tracked (`.dockerignore` drops `*.md`).
+- Fix TLS errors by adding CAs, never with `--trusted-host`, `--insecure`, or `strict-ssl=false`. `backend/tests/test_dev_container_ca_config.py` guards this. The production `Dockerfile` does not consume `certs/`.
+- Compose files and `deployment-test/` use fully qualified image names (`docker.io/library/postgres:15`); Podman without unqualified-search registries rejects short names. `test_container_build_config.py` guards this.
+- `scripts/dev.sh` works with podman-compose 1.0.6: it starts `DEV_SERVICES` / builds `DEV_BUILD_SERVICES` explicitly (old podman-compose ignores `profiles:`, which would start the GPU `toolbox-models` service), and waits for health via `podman|docker inspect` on the `com.docker.compose.service` label, running `podman healthcheck run` each poll because Podman healthcheck timers need systemd (often absent in WSL2).
+- Podman passes host `http_proxy`/`no_proxy` into containers by default, which sends `http://minio:9000` to a corporate proxy (`RemoteDisconnected`). `backend-dev`, `frontend-dev`, and `backend-test` set `NO_PROXY`/`no_proxy` listing the compose hostnames; add new service hostnames there.
 
 ## Claude Code Agents
 

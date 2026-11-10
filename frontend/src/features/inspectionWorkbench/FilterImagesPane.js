@@ -8,7 +8,6 @@ export function FilterImagesPane({ chipFilters, partRows }) {
     projectConfiguration,
     collapsedPartIdSet,
     aggregatePartImageRefs,
-    aggregateViews,
     selectedBatchId,
     setSelectedBatchId,
     batches,
@@ -22,16 +21,6 @@ export function FilterImagesPane({ chipFilters, partRows }) {
   const showModalitiesRow = isUiSectionEnabled(projectConfiguration, 'inspection.part_summary.modalities_row');
   const showLayersRow = isUiSectionEnabled(projectConfiguration, 'inspection.part_summary.layers_row');
   const isCollapsed = collapsedPartIdSet.has(ALL_PARTS_ID);
-  const allImageEntryByViewName = new Map();
-  aggregatePartImageRefs.forEach((entry) => {
-    const viewName = String(entry?.viewName || '').toLowerCase();
-    if (viewName && !entry.overlay && !entry.cropChild && !allImageEntryByViewName.has(viewName)) {
-      allImageEntryByViewName.set(viewName, entry);
-    }
-  });
-  const imageEntries = aggregateViews
-    .map((viewName) => [viewName, allImageEntryByViewName.get(viewName)])
-    .filter(([, entry]) => entry);
 
   return (
     <section
@@ -83,7 +72,6 @@ export function FilterImagesPane({ chipFilters, partRows }) {
                   label: 'All Images',
                   isSelected: true,
                   collapsed: isCollapsed,
-                  imageEntries,
                   imageRefs: aggregatePartImageRefs,
                   modalities: aggregateModalities,
                   layerAvailability: aggregateLayerAvailability,

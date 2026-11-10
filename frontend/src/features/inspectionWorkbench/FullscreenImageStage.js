@@ -55,14 +55,10 @@ function buildFullscreenSurface({ model, modal, tools, display, fullscreenHandle
 	        }
 	      },
 	      onClick: (event) => {
+	        // Measurements are drawn by press-drag-release (mousedown/mouseup); the
+	        // click that follows must not start or commit a second line.
 	        if (fullscreenEditingEndpoint?.lineId || fullscreenEditingBoxCorner?.boxId) {
 	          handleFullscreenMeasurePointerDown(event);
-	        } else if (fullscreenMeasureActive) {
-	          if (annotationDraftsRef.current.fullscreen.measure) {
-	            handleFullscreenMeasurePointerUp(event);
-	          } else {
-	            handleFullscreenMeasurePointerDown(event);
-	          }
 	        }
 	      },
 	    };

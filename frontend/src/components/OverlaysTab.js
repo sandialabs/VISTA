@@ -93,7 +93,7 @@ function buildOverlayBuckets({ parts, images }) {
         return {
           partId: part.id,
           partName: part.display_name || part.serial_number || 'Unassigned part',
-          image: { ...image, side: record.side || '' },
+          image,
           overlays: [],
         };
       })
@@ -113,19 +113,16 @@ function buildOverlayBuckets({ parts, images }) {
         if (!overlayKey || assignedOverlayKeys.has(overlayKey)) return;
         const baseImageId = String(record.overlay_base_image_id || '').trim();
         const baseFilename = String(record.overlay_base_filename || '').trim();
-        const fallbackSide = String(record.side || '').trim().toLowerCase();
         let target = null;
         if (baseImageId) {
           target = bucketsByImageId.get(baseImageId) || null;
         } else if (baseFilename) {
           const candidates = bucketsByFilename.get(baseFilename) || [];
           if (candidates.length === 1) [target] = candidates;
-        } else if (fallbackSide) {
-          const candidates = bases.filter((bucket) => String(bucket.image.side || '').trim().toLowerCase() === fallbackSide);
-          if (candidates.length === 1) [target] = candidates;
-        } else if (bases.length === 1) {
-          [target] = bases;
         }
+        // Overlays are paired only through an explicit base reference. VISTA
+        // does not infer the base from matching user metadata (e.g. side) or
+        // from there being a single base image; such overlays stay unassigned.
         if (!target) return;
         target.overlays.push(overlayRef);
         assignedOverlayKeys.add(overlayKey);
