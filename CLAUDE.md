@@ -430,6 +430,7 @@ The UI uses `react-router-dom` 7.x (imports come only from `react-router-dom`; t
 - Create React App's Jest cannot read the `exports` map in `package.json`, so `frontend/package.json` has a `jest.moduleNameMapper` entry for `react-router/dom`. Do not remove it or the suites that import the router fail to load.
 - Router 7 needs `TextEncoder`/`TextDecoder`, which jsdom omits; `frontend/src/setupTests.js` defines them.
 - Lockfiles (`uv.lock`, `frontend/package-lock.json`) must resolve only from public indexes (`pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`). Never commit internal mirror URLs or insecure-host/TLS-skipping settings; pass such flags only on a local command line.
+- `frontend/package.json` `overrides` patch Create React App's pinned transitive dependencies: `underscore` ^1.13.8, `serialize-javascript` ^7.1.4, `uuid` ^11.1.1 (under `sockjs`) and `@tootallnate/once` ^2.0.1 (under `http-proxy-agent`). Each is API-compatible with its caller; `backend/tests/test_frontend_package_scripts.py` keeps them in place. `npm audit` is 18 findings (4 high, 2 moderate, 12 low). The remaining highs (`svgo` via `@svgr/plugin-svgo`, `webpack-dev-server`, `webpack-dev-middleware`) need major versions that `react-scripts` 5 cannot use, and they cannot be fixed without migrating off CRA. They are build or dev-server tooling only: the production image ships only the compiled bundle, and `src` imports no SVG components. Do not run `npm audit fix --force`; it installs `react-scripts@0.0.0`.
 
 ## Container Image Scan
 

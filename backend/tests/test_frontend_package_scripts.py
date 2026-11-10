@@ -67,3 +67,36 @@ def test_frontend_npm_script_commands_are_declared_dependencies():
         "npm scripts reference package-provided commands that are not declared "
         f"in frontend/package.json: {missing}"
     )
+
+
+# Security overrides for Create React App's pinned transitive dependencies. Each maps to a
+# patched release that is API-compatible with its caller; dropping one reintroduces advisories.
+SECURITY_OVERRIDES = {
+    "underscore": "^1.13.8",
+    "serialize-javascript": "^7.1.4",
+    "sockjs": {"uuid": "^11.1.1"},
+    "http-proxy-agent": {"@tootallnate/once": "^2.0.1"},
+}
+
+
+def _locked_versions(name):
+    lock_path = REPO_ROOT / "frontend" / "package-lock.json"
+    packages = json.loads(lock_path.read_text(encoding="utf-8"))["packages"]
+    suffix = f"node_modules/{name}"
+    return {meta["version"] for path, meta in packages.items() if path.endswith(suffix)}
+
+
+def test_security_overrides_stay_in_package_json_and_the_lockfile():
+    overrides = _load_frontend_package()["overrides"]
+    for name, spec in SECURITY_OVERRIDES.items():
+        assert overrides.get(name) == spec, name
+    for name, floor in (
+        ("underscore", (1, 13, 8)),
+        ("serialize-javascript", (7, 1, 4)),
+        ("uuid", (11, 1, 1)),
+        ("@tootallnate/once", (2, 0, 1)),
+    ):
+        versions = _locked_versions(name)
+        assert versions, name
+        for version in versions:
+            assert tuple(int(part) for part in version.split(".")[:3]) >= floor, (name, version)
