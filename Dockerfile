@@ -19,7 +19,6 @@ FROM ${UBI_MINIMAL} AS base
 RUN microdnf upgrade -y --nodocs && \
     microdnf install -y --nodocs \
     python3.11 \
-    python3.11-pip \
     ca-certificates \
     && microdnf clean all
 
@@ -27,18 +26,9 @@ RUN microdnf upgrade -y --nodocs && \
 RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.11 /usr/bin/python
 
-# Create a Python virtual environment
-RUN python3 -m venv /opt/venv
+# The virtual environment is created and filled in the builder stage and copied into final.
+# The runtime image carries no pip, setuptools seed or uv.
 ENV PATH="/opt/venv/bin:$PATH"
-
-# Install uv. setuptools is upgraded here because the venv is seeded with the OS-packaged
-# 65.5.1, which carries known vulnerabilities. debugpy is not installed in the image.
-RUN pip install --no-cache-dir --upgrade pip setuptools uv
-# ultralytics and every other runtime dependency come from uv.lock in the builder
-# stage. Do not pip install them here: this stage's /opt/venv is also the base of
-# the final stage, and COPY --from=builder only adds files, so anything installed
-# here (for example the GUI opencv-python with its bundled FFmpeg) would survive
-# into the shipped image.
 
 WORKDIR /app
 
@@ -68,6 +58,12 @@ RUN mkdir -p /checkpoints && \
     echo "${SAM_VIT_B_SHA256}  /checkpoints/sam_vit_b_01ec64.pth" | sha256sum -c -
 
 FROM base AS builder
+
+# pip and uv exist only in this stage. The venv is seedless (no pip or setuptools of its own),
+# so the OS-packaged setuptools never lands in /opt/venv; uv installs the locked versions.
+RUN microdnf install -y --nodocs python3.11-pip && microdnf clean all && \
+    python3.11 -m pip install --no-cache-dir uv && \
+    uv venv --python /usr/bin/python3.11 /opt/venv
 
 # Install Python dependencies
 COPY pyproject.toml uv.lock ./
@@ -111,13 +107,6 @@ RUN python -c "import cv2; assert 'FFMPEG' not in cv2.getBuildInformation(), 'cv
         -o -name 'libswscale*' -o -name 'libswresample*' -o -name 'opencv_python.libs' \
         -o -name 'opencv_python-*.dist-info' -o -name 'opencv_python_headless.libs' \) | grep -q .
 
-# Install uv in the final stage for testing
-RUN pip install --no-cache-dir uv
-
-# Copy pyproject.toml and lockfile (needed for installing dev deps in CI)
-COPY pyproject.toml uv.lock ./
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-
 # Copy backend code
 COPY --from=builder /app/backend /app/backend
 # Download the bundled default checkpoints used by Analyze (public weights
@@ -144,3 +133,14 @@ EXPOSE 8000
 # with uvicorn so container signals are delivered to the server process.
 WORKDIR /app/backend
 CMD ["bash", "/app/backend/scripts/start_production_server.sh"]
+
+# ---- test: final plus uv and the project files, so CI can install dev dependencies and run the
+# suites inside the image. Never shipped. Build it with --target test. ----
+FROM final AS test
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY pyproject.toml uv.lock /app/
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+
+# ---- release: the default build target, identical to final. Keeping it last means a plain
+# `docker build .` produces the production image and never the test image. ----
+FROM final AS release

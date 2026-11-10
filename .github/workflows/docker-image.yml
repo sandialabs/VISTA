@@ -164,14 +164,15 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build Docker image
+    - name: Build test image
+      # The test stage is the production image plus uv; it is never pushed.
       uses: docker/build-push-action@v5
       with:
         context: .
+        target: test
         load: true
         tags: |
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -191,7 +192,7 @@ jobs:
           -e POSTGRES_DB=postgres \
           -e POSTGRES_SERVER=localhost \
           -p 8000:8000 \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test \
           bash -c "uv sync --frozen --inexact --no-install-package opencv-python-headless && uvicorn main:app --host 0.0.0.0 --port 8000"
         
         # Wait for container to start and implement health checking with retry
@@ -230,7 +231,7 @@ jobs:
           -e POSTGRES_DB=postgres \
           -e POSTGRES_SERVER=localhost \
           --workdir /app \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test \
           bash -c "uv sync --frozen && bash test/run_tests.sh --backend"
 
     - name: Push Docker image

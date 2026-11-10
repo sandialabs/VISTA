@@ -208,7 +208,7 @@ def test_runtime_base_installs_only_python_and_certificates():
     packages.discard("microdnf")
     assert {"python3.11", "ca-certificates"} <= packages
     denied = re.compile(
-        r"^(gcc|gcc-c\+\+|git|wget|gtk3|webkit.*|atk|at-spi2-atk|alsa-lib|cups-libs|pango"
+        r"^(gcc|gcc-c\+\+|git|wget|python3\.11-pip|gtk3|webkit.*|atk|at-spi2-atk|alsa-lib|cups-libs|pango"
         r"|libX.*|libxcb|libdrm|libgbm|.*-devel)$"
     )
     assert not [name for name in packages if denied.match(name)]
@@ -255,7 +255,7 @@ def test_runtime_image_has_no_debugger_and_current_setuptools():
         if not line.lstrip().startswith("#")
     )
     assert "debugpy" not in instructions
-    assert re.search(r"pip install .*--upgrade pip setuptools uv", instructions)
+    assert "uv venv" in instructions
     for package, minimum in (
         ("fastmcp", (3, 4, 10)),
         ("fastmcp-slim", (3, 4, 10)),
@@ -264,6 +264,46 @@ def test_runtime_image_has_no_debugger_and_current_setuptools():
     ):
         version = tuple(int(part) for part in _locked_version(package).split("."))
         assert version >= minimum, package
+
+
+def _instructions(dockerfile: str, name: str) -> str:
+    return "\n".join(
+        line
+        for line in _dockerfile_stage(dockerfile, name).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_runtime_stages_carry_no_pip_or_uv_and_the_venv_is_seedless():
+    """Only builder (and the CI-only test stage) may have pip or uv."""
+    dockerfile = _read_repo_file("Dockerfile")
+    for name in ("base", "final"):
+        instructions = _instructions(dockerfile, name)
+        assert not re.search(r"\b(pip|uv)\b", instructions), name
+    builder = _instructions(dockerfile, "builder")
+    assert "uv venv --python /usr/bin/python3.11 /opt/venv" in builder
+    assert "python3 -m venv" not in dockerfile
+
+
+def test_test_stage_adds_uv_and_release_stays_the_default_target():
+    """CI tests run in a separate stage; a plain build must produce the production image."""
+    dockerfile = _read_repo_file("Dockerfile")
+    test_stage = _dockerfile_stage(dockerfile, "test")
+    assert test_stage.startswith("FROM final AS test")
+    assert "COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv" in test_stage
+    assert "uv.lock" in test_stage
+    # CI starts uvicorn from the inherited working directory (/app/backend).
+    assert "WORKDIR" not in test_stage
+    last_from = re.findall(r"^FROM .*$", dockerfile, flags=re.MULTILINE)[-1]
+    assert last_from == "FROM final AS release"
+
+
+def test_ci_builds_and_tests_the_test_target_and_ships_the_default_target():
+    """The workflow tests the test stage and publishes the production stage."""
+    workflow = _read_repo_file(".github/workflows/docker-image.yml")
+    assert re.search(r"target: test", workflow)
+    assert ":test" in workflow
+    assert "uv sync --frozen --inexact --no-install-package opencv-python-headless" in workflow
 
 
 def test_image_scan_script_parses_and_documents_its_usage():
