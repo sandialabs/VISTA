@@ -83,7 +83,10 @@ const scenarioByUser = {
           defects: [{ severity: 'minor' }, { severity: 'critical' }],
           configured_views: ['front', 'back', 'left', 'right'],
           modalities: ['visual', 'infrared'],
-          view_images: { front: 'housing-mid-front.png', right: 'housing-mid-right.png' },
+          source_images: [
+            { filename: 'housing-mid-front.png', side: 'front', modality: 'visual' },
+            { filename: 'housing-mid-right.png', side: 'right', modality: 'visual' },
+          ],
           volume_shape: { axial: 64, coronal: 56, sagittal: 40 },
           overlay_layers: [
             { id: 'segmentation', label: 'Segmentation', color: '#ef4444' },
@@ -152,7 +155,10 @@ const scenarioByUser = {
           defects: [{ severity: 'critical' }, { severity: 'critical' }, { severity: 'major' }],
           configured_views: ['front', 'back', 'left', 'right', 'top', 'bottom'],
           modalities: ['visual', 'infrared', 'uv'],
-          view_images: { front: 'housing-adv-front.png', top: 'housing-adv-top.png' },
+          source_images: [
+            { filename: 'housing-adv-front.png', side: 'front', modality: 'visual' },
+            { filename: 'housing-adv-top.png', side: 'top', modality: 'visual' },
+          ],
           volume_shape: { axial: 128, coronal: 96, sagittal: 80 },
           overlay_layers: [
             { id: 'segmentation', label: 'Segmentation', color: '#ef4444' },
@@ -206,8 +212,15 @@ const scenarioByUser = {
   },
 };
 
-function createMockData(scenario = 'advanced') {
-  return scenarioByUser[scenario] || scenarioByUser.advanced;
+function createMockData(scenario = 'advanced', type = 'PT1') {
+  const data = scenarioByUser[scenario] || scenarioByUser.advanced;
+  if (type !== 'PT3') return data;
+  // A PT3 part is a volume: explicit 2D source images would be read as its image stack
+  // instead of its volume_shape, so PT3 parts keep none.
+  return {
+    ...data,
+    parts: data.parts.map(({ metadata: { source_images: _sourceImages, ...metadata }, ...part }) => ({ ...part, metadata })),
+  };
 }
 
 function collectMockImageRecords(parts = []) {
@@ -253,7 +266,7 @@ async function mockInspectionWorkbenchRoutes(page, {
   realSplatSegmentIds = null,
   seededAnnotations = null,
 } = {}) {
-  const { batches, parts, workspaceState } = createMockData(scenario);
+  const { batches, parts, workspaceState } = createMockData(scenario, type);
   const responseWorkspaceState = mockWorkspaceState && typeof mockWorkspaceState === 'object'
     ? mockWorkspaceState
     : workspaceState;

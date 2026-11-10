@@ -2,7 +2,7 @@ import { ALL_PARTS_ID } from './useInspectionPartSelection';
 import { parseMetadataBoolean } from '../../utils/imageIdentity';
 import { getProjectImageRecord, isDeletedProjectImageRecord } from './imageLookup';
 import { safeDecodeFilename } from './inspectionUtils';
-import { isServerVolumeDescriptor } from './volumeDescriptors';
+import { isServerVolumeDescriptor, isVolumeFileEntry } from './volumeDescriptors';
 import { formatAnnotationTimestamp } from './annotationListHelpers';
 import { getInspectionImageOrderKey, applyInspectionImageDisplayOrder } from './imageSorting';
 
@@ -84,9 +84,13 @@ export function getDiscoveredModalities(part) {
   return getModalities(part).map((value) => value.toLowerCase());
 }
 
+// Shell layers are 2D images drawn behind the reconstruction. A volume file
+// (.npy, .npz, 3D TIFF, ...) is never one of them: its `/content` URL would
+// download the whole file, which large volumes avoid by loading slice by slice.
 export function getShellImageLayers(part, projectImageLookup = {}) {
   return getPartImageRefs(part, projectImageLookup)
     .filter((entry) => !entry.overlay && !entry.cropChild)
+    .filter((entry) => !isVolumeFileEntry(entry, projectImageLookup))
     .map((entry) => {
       const record = getProjectImageRecord(projectImageLookup, {
         image_id: entry.imageId,

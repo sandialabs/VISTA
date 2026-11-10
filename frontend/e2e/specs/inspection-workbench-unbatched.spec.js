@@ -39,7 +39,7 @@ test('shows selected part images after removing it from a saved batch filter', a
   await expect(page.getByLabel('Batch', { exact: true })).toHaveValue('');
   await expect(page.getByRole('heading', { name: 'Unbatched Part' })).toBeVisible();
   await expect(page.getByText('unbatched-front.png')).toBeVisible();
-  await expect(page.getByAltText('front view')).toBeVisible();
+  await expect(page.getByAltText('unbatched-front.png view')).toBeVisible();
   await expect
     .poll(() => getImageAssetRequests().filter((request) => request.imageId === imageId).length)
     .toBeGreaterThan(0);

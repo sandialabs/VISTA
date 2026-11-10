@@ -94,10 +94,10 @@ async function mockFullInspectionWorkflowRoutes(page) {
       review_state: 'unreviewed',
       metadata: {
         defects: [{ severity: 'minor' }],
-        view_images: {
-          front: 'part-a-front.png',
-          back: 'part-a-back.png',
-        },
+        source_images: [
+          { filename: 'part-a-front.png', side: 'front' },
+          { filename: 'part-a-back.png', side: 'back' },
+        ],
       },
     },
     {
@@ -108,9 +108,9 @@ async function mockFullInspectionWorkflowRoutes(page) {
       review_state: 'unreviewed',
       metadata: {
         defects: [{ severity: 'critical' }],
-        view_images: {
-          front: 'part-b-front.png',
-        },
+        source_images: [
+          { filename: 'part-b-front.png', side: 'front' },
+        ],
       },
     },
     {
@@ -121,7 +121,7 @@ async function mockFullInspectionWorkflowRoutes(page) {
       review_state: 'unreviewed',
       metadata: {
         defects: [],
-        view_images: {},
+        source_images: [],
       },
     },
   ];

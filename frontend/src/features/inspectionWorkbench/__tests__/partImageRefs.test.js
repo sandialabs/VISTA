@@ -2,6 +2,7 @@ import {
   getAggregatePartImageRefs,
   getAnnotationSourceImageId,
   getPartImageRefs,
+  getShellImageLayers,
   isInspectionItemForImageEntry,
 } from '../partImageRefs';
 
@@ -75,5 +76,29 @@ describe('annotation image ownership', () => {
     expect(isInspectionItemForImageEntry(measurementOn('base'), heatEntry, ownershipLookup)).toBe(false);
     expect(isInspectionItemForImageEntry(measurementOn('heat'), heatEntry, ownershipLookup)).toBe(true);
     expect(isInspectionItemForImageEntry(measurementOn('heat'), baseEntry, ownershipLookup)).toBe(false);
+  });
+});
+
+describe('shell image layers', () => {
+  const volumePart = {
+    id: 'part-3d',
+    metadata: {
+      source_images: [
+        { image_id: 'volume-npy', filename: 'large-volume.npy' },
+        { image_id: 'volume-tiff', filename: 'stack.tiff', tiff_dimensionality: '3d' },
+        { image_id: 'photo', filename: 'photo.png', side: 'front' },
+      ],
+    },
+  };
+  const lookup = {
+    'volume-npy': { id: 'volume-npy', filename: 'large-volume.npy' },
+    'volume-tiff': { id: 'volume-tiff', filename: 'stack.tiff' },
+    photo: { id: 'photo', filename: 'photo.png' },
+  };
+
+  test('never include a volume file, whose content URL would download the whole file', () => {
+    const layers = getShellImageLayers(volumePart, lookup);
+    expect(layers.map((layer) => layer.id)).toEqual(['photo']);
+    expect(layers.map((layer) => layer.url)).not.toContain('/api/images/volume-npy/content');
   });
 });
