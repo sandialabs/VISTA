@@ -2,7 +2,7 @@ name: "Security Scanning"
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, vista-tk ]
   pull_request:
     branches: [ main ]
   schedule:

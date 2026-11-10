@@ -2,7 +2,7 @@ name: SBOM and Vulnerability Scan
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, vista-tk ]
   pull_request:
     branches: [ main ]
 
