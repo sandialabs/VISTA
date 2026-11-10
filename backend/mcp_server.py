@@ -17,7 +17,7 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import StaticTokenVerifier
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core import models
+from core import group_snapshot, models
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.group_auth_helper import is_user_in_group
@@ -66,7 +66,14 @@ auth_provider = StaticTokenVerifier(
 )
 
 # Initialize MCP server with HTTP and authentication
-mcp = FastMCP("VISTA", auth=auth_provider)
+@asynccontextmanager
+async def _mcp_lifespan(server):
+    """Keep the proxy-asserted group snapshot loaded (core.group_snapshot)."""
+    async with group_snapshot.running():
+        yield
+
+
+mcp = FastMCP("VISTA", auth=auth_provider, lifespan=_mcp_lifespan)
 
 
 # Database session helper

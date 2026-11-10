@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import group_snapshot
 from core.database import get_db
 from repositories import api_keys as api_key_repository
 from schemas import api_keys as api_key_schemas
@@ -40,6 +41,8 @@ async def create_api_key(
         user_id=current_user.id,
         key_hash=key_hash,
         created_by=current_user.email,
+        # The creator's groups as the proxy asserted them on this request.
+        groups=group_snapshot.groups_for_new_key(current_user.email),
     )
 
     # Return both the API key record and the raw key (only shown once)
@@ -65,6 +68,7 @@ async def list_api_keys(
             "name": key.name,
             "user_id": key.user_id,
             "is_active": key.is_active,
+            "groups": key.groups,
             "last_used_at": key.last_used_at,
             "created_at": key.created_at,
             "updated_at": key.updated_at,

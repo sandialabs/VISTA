@@ -67,6 +67,12 @@ PROXY_SHARED_SECRET=<generate-with-openssl-rand-hex-32>
 X_USER_ID_HEADER=X-User-Email
 X_PROXY_SECRET_HEADER=X-Proxy-Secret
 
+# --- Group authorization (VISTA_AUTH_BACKEND=custom) ---
+VISTA_AUTH_BACKEND=custom
+X_USER_GROUPS_HEADER=X-Forwarded-Groups
+GROUPS_SNAPSHOT_TTL_SECONDS=604800
+GROUPS_SNAPSHOT_REFRESH_SECONDS=60
+
 # --- ML analysis (optional) ---
 ML_ANALYSIS_ENABLED=true
 ML_ALLOWED_MODELS=yolo_v8,resnet50
@@ -202,24 +208,65 @@ curl -i \
 Projects belong to groups (`meta_group_id`).  Users must be members of a
 project's group to access it.
 
-### Customizing Group Membership
+### Backends
 
-`core.group_auth._check_group_membership` is **fail-closed** -- it raises
-`NotImplementedError` until you configure a backend. You must set
+`core.group_auth._check_group_membership` is **fail-closed**. You must set
 `VISTA_AUTH_BACKEND` (see `.env.example`):
 
 - `demo` -- hardcoded example mapping. Development and tests only; refused
   at startup when `ENV=production`.
-- `custom` -- your real auth integration.
+- `custom` -- membership from the groups your proxy asserts (below), or from
+  your own integration if you replace the `custom` branch of
+  `_check_group_membership` (for example an LDAP or OIDC userinfo lookup).
 
-For production, set `VISTA_AUTH_BACKEND=custom`, edit
-`backend/core/group_auth.py`, and replace the `custom` branch of
-`_check_group_membership`.
+### Groups from the proxy (`custom`)
 
-VISTA ships with `AUTH_SERVER_URL` on `core.config.Settings`. Any
-additional knobs the example below references (e.g. an API token) must
-be added by the integrator -- either as new `Settings` fields or via
-`os.getenv()`. They are not pre-defined.
+The proxy that authenticates the user already knows their groups from the
+identity provider and can pass them the same way it passes the email.
+oauth2-proxy sends `X-Forwarded-Groups: group-a,group-b` and strips any copy
+the client sent. Set `X_USER_GROUPS_HEADER` if your proxy uses another name.
+
+- On every proxied request, after the `X-Proxy-Secret` check passed,
+  `get_current_user` records the user's groups (`core/group_snapshot.py`).
+  Each request is a full assertion: it replaces the user's groups, and a missing
+  header means no groups (a warning is logged once).
+- Membership checks read what is recorded for the user, so they do not depend on
+  which request is running. A request with no proxy headers of its own (the MCP
+  server, a background task) gets its user's groups as of their last proxied
+  request, for `GROUPS_SNAPSHOT_TTL_SECONDS` (default 7 days). A user who has
+  not signed in through the proxy within the TTL, or never has, is a member of
+  nothing there.
+- **API keys carry their own groups.** A key created while `custom` is active
+  stores its creator's groups as the proxy asserted them on the creating
+  request (`api_keys.groups`, shown in `GET /api/api-keys`). A request made
+  with the key is answered from exactly those groups, with no expiry, so an
+  unattended workflow keeps working however long since its owner signed in.
+  The key does not follow later changes to the owner's groups: to revoke or
+  change its access, deactivate it and create a new one while signed in with
+  the right groups. A key created before this was added has no stored groups
+  and falls back to its owner's recorded groups (the TTL above); recreate it
+  for unattended use.
+- Records are kept in the `user_group_snapshots` table (run
+  `alembic upgrade head`), shared by all replicas, and held in memory by each
+  process, which reloads them every `GROUPS_SNAPSHOT_REFRESH_SECONDS`. If a write
+  fails it is logged and the request is not affected.
+- The app refuses to start with `custom` and no `PROXY_SHARED_SECRET`, unless
+  `DEBUG` or `SKIP_HEADER_CHECK` is on (the groups header is trusted only with
+  the secret).
+- Group names may not contain commas (an LDAP distinguished name, for example).
+  The groups are whatever the IdP puts in the claim the proxy reads. VISTA's
+  admin checks use a group named `admin`.
+- Removing a user from a group takes effect on their next proxied request. For
+  API-key and MCP requests it takes effect when they next sign in, or when the
+  TTL passes.
+
+### Your own integration
+
+To use another source instead, edit `backend/core/group_auth.py` and replace
+the `custom` branch of `_check_group_membership`. VISTA ships with
+`AUTH_SERVER_URL` on `core.config.Settings`. Any additional knobs the example
+below references (e.g. an API token) must be added by the integrator -- either
+as new `Settings` fields or via `os.getenv()`. They are not pre-defined.
 
 ```python
 import os
@@ -242,15 +289,15 @@ def _check_group_membership(user_email: str, group_id: str) -> bool:
     # ... leave the demo / fallthrough branches intact
 ```
 
-On startup, `run_auth_startup_self_test()` verifies the stub was replaced
-and that the hardcoded demo emails (`admin@example.com`,
-`scientist@example.com`, `user@example.com`) do **not** resolve as members
-of the demo groups. If they do, the app refuses to start -- this catches
-deployments that forgot to replace the helper, or that accidentally named a
-real user after one of the demo emails.
+On startup, `run_auth_startup_self_test()` verifies that the hardcoded demo
+emails (`admin@example.com`, `scientist@example.com`, `user@example.com`) do
+**not** resolve as members of the demo groups. If they do, the app refuses to
+start -- this catches deployments that granted access to a demo email, or that
+accidentally named a real user after one.
 
 Membership checks are cached for 5 minutes by default (configurable in
-`backend/core/group_auth_helper.py`).
+`backend/core/group_auth_helper.py`). The proxy-groups backend bypasses that
+cache: its answer is already in memory.
 
 ## Security Considerations
 
@@ -284,13 +331,14 @@ Membership checks are cached for 5 minutes by default (configurable in
 - [ ] `PROXY_SHARED_SECRET` set (matches proxy config)
 - [ ] `alembic upgrade head` run
 - [ ] Production database and S3/MinIO configured
-- [ ] Custom `_check_group_membership` implemented (startup self-test passes)
+- [ ] Groups source chosen: proxy groups header (`X_USER_GROUPS_HEADER`) or your own `_check_group_membership` (startup self-test passes)
+- [ ] Proxy passes the user's groups header (oauth2-proxy: `X-Forwarded-Groups`)
 
 **Reverse Proxy:**
 - [ ] OAuth2/SAML/LDAP configured for `/api/` (browser users)
 - [ ] `/ext/` location block added (no OAuth, forwards Authorization header)
 - [ ] `/ext/` rewrites to `/api/` on the backend (trailing slash in proxy_pass)
-- [ ] `X-User-Email` and `X-Proxy-Secret` injected for OAuth users
+- [ ] `X-User-Email` and `X-Proxy-Secret` injected for OAuth users, and the groups header passed through (the client's own copy stripped)
 - [ ] Rate limiting configured on both `/api/` and `/ext/`
 - [ ] HTTPS with valid TLS certificate
 - [ ] Health endpoint (`/api/health`) accessible without auth
@@ -329,6 +377,21 @@ Membership checks are cached for 5 minutes by default (configurable in
 ### 403 on project access
 - User is not a member of the project's `meta_group_id`.
 - Check `_check_group_membership` implementation and cache TTL.
+- With proxy groups: confirm the proxy sends the groups header
+  (`X_USER_GROUPS_HEADER`) and the IdP's claim holds the project's group name.
+  A "no groups header" warning in the backend log means it does not.
+
+### Projects empty for API keys or the MCP server
+- A key created after per-key groups were added carries its creator's groups
+  (see `groups` in `GET /api/api-keys`). An empty list means the creator had no
+  groups when it was made: create a new key while signed in through the proxy.
+- A key with no stored groups (made earlier) needs its owner to have made a
+  proxied request within `GROUPS_SNAPSHOT_TTL_SECONDS`: have them open the UI, or
+  recreate the key.
+- For the MCP server, check the `user_group_snapshots` table exists
+  (`alembic upgrade head`) and the username's email matches the proxy's
+  `X-User-Email` (case-insensitive). Usernames without an `@` become
+  `name@local` and never match.
 
 ## Additional Resources
 

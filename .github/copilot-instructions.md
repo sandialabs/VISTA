@@ -100,6 +100,18 @@ Images can be organized into named groups (e.g., by part or serial number) using
 - `ImageUploader.js` shows a "Use as Group Identifier" dropdown for non-PT1 projects when `FilenameMetadataExtractor` keys are configured.
 - Tests: `backend/tests/test_groups.py`.
 
+## Proxy-Asserted Group Membership
+
+With `VISTA_AUTH_BACKEND=custom`, group membership comes from the groups the reverse proxy asserts, not from a stub that raises.
+
+- `get_current_user` (proxy path, after the `X-Proxy-Secret` check) reads `X_USER_GROUPS_HEADER` (default `X-Forwarded-Groups`) and calls `group_snapshot.record(email, groups)`. Each proxied request replaces the user's groups; a missing header means none.
+- `core/group_snapshot.py` keeps them in memory and in the `user_group_snapshots` table (model `UserGroupSnapshot`, migration `backend/alembic/versions/20261109_0011_add_user_group_snapshots.py`). `is_member(email, group)` is synchronous and memory-only, so existing `is_user_in_group` call sites are unchanged.
+- A new API key stores its creator's asserted groups (`api_keys.groups`, migration `20261110_0012`). They do not expire; deactivating the key revokes them. `_resolve_from_api_key` sets `User.key_groups` (never serialized) and `is_user_in_group(email, group, user)` answers from it for that user only, so call sites that have the user pass it as the third argument. Keys made before the migration (`groups` NULL) use their owner's last-asserted groups instead.
+- The MCP server, background tasks and legacy keys carry no proxy headers; they get their user's last-asserted groups for `GROUPS_SNAPSHOT_TTL_SECONDS` (default 7 days). `GROUPS_SNAPSHOT_REFRESH_SECONDS` (default 60) sets how often each process reloads the table. The API and MCP server start the reload through their lifespans (`group_snapshot.running()`).
+- `custom` without `PROXY_SHARED_SECRET` refuses to start unless `DEBUG` or `SKIP_HEADER_CHECK` is on. Group names may not contain commas.
+- `utils/boto3_client.py` uses boto3's default credential chain when `S3_ACCESS_KEY` or `S3_SECRET_KEY` is empty.
+- Docs: `docs/production/proxy-setup.md`. Tests: `backend/tests/test_group_snapshot.py`.
+
 ## Inspection Workbench All Part
 
 - `InspectionWorkbenchPanel` renders a frontend-only `All` row above real inspection parts using the reserved selection ID `__all_parts__`.

@@ -46,7 +46,9 @@ async def read_current_user_groups(
     # For each project, check if the user is a member of the project's group
     for project in all_projects:
         if (
-            is_user_in_group(current_user.email, project.meta_group_id)
+            is_user_in_group(
+                current_user.email, project.meta_group_id, current_user
+            )
             and project.meta_group_id not in user_groups
         ):
             user_groups.append(project.meta_group_id)

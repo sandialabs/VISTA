@@ -86,7 +86,7 @@ def test_update_project_access_group_rejects_unauthorized_destination_without_mu
     project_id = create_resp.json()["id"]
 
     with _group_membership(
-        side_effect=lambda _email, group_id: group_id == source_group
+        side_effect=lambda _email, group_id, _user=None: group_id == source_group
     ):
         update_resp = client.put(
             f"/api/projects/{project_id}",

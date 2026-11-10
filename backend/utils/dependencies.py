@@ -10,14 +10,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core import models
+from core import group_snapshot, models
 from core.config import settings
 from core.database import get_db
-from core.group_auth import (
-    clear_request_identity,
-    parse_groups_header,
-    set_request_identity,
-)
+from core.group_auth import parse_groups_header
 from core.group_auth_helper import is_user_in_group
 from repositories import api_keys as api_key_repository
 from repositories import images as image_repository
@@ -116,6 +112,13 @@ async def _resolve_from_api_key(
                 created_at=api_key_record.user.created_at,
                 updated_at=api_key_record.user.updated_at,
                 groups=[],
+                # A key with its own groups grants those, whatever its owner's
+                # groups are now; one without falls back to the owner's record.
+                key_groups=(
+                    frozenset(api_key_record.groups)
+                    if group_snapshot.enabled() and api_key_record.groups is not None
+                    else None
+                ),
             )
     return None
 
@@ -132,9 +135,6 @@ async def get_current_user(
     2. Debug / test mode -- header email or MOCK_USER_EMAIL fallback
     3. Production proxy headers (X-User-Email + X-Proxy-Secret)
     """
-    # Only the proxy path below binds the user's groups to this request.
-    clear_request_identity()
-
     # 1. Bearer token -> API key
     if credentials:
         user = await _resolve_from_api_key(credentials, db)
@@ -169,13 +169,17 @@ async def get_current_user(
             detail="Authentication required. Provide API key or ensure proxy auth headers are present.",
         )
     request.state.auth_method = "proxy"
-    # The proxy's groups header is as trustworthy as its user header: only when
-    # the shared secret was checked above.
-    if settings.PROXY_SHARED_SECRET:
-        set_request_identity(
-            email,
-            parse_groups_header(request.headers.getlist(settings.X_USER_GROUPS_HEADER)),
-        )
+    # The proxy's groups header is as trustworthy as its user header: record it
+    # only when the shared secret was checked above. Every proxy request is a full
+    # assertion, so a missing header means no groups.
+    if group_snapshot.enabled():
+        if settings.PROXY_SHARED_SECRET:
+            values = request.headers.getlist(settings.X_USER_GROUPS_HEADER)
+            if not values:
+                group_snapshot.warn_no_groups_header(settings.X_USER_GROUPS_HEADER)
+            await group_snapshot.record(email, parse_groups_header(values))
+        else:
+            group_snapshot.warn_unverified_proxy()
     return await _ensure_user_in_db(email, db)
 
 
@@ -212,7 +216,7 @@ async def get_accessible_projects_for_user(
     all_projects = await project_repository.get_all_projects(
         db, skip, limit, include_archived=include_archived
     )
-    return [p for p in all_projects if is_user_in_group(user.email, p.meta_group_id)]
+    return [p for p in all_projects if is_user_in_group(user.email, p.meta_group_id, user)]
 
 
 ARCHIVED_PROJECT_DETAIL = (
@@ -243,7 +247,9 @@ async def get_project_or_403(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
-    if not is_user_in_group(current_user.email, db_project.meta_group_id):
+    if not is_user_in_group(
+        current_user.email, db_project.meta_group_id, current_user
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{current_user.email}' does not have access to project '{project_id}'.",
@@ -279,7 +285,9 @@ async def get_image_or_403(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Image not found"
         )
-    if not is_user_in_group(current_user.email, db_image.project.meta_group_id):
+    if not is_user_in_group(
+        current_user.email, db_image.project.meta_group_id, current_user
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{current_user.email}' does not have access to image '{image_id}'",

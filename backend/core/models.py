@@ -423,6 +423,11 @@ class ApiKey(Base):
     name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
+    # The groups the key grants: its creator's groups, as the authenticating proxy
+    # asserted them when the key was made (VISTA_AUTH_BACKEND=custom). NULL for a
+    # key made before that, or under another backend: the owner's recorded groups
+    # apply instead (core.group_snapshot).
+    groups = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -561,3 +566,18 @@ class ImageReview(Base):
     image = relationship("DataInstance", back_populates="reviews")
     project = relationship("Project", back_populates="reviews")
     reviewer = relationship("User", back_populates="reviews")
+
+
+class UserGroupSnapshot(Base):
+    """A user's groups as the authenticating proxy last asserted them.
+
+    One row per (email, group). Written by core.group_snapshot on every proxy
+    request that changes them, and read back by every process, so an API-key or
+    MCP request for the same user sees the same groups.
+    """
+
+    __tablename__ = "user_group_snapshots"
+
+    email = Column(String(255), primary_key=True)
+    group_id = Column(String(255), primary_key=True)
+    asserted_at = Column(DateTime(timezone=True), nullable=False, index=True)

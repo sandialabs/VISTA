@@ -222,6 +222,20 @@ alembic history --verbose
 
 See README.md "Database Migrations" section for complete details.
 
+## Proxy-Asserted Group Membership
+
+`VISTA_AUTH_BACKEND=custom` answers group membership from the groups the reverse proxy asserts, instead of raising `NotImplementedError`.
+
+- **Header:** `X_USER_GROUPS_HEADER` (default `X-Forwarded-Groups`, comma separated). Read in `get_current_user` on the proxy path only, after the `X-Proxy-Secret` check passed.
+- **Store:** `core/group_snapshot.py` records each user's groups (`email -> groups, asserted_at`) in memory and in the `user_group_snapshots` table (model `UserGroupSnapshot`, migration `20261109_0011`). `is_member` is synchronous and reads memory only, so `is_user_in_group(email, group)` call sites are unchanged. Each proxied request replaces the user's groups; a missing header means none.
+- **API keys:** a key made under `custom` carries its creator's groups as the proxy asserted them when the key was made (`api_keys.groups`, migration `20261110_0012`). They do not expire; deactivating the key revokes them. `_resolve_from_api_key` puts them on the request's `User` as `key_groups` (never serialized), and `is_user_in_group(email, group, user)` answers from them for that user only. Call sites that have the user pass it as the third argument. A key made before the migration (`groups` NULL) falls back to its owner's recorded groups (TTL below). Recreate such keys for unattended jobs.
+- **MCP and keyless callers:** requests with no proxy headers and no key groups (the MCP server, background tasks, legacy keys) get their user's groups from the last proxied request, for `GROUPS_SNAPSHOT_TTL_SECONDS` (default 7 days). The MCP server loads the table through its FastMCP `lifespan`; the API does it in `main.py`'s lifespan (`group_snapshot.running()`).
+- **Replicas:** every process reloads the table each `GROUPS_SNAPSHOT_REFRESH_SECONDS` (default 60).
+- **Fail closed:** no record, an expired one, or another user is not a member. `run_auth_startup_self_test` refuses to start with `custom` and no `PROXY_SHARED_SECRET` unless `DEBUG` or `SKIP_HEADER_CHECK` is on. `group_auth_helper.is_user_in_group` skips its 5-minute cache for `custom`.
+- **Limits:** group names may not contain commas; MCP usernames without `@` never match an IdP email.
+- **S3:** `utils/boto3_client.py` passes static keys to boto3 only when both `S3_ACCESS_KEY` and `S3_SECRET_KEY` are set, so empty keys use boto3's default credential chain (Pod Identity, IRSA).
+- **Tests:** `backend/tests/test_group_snapshot.py`. Docs: `docs/production/proxy-setup.md`.
+
 ## ML Analysis Feature
 
 External ML pipelines integrate via REST API (users cannot trigger analyses directly):

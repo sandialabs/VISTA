@@ -39,7 +39,9 @@ async def create_new_project(
     This uses the new approach of checking if the user is a member of the project's group.
     """
     # Check if the user is a member of the project's group
-    is_member = is_user_in_group(current_user.email, project.meta_group_id)
+    is_member = is_user_in_group(
+        current_user.email, project.meta_group_id, current_user
+    )
 
     if not is_member:
         raise HTTPException(
@@ -133,7 +135,7 @@ async def update_existing_project(
 
     updates = project_update.model_dump(exclude_unset=True)
     if "meta_group_id" in updates and not is_user_in_group(
-        current_user.email, updates["meta_group_id"]
+        current_user.email, updates["meta_group_id"], current_user
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

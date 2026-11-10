@@ -52,12 +52,14 @@ async def create_api_key(
     user_id: uuid.UUID,
     key_hash: str,
     created_by: str | None = None,
+    groups: list[str] | None = None,
 ) -> models.ApiKey:
     """Create an API key for a user and log the creation."""
     db_api_key = models.ApiKey(
         user_id=user_id,
         key_hash=key_hash,
         name=api_key.name,
+        groups=groups,
     )
     db.add(db_api_key)
     await db.commit()

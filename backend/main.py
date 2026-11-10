@@ -13,6 +13,7 @@ from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
+from core import group_snapshot
 from core.config import settings
 from core.config import settings as _app_settings
 from core.database import create_db_and_tables
@@ -199,7 +200,8 @@ async def lifespan(app: FastAPI):
     )
     os.makedirs(tmp_dir, exist_ok=True)
     logger.info("Application startup complete.")
-    yield
+    async with group_snapshot.running():
+        yield
     logger.info("Application shutdown...")
     logger.info("Application shutdown complete.")
 

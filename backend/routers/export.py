@@ -369,7 +369,9 @@ async def _restore_backup_as_new(
             confirmation=confirmation,
             db=db,
             current_user=current_user,
-            can_access_group=is_user_in_group,
+            can_access_group=lambda email, group: is_user_in_group(
+                email, group, current_user
+            ),
         )
     finally:
         await file.close()
@@ -431,7 +433,9 @@ async def _import_backup_into_project(
             db=db,
             current_user=current_user,
             target_project=db_project,
-            can_access_group=is_user_in_group,
+            can_access_group=lambda email, group: is_user_in_group(
+                email, group, current_user
+            ),
         )
     finally:
         await file.close()

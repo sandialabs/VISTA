@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # separated (oauth2-proxy's X-Forwarded-Groups). Read by the "custom"
     # group-auth backend, and only on a request whose X-Proxy-Secret matched.
     X_USER_GROUPS_HEADER: str = "X-Forwarded-Groups"
+    # How long a user's last proxy-asserted groups count for callers that carry
+    # no proxy headers of their own (API keys, the MCP server). Each proxy
+    # request renews them. See core/group_snapshot.py.
+    GROUPS_SNAPSHOT_TTL_SECONDS: int = 604800
+    # How often each process reloads the snapshot table, to see other replicas.
+    GROUPS_SNAPSHOT_REFRESH_SECONDS: int = 60
 
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"

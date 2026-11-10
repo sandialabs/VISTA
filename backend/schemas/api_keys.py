@@ -22,6 +22,7 @@ class ApiKey(ApiKeyBase):
     id: uuid.UUID
     user_id: uuid.UUID
     is_active: bool
+    groups: list[str] | None = None
     last_used_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None

@@ -11,22 +11,12 @@ The built-in ``demo`` backend is for development and automated tests only and
 is refused in production (see ``Settings.validate_production_safety``).
 """
 
-import contextvars
 import logging
 from typing import Dict, Iterable, List
+from . import group_snapshot
 from .config import settings
 
 logger = logging.getLogger(__name__)
-
-
-# The signed-in user and their groups, as the authenticating proxy asserted them
-# on this request: (email, groups). utils.dependencies.get_current_user sets it,
-# only after the request's X-Proxy-Secret matched. It is None everywhere else:
-# an API-key request, a background task, the startup self-test. Each request runs
-# in its own task, whose context holds its own value.
-_request_identity: contextvars.ContextVar[tuple[str, frozenset[str]] | None] = (
-    contextvars.ContextVar("vista_request_identity", default=None)
-)
 
 
 def parse_groups_header(values: Iterable[str] | None) -> frozenset[str]:
@@ -40,26 +30,11 @@ def parse_groups_header(values: Iterable[str] | None) -> frozenset[str]:
     return frozenset(groups)
 
 
-def set_request_identity(user_email: str | None, groups: Iterable[str]) -> None:
-    """Bind the proxy-asserted user and groups to the current request."""
-    if not user_email:
-        _request_identity.set(None)
-        return
-    _request_identity.set((user_email.lower().strip(), frozenset(groups)))
-
-
-def clear_request_identity() -> None:
-    _request_identity.set(None)
-
-
 def _custom_check_group_membership(user_email: str, group_id: str) -> bool:
-    """Membership from the request's own proxy-asserted groups. Fail closed: no
-    identity on this request, or a different user, is not a member."""
-    identity = _request_identity.get()
-    if identity is None:
-        return False
-    email, groups = identity
-    return user_email == email and group_id in groups
+    """Membership from the groups the authenticating proxy last asserted for this
+    user (core.group_snapshot). Fail closed: no snapshot, or an expired one, is
+    not a member."""
+    return group_snapshot.is_member(user_email, group_id)
 
 
 # Hardcoded demo emails that must never resolve as members in a non-demo
@@ -166,8 +141,8 @@ def _check_group_membership(user_email: str, group_id: str) -> bool:
         return _demo_check_group_membership(user_email, group_id)
 
     if backend == "custom":
-        # The groups the authenticating proxy passed on this request
-        # (X_USER_GROUPS_HEADER), for this request's own user only.
+        # The groups the authenticating proxy last asserted for this user
+        # (X_USER_GROUPS_HEADER), kept by core.group_snapshot.
         return _custom_check_group_membership(user_email, group_id)
 
     raise NotImplementedError(
@@ -203,6 +178,17 @@ def run_auth_startup_self_test() -> None:
         raise RuntimeError(
             f"Unknown VISTA_AUTH_BACKEND={backend!r}. "
             "Expected 'demo' or 'custom'."
+        )
+
+    if (
+        backend == "custom"
+        and not (settings.DEBUG or settings.SKIP_HEADER_CHECK)
+        and not settings.PROXY_SHARED_SECRET
+    ):
+        raise RuntimeError(
+            "VISTA_AUTH_BACKEND=custom takes the user's groups from the proxy's "
+            "headers, which are trusted only when PROXY_SHARED_SECRET is set. "
+            "Refusing to start without it."
         )
 
     if backend == "demo" and settings.is_production:

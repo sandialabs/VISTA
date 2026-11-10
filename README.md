@@ -155,6 +155,10 @@ PROXY_SHARED_SECRET=your-secure-secret-here
 AUTH_SERVER_URL=https://your-auth-server.com
 X_USER_ID_HEADER=X-User-Email
 X_PROXY_SECRET_HEADER=X-Proxy-Secret
+# With VISTA_AUTH_BACKEND=custom: the proxy's groups header and how long a
+# user's last groups apply to their API-key requests (see docs/production/proxy-setup.md)
+X_USER_GROUPS_HEADER=X-Forwarded-Groups
+GROUPS_SNAPSHOT_TTL_SECONDS=604800
 ```
 
 **ML Analysis (Optional):**

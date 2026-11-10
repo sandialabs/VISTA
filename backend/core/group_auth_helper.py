@@ -17,13 +17,16 @@ _group_membership_cache: dict[tuple[str, str, bool], tuple[bool, float]] = {}
 _CACHE_TTL = 300  # 5 minutes
 
 
-def is_user_in_group(user_email: str, group_id: str) -> bool:
+def is_user_in_group(user_email: str, group_id: str, user=None) -> bool:
     """
     Cached wrapper around core group membership check.
 
     Args:
         user_email: The user's email address
         group_id: The group ID to check membership for
+        user: The authenticated user making the request, if any. A request made
+            with an API key that carries its own groups (``key_groups``) is
+            answered from them, for that user only.
 
     Returns:
         True if user is in the group, False otherwise
@@ -34,6 +37,15 @@ def is_user_in_group(user_email: str, group_id: str) -> bool:
     # Normalize inputs for consistent caching
     user_email = user_email.lower().strip()
     group_id = group_id.strip()
+
+    # An API key that carries its own groups grants exactly those.
+    key_groups = getattr(user, "key_groups", None)
+    if (
+        key_groups is not None
+        and not (settings.DEBUG or settings.SKIP_HEADER_CHECK)
+        and (getattr(user, "email", "") or "").lower().strip() == user_email
+    ):
+        return group_id in key_groups
 
     # The custom backend answers from the request's own groups, in memory: a
     # cache would only return an earlier request's answer for this user.
