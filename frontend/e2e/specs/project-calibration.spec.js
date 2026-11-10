@@ -39,12 +39,6 @@ test.describe('Project calibration configuration and measurement workflow', () =
       metadata: {
         configured_views: ['front'],
         modalities: ['visual'],
-        view_images: {
-          front: {
-            filename: calibrationImageFilename,
-            image_id: calibrationImageId,
-          },
-        },
         source_images: [{
           filename: calibrationImageFilename,
           image_id: calibrationImageId,
@@ -114,7 +108,8 @@ test.describe('Project calibration configuration and measurement workflow', () =
     await page.getByRole('tab', { name: 'Inspection' }).click();
     const workbench = page.locator('section[aria-label="Inspection Workbench"]');
     await expect(workbench).toBeVisible();
-    const image = page.getByAltText('front view');
+    // Tiles are named from the image's own filename, so the alt text is "<filename> view".
+    const image = page.getByAltText(`${calibrationImageFilename} view`);
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((element) => ({
       complete: element.complete,
@@ -127,8 +122,11 @@ test.describe('Project calibration configuration and measurement workflow', () =
     const secondPoint = { x: imageBox.width * 0.75, y: imageBox.height * 0.5 };
 
     await page.getByRole('button', { name: 'Measure on tiles' }).click();
-    await image.click({ position: firstPoint });
-    await image.click({ position: secondPoint });
+    // A tile measurement is one press-drag-release; two separate clicks draw nothing.
+    await page.mouse.move(imageBox.x + firstPoint.x, imageBox.y + firstPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(imageBox.x + secondPoint.x, imageBox.y + secondPoint.y, { steps: 8 });
+    await page.mouse.up();
 
     await expect.poll(() => {
       const annotations = getAnnotations()[mockPart.id] || [];
