@@ -433,14 +433,14 @@ The UI uses `react-router-dom` 7.x (imports come only from `react-router-dom`; t
 
 ## Container OpenCV Build (No FFmpeg)
 
-The production `Dockerfile` ships an `opencv-python-headless` wheel compiled from the hash-pinned PyPI source distribution with `-DWITH_FFMPEG=OFF` (stage `opencv-build`), because the PyPI wheels bundle FFmpeg libraries that carry unpatched CVEs. Things to keep in mind:
+The production `Dockerfile` installs a prebuilt `opencv-python-headless` wheel from `vendor/opencv/` (offline, `--require-hashes`), compiled from the hash-pinned PyPI source distribution with `-DWITH_FFMPEG=OFF`, because the PyPI wheels bundle FFmpeg libraries (and OpenSSL 1.1.1k) that carry unpatched CVEs. The image build no longer compiles OpenCV. Things to keep in mind:
 
 - Video decoding and writing through `cv2` (`VideoCapture`, `VideoWriter` with FFmpeg codecs such as `mp4v`) is unavailable in the image by design. Image I/O, drawing, contours, `dnn`, and ultralytics inference are unaffected (YOLO inference and common cv2 operations were verified bit-identical to the stock wheel).
 - `pyproject.toml` has a `[tool.uv] override-dependencies` entry that drops the GUI `opencv-python` distribution (required by ultralytics) from resolution; it bundles its own FFmpeg and shares the `cv2` directory with the headless wheel. Local development and CI test runs still install the stock PyPI headless wheel.
-- To bump OpenCV: update `OPENCV_VERSION` and `OPENCV_SDIST_SHA256` in the `Dockerfile` together with the `uv.lock` version. `backend/tests/test_container_build_config.py` fails if they drift.
+- To bump OpenCV: update `OPENCV_VERSION` and `OPENCV_SDIST_SHA256` in `vendor/opencv/Dockerfile.build` with the `uv.lock` version, rebuild the wheel (instructions in that file and `vendor/opencv/MANIFEST.md`), then replace the wheel and refresh `SHA256SUMS` and `requirements-opencv-prebuilt.txt`. `backend/tests/test_container_build_config.py` fails if the wheel, its pinned hash, `SHA256SUMS`, the recipe and `uv.lock` drift. The wheel is cp311 linux x86_64 only, and each rebuild adds a 33 MB binary to git history.
 - Never `pip install` runtime packages in the `base` stage: the `final` stage inherits its `/opt/venv` and `COPY --from=builder` does not delete files, so anything installed there (such as the GUI `opencv-python`) ships. The `final` stage fails the build if any FFmpeg library or PyPI OpenCV distribution is present.
 - Do not run a plain `uv sync` inside the image; it reinstalls the PyPI wheel. Use `uv sync --frozen --inexact --no-install-package opencv-python-headless` (the CI container test does).
-- A cold build compiles OpenCV, which adds substantial time (more on small CI runners). The layer is cached while the pinned inputs are unchanged.
+- The wheel's image codecs (libpng, libjpeg, libtiff, libwebp, openjpeg, zlib) are compiled in from OpenCV's own sources and are invisible to image scanners; only FFmpeg is disabled. `vendor/opencv/MANIFEST.md` lists what was verified and the known limits.
 
 ## Inspection Tile Highlight (Single Selection)
 
