@@ -146,13 +146,13 @@ def _find_base_part(all_parts, target):
 
 
 def _attached_overlay_record(overlay_entry, base_entry, target) -> dict:
-    side = str(base_entry.get("side") or overlay_entry.get("side") or "")
-    modality = str(overlay_entry.get("modality") or "overlay").strip().lower()
+    # Pairing is explicit: the overlay records exactly which base image it
+    # belongs to. The overlay's own user metadata (side, modality, or any
+    # other key) is preserved verbatim and never copied from, or defaulted
+    # to match, the base image.
     return {
         **overlay_entry,
         "overlay": True,
-        "side": side.strip().lower(),
-        "modality": modality or "overlay",
         "overlay_base_filename": target.base_filename,
         "overlay_base_image_id": str(
             base_entry.get("image_id") or target.base_image.id

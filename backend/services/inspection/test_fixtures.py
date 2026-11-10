@@ -147,8 +147,6 @@ async def _load_nist_fixture(load: _FixtureLoad):
         "bit_depth": 16,
         "mpr": {"volume_shape": volume_shape, "axis_labels": PT3_AXIS_LABELS},
         "source_images": load.uploaded_records,
-        "view_images": {"volume": raw_spec.filename},
-        "overlay_images": {"volume": {"segmentation": overlay_spec.filename}},
     }
     return _single_part_payload(
         "PT3_NIST_COCR_SET1SAMPLE5_BATCH",

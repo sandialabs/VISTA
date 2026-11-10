@@ -37,7 +37,6 @@ export function applyInspectionImageDisplayOrder(entries, imageRefs) {
 const INSPECTION_IMAGE_SORT_OPTIONS = [
   { id: 'filename_asc', label: 'Filename A-Z' },
   { id: 'filename_desc', label: 'Filename Z-A' },
-  { id: 'view_asc', label: 'View A-Z' },
   { id: 'type_asc', label: 'Image type' },
 ];
 export const DEFAULT_INSPECTION_IMAGE_SORT_ID = 'filename_asc';
@@ -66,8 +65,10 @@ function getInspectionImageSortFilename(entry, projectImageLookup = {}) {
   );
 }
 
-function getInspectionImageSortView(entry) {
-  return String(entry?.viewName || entry?.label || entry?.filename || entry?.imageRef || '');
+// Secondary ordering by the image's own label/filename. User metadata such
+// as side or view is sorted through the generic "metadata:<key>" options.
+function getInspectionImageSortLabel(entry) {
+  return String(entry?.label || entry?.filename || entry?.imageRef || '');
 }
 
 function compareInspectionImageSortText(left, right) {
@@ -155,19 +156,13 @@ function compareInspectionImageDisplayEntryByLayer(leftEntry, rightEntry, sortId
       getInspectionImageSortFilename(rightEntry, projectImageLookup),
     );
   }
-  if (sortId === 'view_asc') {
-    return compareInspectionImageSortText(
-      getInspectionImageSortView(leftEntry),
-      getInspectionImageSortView(rightEntry),
-    );
-  }
   if (sortId === 'type_asc') {
     return (
       INSPECTION_IMAGE_TYPE_ORDER[getInspectionImageType(leftEntry)]
       - INSPECTION_IMAGE_TYPE_ORDER[getInspectionImageType(rightEntry)]
     ) || compareInspectionImageSortText(
-      getInspectionImageSortView(leftEntry),
-      getInspectionImageSortView(rightEntry),
+      getInspectionImageSortLabel(leftEntry),
+      getInspectionImageSortLabel(rightEntry),
     );
   }
   return compareInspectionImageSortText(

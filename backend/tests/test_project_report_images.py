@@ -76,7 +76,7 @@ def test_transparent_overlay_visibly_changes_composite_and_opaque_output_is_blen
     assert opaque_pixel != base.getpixel((4, 4))
 
 
-def test_overlay_linking_prefers_id_then_unique_filename_then_single_base():
+def test_overlay_linking_prefers_explicit_id_then_unique_explicit_filename():
     first_asset = _asset(_image_bytes("white"), filename="same.png")
     second_asset = _asset(_image_bytes("black"), filename="other.png")
     first = _record(first_asset)
@@ -97,12 +97,17 @@ def test_overlay_linking_prefers_id_then_unique_filename_then_single_base():
     )
     assert report_images._link_overlay_to_base(by_filename, [first, second]) is first
 
-    fallback = _record(_asset(_image_bytes("red")), overlay=True)
-    assert report_images._link_overlay_to_base(fallback, [first]) is first
-    assert report_images._link_overlay_to_base(fallback, [first, second]) is None
 
+def test_overlay_without_explicit_base_reference_is_never_inferred():
+    """An overlay is paired only through overlay_base_image_id/filename.
 
-def test_overlay_linking_uses_unique_imported_view_and_modality_without_cross_linking():
+    VISTA does not guess the base from there being a single candidate, nor
+    from user-supplied metadata such as side, view, or modality.
+    """
+    only_base = _record(_asset(_image_bytes("white"), filename="only.png"))
+    unreferenced = _record(_asset(_image_bytes("red")), overlay=True)
+    assert report_images._link_overlay_to_base(unreferenced, [only_base]) is None
+
     left = _record(_asset(_image_bytes("white"), filename="left.png"))
     left.record.update({"side": "left", "modality": "visible"})
     right = _record(_asset(_image_bytes("black"), filename="right.png"))
@@ -111,17 +116,23 @@ def test_overlay_linking_uses_unique_imported_view_and_modality_without_cross_li
         _asset(_image_bytes("red"), filename="right-overlay.png"), overlay=True
     )
     overlay.record.update({"side": "right", "modality": "visible"})
+    assert report_images._link_overlay_to_base(overlay, [left, right]) is None
+    assert report_images._link_overlay_to_base(overlay, [right]) is None
 
-    assert report_images._link_overlay_to_base(overlay, [left, right]) is right
 
-    duplicate_right = _record(_asset(_image_bytes("blue"), filename="right-2.png"))
-    duplicate_right.record.update({"side": "right", "modality": "visible"})
+def test_user_modality_text_does_not_make_a_record_an_overlay():
     assert (
-        report_images._link_overlay_to_base(
-            overlay,
-            [left, right, duplicate_right],
+        report_images._is_overlay_record(
+            {"filename": "a.png", "modality": "overlay-thermal"},
+            from_analysis_outputs=False,
         )
-        is None
+        is False
+    )
+    assert (
+        report_images._is_overlay_record(
+            {"filename": "a.png", "overlay": True}, from_analysis_outputs=False
+        )
+        is True
     )
 
 

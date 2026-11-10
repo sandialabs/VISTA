@@ -372,7 +372,6 @@ function InspectionWorkbenchPanel({
     aggregateLoadedModalities,
     aggregateModalities,
     aggregatePartImageRefs,
-    aggregateViews,
     modalityOptions,
     selectedPartImageRefs,
   } = useInspectionImageCollection({
@@ -798,7 +797,7 @@ function InspectionWorkbenchPanel({
     createCropChildImage,
   });
   const partPaneProps = buildPartPaneProps({
-    aggregateLayerAvailability, aggregateModalities, aggregatePartImageRefs, aggregateViews,
+    aggregateLayerAvailability, aggregateModalities, aggregatePartImageRefs,
     annotations, batches, collapsedPartRows, enabledModalities, ensureRenderCategoryVisible,
     filteredParts, imageSortFilter, inspectionHierarchy, manualFilterNotice,
     normalizationTriageField, normalizationTriageMatchCount, partFilter, projectConfiguration,

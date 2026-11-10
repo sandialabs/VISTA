@@ -281,7 +281,9 @@ export function getVolumeOverlayStacks(part, projectImageLookup = {}) {
     const baseFilename = String(entry.overlay_base_filename || '');
     if (baseImageId) return baseIds.has(baseImageId);
     if (baseFilename) return (baseRecordsByFilename.get(baseFilename) || []).length === 1;
-    return baseRecords.length === 1;
+    // Overlays are aligned only to an explicitly referenced base image; an
+    // overlay without a reference is never assumed to belong to a lone base.
+    return false;
   });
   const stacksByOverlayImage = new Map();
   const serverVolumesByOverlayImage = new Map();

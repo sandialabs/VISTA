@@ -1,4 +1,4 @@
-import { DEFAULT_MODALITY_IMAGE_FILTER_KEY } from './inspectionConstants';
+import { MODALITY_METADATA_KEY } from './inspectionConstants';
 import { getMetadataFilterValue } from './imageLookup';
 import { buildPartSummaryChipModel } from './partSummaryChipModel';
 
@@ -40,10 +40,12 @@ export function PartSummaryChipRows({ row, chipFilters }) {
     setHiddenSecondaryImageFilterValues,
     selectOnlyLayerVisibility,
     setAllLayerVisibility,
+    configuredImageFilterKeys,
   } = chipFilters;
   if (collapsed) return null;
 
   const {
+    getDisplayValue,
     enabledModalityKeys,
     primaryFilterKey,
     secondaryFilterKey,
@@ -75,6 +77,7 @@ export function PartSummaryChipRows({ row, chipFilters }) {
     hiddenPrimaryImageFilterValues,
     hiddenModalityImageFilterValues,
     hiddenSecondaryImageFilterValues,
+    configuredImageFilterKeys,
   });
   const getImageRefForEntry = (entry) => String(
     entry?.imageRef
@@ -91,7 +94,6 @@ export function PartSummaryChipRows({ row, chipFilters }) {
   const getImageRefForMetadataValue = (key, value) => imageRefs.find((entry) => (
     getMetadataFilterValue(entry, key, projectImageLookup) === String(value || '').toLowerCase()
   ));
-  const formatMetadataButtonLabel = (value) => String(value || '').toUpperCase();
 
   return (
     <>
@@ -128,7 +130,7 @@ export function PartSummaryChipRows({ row, chipFilters }) {
                     if (imageEntry) selectImageEntry(imageEntry);
                   }}
                 >
-                  {formatMetadataButtonLabel(value)}
+                  {getDisplayValue(primaryFilterKey, value)}
                 </button>
               );
             })}
@@ -159,7 +161,7 @@ export function PartSummaryChipRows({ row, chipFilters }) {
               event.stopPropagation();
               setModalityImageFilterKey(event.target.value);
               setHiddenModalityImageFilterValues([]);
-              if (event.target.value !== DEFAULT_MODALITY_IMAGE_FILTER_KEY) setAllModalityVisibility(modalities, true);
+              if (event.target.value !== MODALITY_METADATA_KEY) setAllModalityVisibility(modalities, true);
             }}
           >
             {modalityFilterKeyOptions.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
@@ -189,7 +191,7 @@ export function PartSummaryChipRows({ row, chipFilters }) {
                     if (matchingImage) selectImageEntry(matchingImage);
                   }}
                 >
-                  {formatMetadataButtonLabel(value)}
+                  {getDisplayValue(modalityFilterKey, value)}
                 </button>
               );
             })}
@@ -246,7 +248,7 @@ export function PartSummaryChipRows({ row, chipFilters }) {
                   if (matchingImage) selectImageEntry(matchingImage);
                 }}
               >
-                {formatMetadataButtonLabel(value)}
+                {getDisplayValue(secondaryFilterKey, value)}
               </button>
               );
             })}

@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { updatePartImageDisplayOrder } from '../../api/parts';
-import { getImageMetadataFilterOptions, getPreferredMetadataFilterKey } from './imageLookup';
+import {
+  getConfiguredImageDescriptorFilterKeys,
+  getDefaultMetadataFilterKeys,
+  getImageMetadataFilterOptions,
+  getPreferredMetadataFilterKey,
+} from './imageLookup';
 import {
   DEFAULT_INSPECTION_IMAGE_SORT_ID,
   getInspectionImageOrderKey,
@@ -8,7 +13,7 @@ import {
   normalizeInspectionImageSortLayers,
   sortInspectionImageDisplayEntries,
 } from './imageSorting';
-import { DEFAULT_MODALITY_IMAGE_FILTER_KEY, DEFAULT_PRIMARY_IMAGE_FILTER_KEY, DEFAULT_SECONDARY_IMAGE_FILTER_KEY } from './inspectionConstants';
+import { DEFAULT_SECONDARY_IMAGE_FILTER_KEY } from './inspectionConstants';
 import useInspectionImageFilterVisibility from './useInspectionImageFilterVisibility';
 import useInspectionImageSortControls from './useInspectionImageSortControls';
 import { getVisibleInspectionImageRefs } from './visibleImageRefs';
@@ -94,21 +99,31 @@ export default function useInspectionImageSortFilter({
     () => getImageMetadataFilterOptions(selectedPartImageRefs, projectImageLookup),
     [projectImageLookup, selectedPartImageRefs],
   );
+  const configuredImageFilterKeys = useMemo(
+    () => getConfiguredImageDescriptorFilterKeys(projectConfiguration),
+    [projectConfiguration],
+  );
+  const defaultMetadataFilterKeys = useMemo(
+    () => getDefaultMetadataFilterKeys(metadataFilterOptions, configuredImageFilterKeys),
+    [configuredImageFilterKeys, metadataFilterOptions],
+  );
   const effectivePrimaryImageFilterKey = useMemo(
     () => getPreferredMetadataFilterKey(
       metadataFilterOptions,
       primaryImageFilterKey,
-      DEFAULT_PRIMARY_IMAGE_FILTER_KEY,
+      defaultMetadataFilterKeys.primary,
+      { allowAnyKey: false },
     ),
-    [metadataFilterOptions, primaryImageFilterKey],
+    [defaultMetadataFilterKeys, metadataFilterOptions, primaryImageFilterKey],
   );
   const effectiveModalityImageFilterKey = useMemo(
     () => getPreferredMetadataFilterKey(
       metadataFilterOptions,
       modalityImageFilterKey,
-      DEFAULT_MODALITY_IMAGE_FILTER_KEY,
+      defaultMetadataFilterKeys.modality,
+      { allowAnyKey: false },
     ),
-    [metadataFilterOptions, modalityImageFilterKey],
+    [defaultMetadataFilterKeys, metadataFilterOptions, modalityImageFilterKey],
   );
   const effectiveSecondaryImageFilterKey = useMemo(
     () => getPreferredMetadataFilterKey(
@@ -252,6 +267,7 @@ export default function useInspectionImageSortFilter({
   ]);
   return {
     addImageSortLayer,
+    configuredImageFilterKeys,
     effectiveImageSortLayers,
     effectiveModalityImageFilterKey,
     effectivePrimaryImageFilterKey,

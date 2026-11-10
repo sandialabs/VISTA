@@ -173,14 +173,14 @@ def _is_visible_record(record: dict[str, Any]) -> bool:
 
 
 def _is_overlay_record(record: dict[str, Any], *, from_analysis_outputs: bool) -> bool:
-    modality = str(record.get("modality") or "").strip().lower()
+    # Overlay status comes from explicit structural fields only, never from
+    # the text of a user-supplied value such as ``modality``.
     return bool(
         from_analysis_outputs
         or _truthy(record.get("overlay"))
         or _truthy(record.get("analysis_output"))
         or record.get("overlay_base_image_id")
         or record.get("analysis_source_image_id")
-        or "overlay" in modality
     )
 
 
@@ -377,35 +377,10 @@ def _link_overlay_to_base(
         if len(filename_matches) == 1:
             return filename_matches[0]
 
-    def normalized_field(record: EvidenceRecord, *keys: str) -> str:
-        return next(
-            (
-                str(record.record.get(key) or "").strip().lower()
-                for key in keys
-                if str(record.record.get(key) or "").strip()
-            ),
-            "",
-        )
-
-    overlay_view = normalized_field(overlay, "side", "view", "view_name")
-    overlay_modality = normalized_field(
-        overlay,
-        "source_modality",
-        "base_modality",
-        "modality",
-    )
-    if overlay_view and overlay_modality not in {"", "overlay", "analysis"}:
-        view_modality_matches = [
-            base
-            for base in base_records
-            if normalized_field(base, "side", "view", "view_name") == overlay_view
-            and normalized_field(base, "modality") == overlay_modality
-        ]
-        if len(view_modality_matches) == 1:
-            return view_modality_matches[0]
-
-    if len(base_records) == 1:
-        return base_records[0]
+    # Pairing is explicit only. VISTA does not infer an overlay's base image
+    # from user metadata (side/view/modality) or from there being a single
+    # candidate base image; an overlay without an explicit reference is
+    # reported unpaired.
     return None
 
 

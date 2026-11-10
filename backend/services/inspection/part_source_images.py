@@ -10,70 +10,30 @@ from repositories import images as image_repository
 from repositories import inspection as inspection_repository
 from services.errors import NotFoundError, UnprocessableError
 from services.inspection import parts as inspection_part_service
-from utils.metadata_values import parse_metadata_boolean
+from utils.part_image_maps import LEGACY_IMAGE_MAP_KEYS, metadata_with_source_images
 
-PART_IMAGE_MAP_METADATA_KEYS = (
-    "source_images",
-    "configured_views",
-    "modalities",
-    "view_images",
-    "overlay_images",
-)
+PART_IMAGE_MAP_METADATA_KEYS = ("source_images", *LEGACY_IMAGE_MAP_KEYS)
 
 
-def _normalized_source_record(record: dict) -> dict | None:
-    filename = str(record.get("filename") or "").strip()
-    if not filename:
-        return None
-    return {
-        **record,
-        "filename": filename,
-        "side": str(record.get("side") or "").strip().lower(),
-        "modality": str(record.get("modality") or "").strip().lower(),
-        "overlay": parse_metadata_boolean(record.get("overlay")),
-    }
+def rebuild_part_image_maps(metadata: dict, previous_source_images=None) -> dict:
+    """Return metadata with normalized ``source_images``.
+
+    User metadata on each record is preserved verbatim. No grouping keys are
+    derived; legacy ``view_images``/``overlay_images`` maps (if present) only
+    lose references to images that were removed from ``source_images``.
+    """
+    return metadata_with_source_images(
+        metadata,
+        metadata.get("source_images"),
+        previous_source_images=(
+            previous_source_images
+            if previous_source_images is not None
+            else metadata.get("source_images")
+        ),
+    )
 
 
-def rebuild_part_image_maps(metadata: dict) -> dict:
-    """Recompute view/overlay maps derived from a part's ``source_images``."""
-    source_images = metadata.get("source_images")
-    if not isinstance(source_images, list):
-        source_images = []
-    configured_views: set[str] = set()
-    modalities: set[str] = set()
-    view_images: dict[str, str] = {}
-    overlay_images: dict[str, dict[str, str]] = {}
-    normalized_source_images: list[dict] = []
-
-    for record in source_images:
-        if not isinstance(record, dict):
-            continue
-        normalized = _normalized_source_record(record)
-        if normalized is None:
-            continue
-        normalized_source_images.append(normalized)
-        side, modality = normalized["side"], normalized["modality"]
-        filename, overlay = normalized["filename"], normalized["overlay"]
-        if side:
-            configured_views.add(side)
-        if modality:
-            modalities.add(modality)
-        if side and overlay and modality:
-            overlay_images.setdefault(side, {})[modality] = filename
-        elif side and not overlay and side not in view_images:
-            view_images[side] = filename
-
-    return {
-        **metadata,
-        "source_images": normalized_source_images,
-        "configured_views": sorted(configured_views),
-        "modalities": sorted(modalities),
-        "view_images": view_images,
-        "overlay_images": overlay_images,
-    }
-
-
-def part_image_map_metadata_patch(metadata: dict) -> dict:
+def part_image_map_metadata_patch(metadata: dict, previous_source_images=None) -> dict:
     """Return only fields derived from source_images for a locked metadata merge.
 
     Assignment routes discover source records from a project-wide snapshot. A
@@ -83,8 +43,12 @@ def part_image_map_metadata_patch(metadata: dict) -> dict:
     helper reloads the row under a lock. Keeping this patch key-scoped lets the
     locked merge retain the authoritative non-image fields.
     """
-    normalized = rebuild_part_image_maps(metadata)
-    return {key: normalized[key] for key in PART_IMAGE_MAP_METADATA_KEYS}
+    normalized = rebuild_part_image_maps(metadata, previous_source_images)
+    return {
+        key: normalized[key]
+        for key in PART_IMAGE_MAP_METADATA_KEYS
+        if key in normalized
+    }
 
 
 async def mutate_part_source_images_locked(
@@ -107,7 +71,8 @@ async def mutate_part_source_images_locked(
             return {}, mutation_result
         return (
             part_image_map_metadata_patch(
-                {**metadata, "source_images": transformed_source_images}
+                {**metadata, "source_images": transformed_source_images},
+                previous_source_images=current_source_images,
             ),
             mutation_result,
         )
@@ -151,10 +116,7 @@ PART_SOURCE_IMAGE_COLLECTION_KEYS = ("source_images", "analysis_outputs")
 PART_SOURCE_IMAGE_PATCH_KEYS = (
     "source_images",
     "analysis_outputs",
-    "configured_views",
-    "modalities",
-    "view_images",
-    "overlay_images",
+    *LEGACY_IMAGE_MAP_KEYS,
 )
 
 

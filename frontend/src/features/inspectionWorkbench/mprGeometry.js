@@ -9,16 +9,10 @@ import {
 } from './mprConstants';
 import { clampRange } from './inspectionUtils';
 
+// VISTA does not infer which user-named view corresponds to an MPR axis; the
+// first available base image (in the part's display order) is used.
 export function getFallbackProjectionImage(axis, shellImageLayers) {
-  const preferredViews = {
-    axial: ['top', 'bottom', 'front', 'back', 'left', 'right'],
-    coronal: ['front', 'back', 'top', 'bottom', 'left', 'right'],
-    sagittal: ['left', 'right', 'front', 'back', 'top', 'bottom'],
-  };
-  const preferences = preferredViews[axis] || [];
-  return preferences.map((viewName) => shellImageLayers.find((entry) => entry.viewName === viewName)).find(Boolean)
-    || shellImageLayers[0]
-    || null;
+  return (Array.isArray(shellImageLayers) && shellImageLayers[0]) || null;
 }
 
 export function getFraction(value, maxValue) {

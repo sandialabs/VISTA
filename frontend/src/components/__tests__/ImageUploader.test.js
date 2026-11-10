@@ -1924,16 +1924,18 @@ describe('ImageUploader', () => {
               lot_number: 'LOT01',
               set_number: 'SET01',
               serial_number: 'SN0001',
-              configured_views: ['back', 'front'],
-              modalities: ['visual'],
-              view_images: {
-                back: 'D1001_LOT01_SET01_SN0001_back_visual_false.jpg',
-                front: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg',
-              },
+              source_images: [
+                expect.objectContaining({ filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg', side: 'front', modality: 'visual' }),
+                expect.objectContaining({ filename: 'D1001_LOT01_SET01_SN0001_back_visual_false.jpg', side: 'back', modality: 'visual' }),
+              ],
             }),
           }),
         ],
       });
+      const ingestedMetadata = JSON.parse(ingestCall[1].body).unassigned_parts[0].metadata;
+      for (const derivedKey of ['configured_views', 'modalities', 'view_images', 'overlay_images']) {
+        expect(ingestedMetadata).not.toHaveProperty(derivedKey);
+      }
       expect(props.onUploadComplete).toHaveBeenCalledWith([
         { id: 'img-front', filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg' },
         { id: 'img-back', filename: 'D1001_LOT01_SET01_SN0001_back_visual_false.jpg' },
@@ -1978,7 +1980,7 @@ describe('ImageUploader', () => {
 
       await waitFor(() => {
         expect(screen.getByLabelText('Delimiter')).toHaveValue('_');
-        expect(screen.getByLabelText('Keys (comma-separated)')).toHaveValue('design_number, lot_number, set_number, serial_number, side, modality, overlay');
+        expect(screen.getByLabelText('Keys (comma-separated)')).toHaveValue('design_number, lot_number, set_number, serial_number, view, modality, overlay');
       });
 
       fireEvent.click(screen.getByRole('button', { name: /upload images/i }));
@@ -1989,11 +1991,14 @@ describe('ImageUploader', () => {
         lot_number: '22',
         set_number: '7',
         serial_number: '9',
-        side: 'left',
+        // The project's "View" descriptor keeps its own key.
+        view: 'left',
         modality: 'visual',
         overlay: false,
       }));
-      expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).toEqual({
+      expect((await batchManifest(fetchSpy.mock.calls[0][1].body))[0].metadata).not.toHaveProperty('side');
+      const ingestBody = JSON.parse(fetchSpy.mock.calls[1][1].body);
+      expect(ingestBody).toEqual({
         batches: [],
         unassigned_parts: [
           expect.objectContaining({
@@ -2004,20 +2009,15 @@ describe('ImageUploader', () => {
               lot_number: '22',
               set_number: '7',
               serial_number: '9',
-              configured_views: ['left', 'right'],
-              modalities: ['thermal', 'visual'],
-              view_images: {
-                left: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png',
-                right: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png',
-              },
               source_images: expect.arrayContaining([
-                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png', image_id: 'img-left' }),
-                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png', image_id: 'img-right' }),
+                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWleft_MDvisual_false.png', image_id: 'img-left', view: 'left', modality: 'visual' }),
+                expect.objectContaining({ filename: 'DWG100_LT22_PN7_SN9_VWright_MDthermal_false.png', image_id: 'img-right', view: 'right', modality: 'thermal' }),
               ]),
             }),
           }),
         ],
       });
+      expect(ingestBody.unassigned_parts[0].metadata).not.toHaveProperty('view_images');
     });
 
     test('does not infer upload metadata from filename when filename convention is disabled', async () => {
@@ -2093,7 +2093,15 @@ describe('ImageUploader', () => {
                 serial_number: '888',
                 metadata: expect.objectContaining({
                   batch_number: '55',
-                  view_images: { front: 'D200-L03-B55-S888-Vfront-Mvisual-false.jpg' },
+                  // The configured "View" descriptor is stored under its own
+                  // key; it is not renamed to "side" or grouped into maps.
+                  source_images: [
+                    expect.objectContaining({
+                      filename: 'D200-L03-B55-S888-Vfront-Mvisual-false.jpg',
+                      view: 'front',
+                      modality: 'visual',
+                    }),
+                  ],
                 }),
               }),
             ],
@@ -2136,19 +2144,15 @@ describe('ImageUploader', () => {
 
       expect(payload.batches).toHaveLength(0);
       expect(payload.unassigned_parts).toHaveLength(1);
-      expect(payload.unassigned_parts[0].metadata).toEqual(expect.objectContaining({
-        set_number: 'SET01',
-        configured_views: ['front'],
-        modalities: ['heatmap', 'visual'],
-        view_images: {
-          front: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg',
-        },
-        overlay_images: {
-          front: {
-            heatmap: 'D1001_LOT01_SET01_SN0001_front_heatmap_true.jpg',
-          },
-        },
-      }));
+      const { metadata } = payload.unassigned_parts[0];
+      expect(metadata.set_number).toBe('SET01');
+      for (const derivedKey of ['configured_views', 'modalities', 'view_images', 'overlay_images']) {
+        expect(metadata).not.toHaveProperty(derivedKey);
+      }
+      expect(metadata.source_images).toEqual([
+        expect.objectContaining({ filename: 'D1001_LOT01_SET01_SN0001_front_visual_false.jpg', side: 'front', modality: 'visual', overlay: false }),
+        expect.objectContaining({ filename: 'D1001_LOT01_SET01_SN0001_front_heatmap_true.jpg', side: 'front', modality: 'heatmap', overlay: true }),
+      ]);
     });
 
     test('groups legacy PT1 batch metadata into inspection batches and parts', () => {
@@ -2182,19 +2186,15 @@ describe('ImageUploader', () => {
       expect(payload.batches).toHaveLength(1);
       expect(payload.batches[0].parts).toHaveLength(1);
       expect(payload.unassigned_parts).toHaveLength(0);
-      expect(payload.batches[0].parts[0].metadata).toEqual(expect.objectContaining({
-        batch_number: 'BATCH01',
-        configured_views: ['front'],
-        modalities: ['heatmap', 'visual'],
-        view_images: {
-          front: 'D1001_LOT01_BATCH01_SN0001_front_visual_false.jpg',
-        },
-        overlay_images: {
-          front: {
-            heatmap: 'D1001_LOT01_BATCH01_SN0001_front_heatmap_true.jpg',
-          },
-        },
-      }));
+      const { metadata } = payload.batches[0].parts[0];
+      expect(metadata.batch_number).toBe('BATCH01');
+      for (const derivedKey of ['configured_views', 'modalities', 'view_images', 'overlay_images']) {
+        expect(metadata).not.toHaveProperty(derivedKey);
+      }
+      expect(metadata.source_images.map((record) => [record.side, record.modality, record.overlay])).toEqual([
+        ['front', 'visual', false],
+        ['front', 'heatmap', true],
+      ]);
     });
 
 
@@ -2240,10 +2240,61 @@ describe('ImageUploader', () => {
           version: 'v1',
         }),
       ]));
-      expect(payload.unassigned_parts[0].metadata.filename_identifiers).toEqual({ version: 'v1' });
-      expect(payload.unassigned_parts[0].metadata.overlay_images).toEqual({
-        front: { visual: 'D100_LOT01_SET01_SN0001_front_visual_v1_overlay.png' },
-      });
+      expect(payload.unassigned_parts[0].metadata).not.toHaveProperty('overlay_images');
+    });
+
+    test('stores user metadata verbatim with no implicit mapping (issue examples)', () => {
+      const identity = {
+        design_number: 'D9',
+        lot_number: 'L9',
+        set_number: 'S9',
+        serial_number: 'SN9',
+      };
+      const payload = buildInspectionPartIngestPayload([
+        { image: { id: 'img-a', filename: 'a.png' }, metadata: { ...identity, modality: 'optical' } },
+        { image: { id: 'img-b', filename: 'b.png' }, metadata: { ...identity, side: 'B' } },
+        { image: { id: 'img-c', filename: 'c.png' }, metadata: { ...identity, view: 18 } },
+        { image: { id: 'img-d', filename: 'd.png' }, metadata: { ...identity, view_name: 'Top', image_modality: 'CT', station: 0 } },
+        // No per-image descriptors at all: still a normal part image.
+        { image: { id: 'img-e', filename: 'e.png' }, metadata: { ...identity } },
+      ]);
+
+      expect(payload.unassigned_parts).toHaveLength(1);
+      const { metadata } = payload.unassigned_parts[0];
+      for (const derivedKey of ['configured_views', 'modalities', 'view_images', 'overlay_images']) {
+        expect(metadata).not.toHaveProperty(derivedKey);
+      }
+      const byId = Object.fromEntries(metadata.source_images.map((record) => [record.image_id, record]));
+      // {"modality": "optical"} is not binned into a "modalities" group.
+      expect(byId['img-a'].modality).toBe('optical');
+      // {"side": "B"} is not mapped to {"view": "b"}.
+      expect(byId['img-b'].side).toBe('B');
+      expect(byId['img-b']).not.toHaveProperty('view');
+      // {"view": 18} is kept as 18, not mapped to "image" or renamed to side.
+      expect(byId['img-c'].view).toBe(18);
+      expect(byId['img-c']).not.toHaveProperty('side');
+      // Alternate spellings are distinct keys, not synonyms.
+      expect(byId['img-d']).toEqual(expect.objectContaining({ view_name: 'Top', image_modality: 'CT', station: 0 }));
+      expect(byId['img-d']).not.toHaveProperty('side');
+      expect(byId['img-d']).not.toHaveProperty('modality');
+      // Missing descriptors are left missing, not defaulted.
+      expect(byId['img-e']).not.toHaveProperty('side');
+      expect(byId['img-e']).not.toHaveProperty('modality');
+    });
+
+    test('user metadata cannot overwrite VISTA structural source-record fields', () => {
+      const payload = buildInspectionPartIngestPayload([
+        {
+          image: { id: 'real-id', filename: 'real.png' },
+          metadata: {
+            design_number: 'D1', lot_number: 'L1', set_number: 'S1', serial_number: 'SN1',
+            filename: 'spoofed.png', image_id: 'spoofed-id',
+          },
+        },
+      ]);
+      const [record] = payload.unassigned_parts[0].metadata.source_images;
+      expect(record.filename).toBe('real.png');
+      expect(record.image_id).toBe('real-id');
     });
 
     test('groups PT3 Build-It stack metadata and maps all images to the part', () => {

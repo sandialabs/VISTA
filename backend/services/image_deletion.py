@@ -21,6 +21,7 @@ from core import models
 from repositories import audit as audit_repository
 from schemas import images as image_schemas
 from services.errors import ConflictError, GoneError, NotFoundError, UpstreamError
+from utils.part_image_maps import metadata_with_source_images
 from utils.serialization import to_data_instance_schema
 from utils.transactions import commit_database_transaction
 
@@ -275,45 +276,9 @@ def _metadata_without_image_reference(
     if not changed:
         return None
 
-    configured_views: set[str] = set()
-    modalities: set[str] = set()
-    view_images: dict[str, str] = {}
-    overlay_images: dict[str, dict[str, str]] = {}
-    normalized_source_images: list[dict[str, Any]] = []
-    for retained_record in retained:
-        if not isinstance(retained_record, dict):
-            continue
-        retained_filename = str(retained_record.get("filename") or "").strip()
-        if not retained_filename:
-            continue
-        side = str(retained_record.get("side") or "").strip().lower()
-        modality = str(retained_record.get("modality") or "").strip().lower()
-        overlay = bool(retained_record.get("overlay"))
-        normalized_record = {
-            **retained_record,
-            "filename": retained_filename,
-            "side": side,
-            "modality": modality,
-            "overlay": overlay,
-        }
-        normalized_source_images.append(normalized_record)
-        if side:
-            configured_views.add(side)
-        if modality:
-            modalities.add(modality)
-        if side and overlay and modality:
-            overlay_images.setdefault(side, {})[modality] = retained_filename
-        elif side and not overlay and side not in view_images:
-            view_images[side] = retained_filename
-
-    return {
-        **metadata,
-        "source_images": normalized_source_images,
-        "configured_views": sorted(configured_views),
-        "modalities": sorted(modalities),
-        "view_images": view_images,
-        "overlay_images": overlay_images,
-    }
+    return metadata_with_source_images(
+        metadata, retained, previous_source_images=source_images
+    )
 
 
 async def _stage_inspection_part_reference_removal(

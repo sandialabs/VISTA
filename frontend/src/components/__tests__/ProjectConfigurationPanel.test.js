@@ -963,7 +963,7 @@ describe('ProjectConfigurationPanel', () => {
     expect(screen.getByText(/Filename convention assumptions are disabled/)).toBeInTheDocument();
   });
 
-  test('keeps view descriptors user-facing as side in the expected filename preview', async () => {
+  test('shows the configured "view" descriptor under its own name, not as side', async () => {
     const config = makeConfig('PT2', 'basic');
     mockFetch(config, 'PT2');
 
@@ -971,7 +971,7 @@ describe('ProjectConfigurationPanel', () => {
 
     await openFilenameConventionSubtab();
     expect(await screen.findByTestId('expected-filename-preview')).toHaveTextContent(
-      'D001_P001_L001_S001_R001_side_modality.type',
+      'D001_P001_L001_S001_R001_view_modality.type',
     );
   });
 

@@ -537,8 +537,6 @@ def test_pt3_upload_numpy_volume_autoassigns_part_named_for_file(client):
         {
             "filename": "volume.npy",
             "image_id": image_id,
-            "side": "",
-            "modality": "",
             "overlay": False,
             "slice_axis": None,
             "slice_index": None,

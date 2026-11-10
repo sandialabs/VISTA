@@ -78,7 +78,8 @@ export default function useInspectorWorkspaceHydration({
     setMeasurementEntries(normalizeSavedMeasurements(savedInspector.measurements));
     setAnnotationDraft({
       defect_class: '',
-      modality: (isAllImagesSelection ? aggregateLoadedModalities[0] : getModalities(selectedPart)[0]) || 'visual',
+      // Pre-select a modality the user's own images use; never invent one.
+      modality: (isAllImagesSelection ? aggregateLoadedModalities[0] : getModalities(selectedPart)[0]) || '',
       comment: '',
       disposition: 'open',
       measurement_name: '',

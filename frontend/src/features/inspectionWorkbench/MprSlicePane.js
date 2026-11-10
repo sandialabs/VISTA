@@ -45,7 +45,7 @@ function MprSliceSurface({ axis, label, fallbackImage, navigation, volume, displ
       <MprWindowedImage
         className="mpr-fallback-projection"
         src={fallbackImage.url}
-        alt={`${label} fallback projection from ${fallbackImage.viewName} view`}
+        alt={`${label} fallback projection from ${fallbackImage.label || fallbackImage.filename}`}
         displayWindow={displayWindow}
         displayDomain={displayValueDomain}
       />

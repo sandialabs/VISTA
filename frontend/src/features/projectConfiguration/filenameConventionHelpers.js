@@ -48,7 +48,6 @@ export function getDisplayTokenForFilenameEntry(entry, fallback, { hierarchy = f
   const key = getFilenameEntryMetadataKey(entry, fallback);
   if (key === 'overlay') return prefix ? `${prefix}overlay` : 'overlay';
   if (key === 'version') return `${prefix || 'v'}1`;
-  if (!hierarchy && (key === 'view' || key === 'side')) return 'side';
   return normalizeFilenameToken(getFilenameEntryName(entry, fallback), fallback);
 }
 

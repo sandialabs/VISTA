@@ -218,7 +218,11 @@ async def attach_analysis_outputs_to_parts(
                 "analysis_source_filename": source_record.filename,
                 "overlay_base_image_id": str(source_record.image_id),
                 "overlay_base_filename": source_record.filename,
-                "side": source_record.side or "analyze",
+                **(
+                    {"side": source_record.side}
+                    if source_record.side not in (None, "")
+                    else {}
+                ),
                 "modality": "analyze-overlay",
                 "slice_axis": source_record.slice_axis,
                 "slice_index": source_record.slice_index,

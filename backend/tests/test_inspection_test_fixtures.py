@@ -121,8 +121,18 @@ def test_pt2_load_builds_batches_from_hierarchy_filenames(client):
     for part in parts:
         metadata = part["metadata"]
         assert metadata["source"] == "vista-test-data"
-        assert metadata["configured_views"] == sorted(metadata["configured_views"])
         assert metadata["source_images"]
+        for derived_key in (
+            "configured_views",
+            "modalities",
+            "view_images",
+            "overlay_images",
+        ):
+            assert derived_key not in metadata
+        # Filename tokens are stored exactly as written; no lower-casing.
+        for record in metadata["source_images"]:
+            assert record["filename"].split("_")[4] == record["side"]
+            assert record["filename"].split("_")[5] == record["modality"]
 
 
 def test_nist_load_reports_missing_volumes(client, monkeypatch, tmp_path):

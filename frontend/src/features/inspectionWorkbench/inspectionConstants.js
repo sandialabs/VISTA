@@ -6,10 +6,16 @@ export const DEFAULT_OVERLAY_LAYERS = [
   { id: 'heatmap', label: 'Heatmap', color: '#8b5cf6' },
   { id: 'voids', label: 'Voids', color: '#f59e0b' },
 ];
-export const DEFAULT_MODALITIES = ['visual', 'infrared', 'uv'];
-export const DEFAULT_PRIMARY_IMAGE_FILTER_KEY = 'view';
-export const DEFAULT_MODALITY_IMAGE_FILTER_KEY = 'modality';
+// The two user-metadata filter rows have no hardcoded default key. Until the
+// user picks one, they default to the project's configured image descriptors
+// (see getConfiguredImageDescriptorFilterKeys), then to discovered keys.
+export const DEFAULT_PRIMARY_IMAGE_FILTER_KEY = '';
+export const DEFAULT_MODALITY_IMAGE_FILTER_KEY = '';
+// "layer" is a VISTA system field (source / overlay / crop), not user metadata.
 export const DEFAULT_SECONDARY_IMAGE_FILTER_KEY = 'layer';
+// The user metadata key whose values drive the per-part modality visibility
+// toggles, when the project uses one. It is not assumed to exist.
+export const MODALITY_METADATA_KEY = 'modality';
 export const INSPECTION_VIEW_ALL_IMAGES_TAB = 'view_all_images';
 export const INSPECTION_VIEW_PARTS_TAB = 'view_parts';
 export const INSPECTION_FILTER_IMAGES_COLUMN = 'filter_images';

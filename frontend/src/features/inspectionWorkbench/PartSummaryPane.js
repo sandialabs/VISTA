@@ -60,34 +60,8 @@ export function PartSummaryPane({ chipFilters, partRows }) {
     const partLabel = part.display_name || part.serial_number || part.id;
     const isSelected = String(part.id) === String(selectedPart?.id);
     const isCollapsed = collapsedPartIdSet.has(String(part.id));
-    const viewImages = part?.metadata?.view_images || {};
     const partImageRefs = getPartImageRefs(part)
       .filter((entry) => isInspectionImageRefLoaded(entry, projectImageLookup));
-    const imageRefByViewName = new Map();
-    partImageRefs.forEach((entry) => {
-      const viewName = String(entry?.viewName || '').toLowerCase();
-      if (viewName && !entry.overlay && !entry.cropChild && !imageRefByViewName.has(viewName)) {
-        imageRefByViewName.set(viewName, entry);
-      }
-    });
-    const imageEntries = Object.entries(viewImages)
-      .map(([viewName, imageRef]) => [
-        viewName,
-        imageRefByViewName.get(String(viewName).toLowerCase()) || imageRef,
-      ])
-      .filter(([viewName, imageRef]) => (
-        imageRefByViewName.has(String(viewName).toLowerCase())
-        || isInspectionImageRefLoaded({
-          imageId: imageRef && typeof imageRef === 'object' ? imageRef.image_id : '',
-          imageRef: imageRef && typeof imageRef === 'object'
-            ? imageRef.filename
-            : String(imageRef || ''),
-          filename: imageRef && typeof imageRef === 'object'
-            ? imageRef.filename
-            : String(imageRef || ''),
-          viewName,
-        }, projectImageLookup)
-      ));
     const partModalities = getPartSummaryModalities(part, partImageRefs, projectConfiguration);
     const rejectAnnotation = isSelected
       ? annotations.find(isRejectPartAnnotation) || getPartRejectAnnotation(part)
@@ -127,7 +101,6 @@ export function PartSummaryPane({ chipFilters, partRows }) {
             label: partLabel,
             isSelected,
             collapsed: isCollapsed,
-            imageEntries,
             imageRefs: partImageRefs,
             modalities: partModalities,
             layerAvailability,

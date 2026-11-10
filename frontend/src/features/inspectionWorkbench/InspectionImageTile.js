@@ -39,7 +39,9 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
     handleTileAnnotationGeometryDragMove,
     finishTileAnnotationGeometryDrag,
   } = handlers;
-                const viewName = entry.viewName || 'image';
+                // Accessible names use the image's own label (title/filename),
+                // not a value synthesized from user metadata.
+                const tileLabel = String(entry.label || entry.filename || entry.imageRef || '');
                 const imageRef = String(entry.imageRef || '');
                 const isSelectedTileImage = String(selectedImageRef || '') === imageRef;
                 const imageRecord = getProjectImageRecord(projectImageLookup, {
@@ -55,6 +57,11 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
                   : null;
                 const baseImageId = baseRecord?.id ? String(baseRecord.id) : '';
                 const imageDisplayName = getInspectionTileFilename(entry, projectImageLookup);
+                // Image alt text names the actual image files shown.
+                const imageAltName = safeDecodeFilename(imageDisplayName || tileLabel);
+                const baseAltName = safeDecodeFilename(
+                  baseRecord?.displayName || baseRecord?.filename || entry.overlayBaseFilename || '',
+                );
                 const metadataOverlayLines = tabKey === 'image_metadata'
                   ? getImageMetadataOverlayLines(entry, projectImageLookup)
                   : [];
@@ -170,7 +177,7 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
                         <button
                           type="button"
                           className="inspection-overlay-delete"
-                          aria-label={`Delete overlay ${entry.label || viewName}`}
+                          aria-label={`Delete overlay ${tileLabel}`}
                           disabled={deletingOverlayId === String(entry.imageId)}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -203,21 +210,21 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
 	                            setFullscreenImageModal({
 	                              imageId: String(imageId),
 	                              baseImageId: String(baseImageId),
-                              label: entry.label || viewName.toUpperCase(),
+                              label: tileLabel,
                             });
                           }}
                         >
                           <img
                             className="inspection-view-image"
                             src={`/api/images/${encodeURIComponent(String(baseImageId))}/content`}
-                            alt={`${viewName} source`}
+                            alt={`${baseAltName} source`}
                             loading="lazy"
                             style={tabKey === 'image_metadata' ? { opacity: metadataImageOpacity } : undefined}
                           />
                           <img
                             className="inspection-view-image analysis-overlay-image"
                             src={`/api/images/${encodeURIComponent(String(imageId))}/content`}
-                            alt={`${viewName} overlay`}
+                            alt={`${imageAltName} overlay`}
                             loading="lazy"
                             style={{ opacity: tileOverlayOpacity * metadataImageOpacity }}
                           />
@@ -248,13 +255,13 @@ export function InspectionImageTile({ entry, tabKey, readOnly, isHighlighted = f
                             }
                             if (handleTileAnnotationPointerDown(event, imageId)) return;
                             setSelectedImageRef(imageRef);
-                            setFullscreenImageModal({ imageId: String(imageId), label: entry.label || viewName.toUpperCase() });
+                            setFullscreenImageModal({ imageId: String(imageId), label: tileLabel });
                           }}
                         >
                           <img
                             className="inspection-view-image"
                             src={`/api/images/${encodeURIComponent(String(imageId))}/content`}
-                            alt={`${viewName} view`}
+                            alt={`${imageAltName} view`}
                             loading="lazy"
 	                            style={entry.overlay || tabKey === 'image_metadata' ? { opacity: entry.overlay ? tileOverlayOpacity * metadataImageOpacity : metadataImageOpacity } : undefined}
 	                          />

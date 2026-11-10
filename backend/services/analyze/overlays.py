@@ -12,6 +12,7 @@ from core import models
 from repositories import inspection as inspection_repository
 from schemas.analyze import AnalyzeDeletedOverlayRecord
 from services.errors import NotFoundError, ValidationFailedError
+from utils.part_image_maps import prune_legacy_image_maps, removed_record_identities
 
 
 class AnalyzeOverlayNotFoundError(NotFoundError, ValueError):
@@ -160,50 +161,48 @@ def without_overlay_delete_fields(record: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
-def rebuild_analyze_part_image_maps(metadata: dict) -> dict:
-    """Rebuild view and overlay image maps from source and analysis records."""
+def _all_image_records(metadata: dict) -> list[dict[str, Any]]:
+    return [
+        record
+        for key in ("source_images", "analysis_outputs")
+        for record in (metadata.get(key) or [])
+        if isinstance(record, dict)
+    ]
+
+
+def rebuild_analyze_part_image_maps(
+    metadata: dict, previous_metadata: dict | None = None
+) -> dict:
+    """Separate Analyze outputs from source images without deriving groupings.
+
+    User metadata is preserved verbatim; no side/modality grouping keys are
+    synthesized. When ``previous_metadata`` is given, legacy
+    ``view_images``/``overlay_images`` maps (present only on older parts) lose
+    references to images that no longer exist in any image collection.
+    Soft-deleted records stay referenced so a restore is lossless; readers
+    already skip delete candidates.
+    """
     source_images, analysis_outputs = split_source_and_analysis_records(metadata)
-    view_images: dict[str, str] = {}
-    overlay_images: dict[str, dict[str, str]] = {}
-    for record in source_images:
-        if not isinstance(record, dict):
-            continue
-        if is_overlay_delete_candidate(record):
-            continue
-        filename = str(record.get("filename") or "").strip()
-        if not filename:
-            continue
-        side = str(record.get("side") or "").strip().lower()
-        modality = str(record.get("modality") or "").strip().lower() or "image"
-        if record.get("overlay"):
-            overlay_images.setdefault(side or "analyze", {})[modality] = filename
-        elif side and side not in view_images:
-            view_images[side] = filename
-    for record in analysis_outputs:
-        if not isinstance(record, dict):
-            continue
-        if is_overlay_delete_candidate(record):
-            continue
-        filename = str(record.get("filename") or "").strip()
-        if not filename:
-            continue
-        side = str(record.get("side") or "").strip().lower() or "analyze"
-        modality = (
-            str(record.get("modality") or "").strip().lower() or "analyze-overlay"
+    legacy_maps: dict[str, Any] = {}
+    if previous_metadata is not None:
+        removed_ids, removed_filenames = removed_record_identities(
+            _all_image_records(previous_metadata),
+            [*source_images, *analysis_outputs],
         )
-        overlay_images.setdefault(side, {})[modality] = filename
+        legacy_maps = prune_legacy_image_maps(metadata, removed_ids, removed_filenames)
     return {
         **metadata,
         "source_images": source_images,
         "analysis_outputs": analysis_outputs,
-        "view_images": view_images,
-        "overlay_images": overlay_images,
+        **legacy_maps,
     }
 
 
-def rebuild_deleted_overlay_safe_image_maps(metadata: dict) -> dict:
+def rebuild_deleted_overlay_safe_image_maps(
+    metadata: dict, previous_metadata: dict | None = None
+) -> dict:
     """Rebuild image maps while excluding deleted Analyze overlay records."""
-    return rebuild_analyze_part_image_maps(metadata)
+    return rebuild_analyze_part_image_maps(metadata, previous_metadata)
 
 
 def mark_overlay_deleted_in_metadata(
@@ -355,7 +354,10 @@ def purge_expired_deleted_overlays_from_metadata(
         "analysis_outputs": keep_unexpired(analysis_outputs),
         "overlay_layers": keep_unexpired(metadata.get("overlay_layers")),
     }
-    return rebuild_deleted_overlay_safe_image_maps(next_metadata), purged_records
+    return (
+        rebuild_deleted_overlay_safe_image_maps(next_metadata, metadata),
+        purged_records,
+    )
 
 
 async def purge_expired_deleted_overlays(

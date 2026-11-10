@@ -8,6 +8,7 @@ from pathlib import Path
 from metadata.nsipro_parsers import parse_nsipro_text
 from schemas import inspection_parts as inspection_part_schemas
 from utils.metadata_values import parse_metadata_boolean
+from utils.part_image_maps import user_image_descriptor_fields
 
 FALLBACK_HIERARCHY_KEYS = [
     "design_number",
@@ -47,8 +48,8 @@ def metadata_from_hierarchy_filename(path: Path) -> dict | None:
         "design_number": design_number,
         "lot_number": lot_number,
         "serial_number": serial_number,
-        "side": side.lower(),
-        "modality": modality.lower(),
+        "side": side,
+        "modality": modality,
         "overlay": parse_metadata_boolean(overlay),
         "source": "vista-test-data",
     }
@@ -60,11 +61,8 @@ def metadata_from_hierarchy_filename(path: Path) -> dict | None:
 
 
 def coerce_filename_metadata(metadata: dict) -> dict:
-    """Normalize filename-derived metadata fields into their canonical shape."""
+    """Normalize VISTA-owned structural fields; user descriptors stay verbatim."""
     coerced = dict(metadata)
-    for key in ("side", "modality"):
-        if key in coerced and coerced[key] is not None:
-            coerced[key] = str(coerced[key]).strip().lower()
     if "overlay" in coerced:
         overlay_value = coerced["overlay"]
         overlay_keyword = str(overlay_value).strip().lower() in {
@@ -131,12 +129,12 @@ def metadata_from_test_data_file(path: Path, root: Path) -> dict | None:
     return metadata_from_hierarchy_filename(path)
 
 
+# Fields that identify which part an image belongs to. Per-image descriptors
+# such as side or modality are deliberately not required.
 REQUIRED_HIERARCHY_KEYS = (
     "design_number",
     "lot_number",
     "serial_number",
-    "side",
-    "modality",
 )
 
 
@@ -175,10 +173,6 @@ def _new_hierarchy_part(metadata: dict) -> dict:
             "design_number": design,
             "lot_number": lot,
             "serial_number": metadata["serial_number"],
-            "configured_views": [],
-            "modalities": [],
-            "view_images": {},
-            "overlay_images": {},
             "source_images": [],
             "source": "vista-test-data",
         },
@@ -190,26 +184,19 @@ def _add_record_to_part(part: dict, record: dict, metadata: dict) -> None:
     for key in ("set_number", "batch_number"):
         if metadata.get(key):
             part_metadata[key] = metadata[key]
-    side, modality = metadata["side"], metadata["modality"]
-    if side not in part_metadata["configured_views"]:
-        part_metadata["configured_views"].append(side)
-    if modality not in part_metadata["modalities"]:
-        part_metadata["modalities"].append(modality)
     part_metadata["source_images"].append(
         {
             "filename": record["filename"],
-            "side": side,
-            "modality": modality,
-            "overlay": metadata["overlay"],
+            **user_image_descriptor_fields(metadata),
+            "overlay": parse_metadata_boolean(metadata.get("overlay")),
             "image_id": str(record["image_id"]),
+            **(
+                {"overlay_base_filename": metadata["overlay_base_filename"]}
+                if metadata.get("overlay_base_filename")
+                else {}
+            ),
         }
     )
-    if metadata["overlay"]:
-        part_metadata["overlay_images"].setdefault(side, {})[modality] = record[
-            "filename"
-        ]
-    elif side not in part_metadata["view_images"]:
-        part_metadata["view_images"][side] = record["filename"]
 
 
 def _group_records_into_parts(uploaded_records: list[dict]) -> list[dict]:
@@ -231,8 +218,6 @@ def build_hierarchy_ingest_records(
     batches_by_name: dict[str, inspection_part_schemas.InspectionIngestBatchRecord] = {}
     unassigned_parts: list[inspection_part_schemas.InspectionIngestPartRecord] = []
     for part in _group_records_into_parts(uploaded_records):
-        part["metadata"]["configured_views"].sort()
-        part["metadata"]["modalities"].sort()
         ingest_part = inspection_part_schemas.InspectionIngestPartRecord(
             serial_number=part["serial_number"],
             display_name=part["display_name"],

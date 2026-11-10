@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core import models
 from repositories.audit import log_db_operation
 from schemas import inspection_parts as inspection_part_schemas
+from utils.part_image_maps import metadata_with_source_images
 
 logger = logging.getLogger(__name__)
 
@@ -492,45 +493,9 @@ async def remove_image_from_inspection_parts(
             retained.append(record)
 
         if changed:
-            configured_views = set()
-            modalities = set()
-            view_images = {}
-            overlay_images = {}
-            normalized_source_images = []
-            for retained_record in retained:
-                if not isinstance(retained_record, dict):
-                    continue
-                retained_filename = str(retained_record.get("filename") or "").strip()
-                if not retained_filename:
-                    continue
-                side = str(retained_record.get("side") or "").strip().lower()
-                modality = str(retained_record.get("modality") or "").strip().lower()
-                overlay = bool(retained_record.get("overlay"))
-                normalized_record = {
-                    **retained_record,
-                    "filename": retained_filename,
-                    "side": side,
-                    "modality": modality,
-                    "overlay": overlay,
-                }
-                normalized_source_images.append(normalized_record)
-                if side:
-                    configured_views.add(side)
-                if modality:
-                    modalities.add(modality)
-                if side and overlay and modality:
-                    overlay_images.setdefault(side, {})[modality] = retained_filename
-                elif side and not overlay and side not in view_images:
-                    view_images[side] = retained_filename
-
-            part.metadata_json = {
-                **metadata,
-                "source_images": normalized_source_images,
-                "configured_views": sorted(configured_views),
-                "modalities": sorted(modalities),
-                "view_images": view_images,
-                "overlay_images": overlay_images,
-            }
+            part.metadata_json = metadata_with_source_images(
+                metadata, retained, previous_source_images=source_images
+            )
             updated_count += 1
 
     if updated_count:
