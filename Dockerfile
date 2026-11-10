@@ -4,9 +4,12 @@
 # The frontend is built in its own stage and only the compiled bundle ships: Node, npm and
 # node_modules stay out of the runtime image. Pinned by digest (ubi9/nodejs-22:latest on
 # 2026-11-05); the UI needs Node 20 or newer (react-router 7).
+# ubi9/ubi-minimal:latest pinned by digest (2026-11-09 build). Bump both digests together to pick up
+# base image fixes; the build's `microdnf upgrade` then applies the rest.
+ARG UBI_MINIMAL=registry.access.redhat.com/ubi9/ubi-minimal@sha256:f26ef64172ea61f5ac5ba4be8c5c738bf8760b22b3e5148ce7b40f7308ab32db
 ARG UBI_NODEJS=registry.access.redhat.com/ubi9/nodejs-22@sha256:18efae02a19cdfbda303ff98d096cfcc2e123f300aff146e7dab1e75b9116dec
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal AS base
+FROM ${UBI_MINIMAL} AS base
 
 # Runtime base: Python 3.11 and CA certificates only. Compilers, headers, git, wget and the
 # GTK/X11/browser libraries are deliberately absent. Every dependency installs from a prebuilt
@@ -28,8 +31,9 @@ RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install uv package installer and debugging tools
-RUN pip install --no-cache-dir --upgrade pip uv debugpy
+# Install uv. setuptools is upgraded here because the venv is seeded with the OS-packaged
+# 65.5.1, which carries known vulnerabilities. debugpy is not installed in the image.
+RUN pip install --no-cache-dir --upgrade pip setuptools uv
 # ultralytics and every other runtime dependency come from uv.lock in the builder
 # stage. Do not pip install them here: this stage's /opt/venv is also the base of
 # the final stage, and COPY --from=builder only adds files, so anything installed
@@ -56,7 +60,7 @@ COPY ./frontend/config-overrides.js ./
 RUN npm run build
 
 # ---- checkpoints: public default weights, verified by SHA-256. Only the file is copied out. ----
-FROM registry.access.redhat.com/ubi9/ubi-minimal AS checkpoints
+FROM ${UBI_MINIMAL} AS checkpoints
 ARG SAM_VIT_B_SHA256=ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912
 RUN mkdir -p /checkpoints && \
     curl -fsSL -o /checkpoints/sam_vit_b_01ec64.pth \

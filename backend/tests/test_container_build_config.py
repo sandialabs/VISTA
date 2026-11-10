@@ -230,6 +230,42 @@ def test_sam_checkpoint_is_downloaded_in_its_own_stage_with_a_pinned_hash():
         assert "wget" not in instructions, name
 
 
+def test_base_images_are_pinned_by_digest():
+    """Pin both base images so rebuilds are reproducible and bumps are deliberate."""
+    dockerfile = _read_repo_file("Dockerfile")
+    for arg, repo in (
+        ("UBI_MINIMAL", "ubi9/ubi-minimal"),
+        ("UBI_NODEJS", "ubi9/nodejs-22"),
+    ):
+        assert re.search(
+            rf"^ARG {arg}=registry\.access\.redhat\.com/{re.escape(repo)}@sha256:[0-9a-f]{{64}}$",
+            dockerfile,
+            flags=re.MULTILINE,
+        ), arg
+    assert "FROM ${UBI_MINIMAL} AS base" in dockerfile
+    assert "FROM ${UBI_MINIMAL} AS checkpoints" in dockerfile
+    assert not re.search(r"^FROM registry\.access\.redhat\.com/\S+(?<!\))\s", dockerfile, re.M)
+
+
+def test_runtime_image_has_no_debugger_and_current_setuptools():
+    """Keep debugpy out of the image and replace the OS-seeded setuptools."""
+    instructions = "\n".join(
+        line
+        for line in _read_repo_file("Dockerfile").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert "debugpy" not in instructions
+    assert re.search(r"pip install .*--upgrade pip setuptools uv", instructions)
+    for package, minimum in (
+        ("fastmcp", (3, 4, 10)),
+        ("fastmcp-slim", (3, 4, 10)),
+        ("opentelemetry-api", (1, 45, 1)),
+        ("setuptools", (84, 1, 0)),
+    ):
+        version = tuple(int(part) for part in _locked_version(package).split("."))
+        assert version >= minimum, package
+
+
 def test_image_scan_script_parses_and_documents_its_usage():
     """Keep the image scan helper runnable and its usage documented."""
     script = REPO_ROOT / "scripts" / "scan_image.sh"

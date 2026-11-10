@@ -48,7 +48,7 @@ def test_historical_production_build_keeps_runtime_and_safe_context() -> None:
         (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
     )
 
-    assert "FROM registry.access.redhat.com/ubi9/ubi-minimal AS base" in dockerfile
+    assert "FROM ${UBI_MINIMAL} AS base" in dockerfile
     assert "uv sync --frozen --no-dev --no-install-project" in dockerfile
     assert "COPY ./backend /app/backend" in dockerfile
     assert "RUN npm ci --no-audit --no-fund" in dockerfile
