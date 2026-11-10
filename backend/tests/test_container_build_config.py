@@ -257,8 +257,9 @@ def test_runtime_image_has_no_debugger_and_current_setuptools():
     assert "debugpy" not in instructions
     assert "uv venv" in instructions
     for package, minimum in (
-        ("fastmcp", (3, 4, 10)),
-        ("fastmcp-slim", (3, 4, 10)),
+        ("fastmcp", (4, 1, 8)),
+        ("fastmcp-slim", (4, 1, 8)),
+        ("mcp", (2, 3, 0)),
         ("opentelemetry-api", (1, 45, 1)),
         ("setuptools", (84, 1, 0)),
     ):
