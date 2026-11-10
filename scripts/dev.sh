@@ -83,6 +83,17 @@ can_run() {
 }
 
 sense_container_engine() {
+  # Allow an explicit override for machines with both engines installed
+  # (e.g. podman kept around for unrelated tooling, Docker Desktop for this project).
+  if [[ -n "${CONTAINER_RUNTIME:-}" ]]; then
+    if ! command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1 || ! can_run "$CONTAINER_RUNTIME" info; then
+      echo "Error: CONTAINER_RUNTIME=$CONTAINER_RUNTIME is set but '$CONTAINER_RUNTIME' is not installed/reachable." >&2
+      exit 1
+    fi
+    RUNTIME_CMD="$CONTAINER_RUNTIME"
+    return
+  fi
+
   local docker_ok=0 podman_ok=0
   if command -v docker >/dev/null 2>&1 && can_run docker info; then docker_ok=1; fi
   if command -v podman >/dev/null 2>&1 && can_run podman info; then podman_ok=1; fi
