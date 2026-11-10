@@ -220,6 +220,9 @@ def test_sam_checkpoint_is_downloaded_in_its_own_stage_with_a_pinned_hash():
     stage = _dockerfile_stage(dockerfile, "checkpoints")
     assert re.search(r"ARG SAM_VIT_B_SHA256=[0-9a-f]{64}\b", stage)
     assert "sha256sum -c -" in stage
+    assert re.search(r"ARG YOLO11N_SEG_SHA256=[0-9a-f]{64}\b", stage)
+    assert stage.count("sha256sum -c -") == 2
+    assert "ln -sf /app/checkpoints/yolo11n-seg.pt /app/backend/yolo11n-seg.pt" in dockerfile
     assert "COPY --from=checkpoints /checkpoints /app/checkpoints" in dockerfile
     for name in ("base", "builder", "final"):
         instructions = "\n".join(
@@ -305,6 +308,22 @@ def test_ci_builds_and_tests_the_test_target_and_ships_the_default_target():
     assert re.search(r"target: test", workflow)
     assert ":test" in workflow
     assert "uv sync --frozen --inexact --no-install-package opencv-python-headless" in workflow
+
+
+def test_production_image_runs_as_an_unprivileged_user():
+    """The shipped image drops root; only the CI test stage keeps it."""
+    dockerfile = _read_repo_file("Dockerfile")
+    final = _instructions(dockerfile, "final")
+    users = re.findall(r"^USER (\S+)$", final, flags=re.MULTILINE)
+    assert users and re.fullmatch(r"[1-9][0-9]*", users[-1]), "final must end as a numeric non-root user"
+    # The runtime state directories must be writable by that user and by group 0 (OpenShift).
+    for path in ("/var/cache/vista", "/app/backend/logs", "/app/backend/tmp", "/home/vista"):
+        assert path in final, path
+    assert "chmod -R g=u" in final
+    assert "CACHE_DIR=/var/cache/vista" in final
+    assert re.search(r"^USER 0$", _instructions(dockerfile, "test"), flags=re.MULTILINE)
+    # Code, venv and checkpoints must not be handed to the runtime user.
+    assert not re.search(r"chown[^\n]*(/opt/venv|/app/checkpoints|/app/ui2)", final)
 
 
 def test_image_scan_script_parses_and_documents_its_usage():

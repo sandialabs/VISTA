@@ -49,13 +49,17 @@ COPY ./frontend/src ./src
 COPY ./frontend/config-overrides.js ./
 RUN npm run build
 
-# ---- checkpoints: public default weights, verified by SHA-256. Only the file is copied out. ----
+# ---- checkpoints: public default weights, verified by SHA-256. Only the files are copied out. ----
 FROM ${UBI_MINIMAL} AS checkpoints
 ARG SAM_VIT_B_SHA256=ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912
+ARG YOLO11N_SEG_SHA256=55ed65c56c91713d23e8402371c6c49a6fd84f257f7dce452e8d70e41dcbe152
 RUN mkdir -p /checkpoints && \
     curl -fsSL -o /checkpoints/sam_vit_b_01ec64.pth \
         https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth && \
-    echo "${SAM_VIT_B_SHA256}  /checkpoints/sam_vit_b_01ec64.pth" | sha256sum -c -
+    echo "${SAM_VIT_B_SHA256}  /checkpoints/sam_vit_b_01ec64.pth" | sha256sum -c - && \
+    curl -fsSL -o /checkpoints/yolo11n-seg.pt \
+        https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.pt && \
+    echo "${YOLO11N_SEG_SHA256}  /checkpoints/yolo11n-seg.pt" | sha256sum -c -
 
 FROM base AS builder
 
@@ -109,13 +113,14 @@ RUN python -c "import cv2; assert 'FFMPEG' not in cv2.getBuildInformation(), 'cv
 
 # Copy backend code
 COPY --from=builder /app/backend /app/backend
-# Download the bundled default checkpoints used by Analyze (public weights
-# only; nothing is committed to the repository). yolo11n-seg.pt is fetched
-# automatically by ultralytics on first use via YOLO_CONFIG_DIR, so only the
-# SAM checkpoint needs an explicit download. No default Anomalib checkpoint
-# ships; its public PatchCore-like fallback is dependency-free and has no
-# pretrained weights to bundle.
+# Bundled default checkpoints used by Analyze (public weights only; nothing is committed to
+# the repository). Both come from the checkpoints stage, verified by SHA-256. yolo11n-seg.pt is
+# bundled, not downloaded at first use, because the unprivileged runtime user cannot write to
+# the working directory where ultralytics would save a download; the symlink below lets the
+# bare model name resolve from /app/backend. No default Anomalib checkpoint ships; its public
+# PatchCore-like fallback is dependency-free and has no pretrained weights to bundle.
 COPY --from=checkpoints /checkpoints /app/checkpoints
+RUN ln -sf /app/checkpoints/yolo11n-seg.pt /app/backend/yolo11n-seg.pt
 # Copy the only root test-tree asset needed at runtime by Project Data's built-in example loader.
 COPY ./test/data /app/test/data
 # Copy frontend build files
@@ -125,6 +130,19 @@ ENV FRONTEND_BUILD_PATH=/app/ui2
 ENV GITLAB_COMMIT_SHA=$GITLAB_COMMIT_SHA
 ENV VISTA_DISABLE_NATIVE_SEGMENTATION_RUNTIME=false
 ENV YOLO_CONFIG_DIR=/tmp/ultralytics
+
+# Run as an unprivileged user. The code, venv and checkpoints stay root-owned and read-only;
+# only the runtime state directories below are writable. Group 0 gets the same access so an
+# arbitrary UID assigned by OpenShift (always in group 0) works too. ubi-minimal has no
+# useradd, so the account is added directly.
+ENV HOME=/home/vista \
+    CACHE_DIR=/var/cache/vista
+RUN echo "vista:x:10001:" >> /etc/group && \
+    echo "vista:x:10001:10001:vista:/home/vista:/sbin/nologin" >> /etc/passwd && \
+    mkdir -p /home/vista /var/cache/vista /app/backend/logs /app/backend/tmp && \
+    chown -R 10001:0 /home/vista /var/cache/vista /app/backend/logs /app/backend/tmp && \
+    chmod -R g=u /home/vista /var/cache/vista /app/backend/logs /app/backend/tmp
+USER 10001
 
 WORKDIR /app
 EXPOSE 8000
@@ -137,6 +155,8 @@ CMD ["bash", "/app/backend/scripts/start_production_server.sh"]
 # ---- test: final plus uv and the project files, so CI can install dev dependencies and run the
 # suites inside the image. Never shipped. Build it with --target test. ----
 FROM final AS test
+# CI installs dev dependencies into /opt/venv, which only root can write.
+USER 0
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock /app/
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
