@@ -169,7 +169,10 @@ services:
         max-file: "3"
     ports:
       - "8010:8010"
-    gpus: all
+    # CDI device (podman-compose 1.0.6 ignores `gpus:`). Requires nvidia-container-toolkit and
+    # a spec from: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    devices:
+      - nvidia.com/gpu=all
     volumes:
       - toolbox_model_cache:/models
     environment:
