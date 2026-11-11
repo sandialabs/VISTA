@@ -6,14 +6,15 @@ OpenSSL. The production `Dockerfile` installs it offline and hash-pinned instead
 OpenCV on every image build. Built 2026-11-10 with the recipe in `Dockerfile.build` (the
 `opencv-build` stage the production Dockerfile used to carry, plus a configurable job count
 `OPENCV_JOBS`, 10 for this build instead of `nproc`, which does not change the output).
+Retagged 2026-11-11 from `cp311-cp311` to `cp311-abi3` for the move to Python 3.14 (see below).
 
 ## The artifact
 
 | | |
 |---|---|
-| File | `opencv_python_headless-5.0.0.93-cp311-cp311-linux_x86_64.whl` (33,536,079 bytes) |
-| SHA-256 | `800d33f83bd70d2fe1e8c256572422da60860358cbd2dd51cd3b78b0c9a22723` |
-| Target | CPython 3.11, linux x86_64, glibc 2.34 or newer (built and tested on UBI 9.8) |
+| File | `opencv_python_headless-5.0.0.93-cp311-abi3-linux_x86_64.whl` (33,536,082 bytes) |
+| SHA-256 | `fa46261d15c47592218353a2dcd296936b5a39d480e840847f1afac98327e9ea` (the original `cp311-cp311` build was `800d33f8...a22723`) |
+| Target | CPython 3.11 or later (limited API; the production image runs 3.14), linux x86_64, glibc 2.34 or newer (built and tested on UBI 9.8) |
 | Source | `opencv_python_headless-5.0.0.93.tar.gz`, SHA-256 `b82f9831daab90b725c7c1ee1b36cb5732c367096ac76d119e64e14eb70d5f3c` (pinned in `Dockerfile`, checked with `--require-hashes`) |
 | CMake args | `-DWITH_FFMPEG=OFF` (the stage's only setting), with `ENABLE_HEADLESS=1` |
 | Base image | `registry.access.redhat.com/ubi9/ubi-minimal@sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661` |
@@ -25,6 +26,18 @@ The production `Dockerfile` consumes it with `requirements-opencv-prebuilt.txt`:
     pip install   --no-index --find-links <dir> --require-hashes --no-deps -r requirements-opencv-prebuilt.txt
 
 A wrong hash is rejected (tested).
+
+## The abi3 retag
+
+The module was always built against the limited API (`cv2/cv2.abi3.so`, as on PyPI), but
+scikit-build tagged the wheel `cp311-cp311`, which no other Python version will install. The
+wheel was retagged with `wheel tags --python-tag cp311 --abi-tag abi3 --platform-tag
+linux_x86_64` (wheel 0.45.1). Only `WHEEL` and `RECORD` changed: every other archive member is
+byte-identical to the original build (compared member by member). On Python 3.14.7 with
+numpy 2.5.2 it imports, finds contours, round-trips PNG encoding, and its build information
+reports no FFmpeg. `Dockerfile.build` now ends with the same retag step, and a full recipe
+rebuild on 2026-11-11 (with the optional `extra_ca` build secret) produced a `cp311-abi3`
+wheel.
 
 ## What was verified
 
@@ -48,7 +61,7 @@ A wrong hash is rejected (tested).
 - Not bit-for-bit reproducible: the base image tag floats (pinned here by digest only for record), and `pip wheel`
   fetches its build requirements (cmake, numpy, scikit-build, setuptools) unpinned at build time. Identify the
   artifact by its SHA-256, and rebuild only when OpenCV is bumped.
-- Python 3.11 only (cp311 wheel), linux x86_64 only. An OpenCV bump in `uv.lock` needs a rebuild and a new hash:
+- Python 3.11 or later (cp311-abi3 wheel), linux x86_64 only. An OpenCV bump in `uv.lock` needs a rebuild and a new hash:
   `backend/tests/test_container_build_config.py` fails if the wheel, its requirements line, `SHA256SUMS` and
   `uv.lock` disagree.
 - A 33 MB binary lives in git history. Each rebuild adds another 33 MB; consider an artifact registry if that grows.

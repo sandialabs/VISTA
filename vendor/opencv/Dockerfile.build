@@ -36,8 +36,29 @@ ENV PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
 ENV ENABLE_HEADLESS=1
 ENV CMAKE_ARGS="-DWITH_FFMPEG=OFF"
 
-RUN echo "opencv-python-headless==${OPENCV_VERSION} --hash=sha256:${OPENCV_SDIST_SHA256}" \
+# The optional extra_ca build secret (a proxy CA on networks that inspect TLS; see
+# scripts/build_image.sh) is combined with the system bundle in a tmpfs, so it never
+# lands in a layer. TLS verification is never disabled.
+RUN --mount=type=secret,id=extra_ca --mount=type=tmpfs,target=/run/ca \
+    if [ -s /run/secrets/extra_ca ]; then \
+      cat /etc/pki/tls/certs/ca-bundle.crt /run/secrets/extra_ca > /run/ca/bundle.pem && \
+      export PIP_CERT=/run/ca/bundle.pem SSL_CERT_FILE=/run/ca/bundle.pem; \
+    fi && \
+    echo "opencv-python-headless==${OPENCV_VERSION} --hash=sha256:${OPENCV_SDIST_SHA256}" \
         > /tmp/opencv-requirements.txt && \
     CMAKE_BUILD_PARALLEL_LEVEL="${OPENCV_JOBS}" python3.11 -m pip wheel \
         --no-deps --no-binary opencv-python-headless --require-hashes \
         -r /tmp/opencv-requirements.txt -w /wheels
+
+# The module is built against the limited API (cv2/cv2.abi3.so) but scikit-build tags the
+# wheel cp311-cp311. Retag it cp311-abi3 so it installs on Python 3.11 and every later
+# version (the production image runs 3.14). Only WHEEL and RECORD change.
+RUN --mount=type=secret,id=extra_ca --mount=type=tmpfs,target=/run/ca \
+    if [ -s /run/secrets/extra_ca ]; then \
+      cat /etc/pki/tls/certs/ca-bundle.crt /run/secrets/extra_ca > /run/ca/bundle.pem && \
+      export PIP_CERT=/run/ca/bundle.pem; \
+    fi && \
+    python3.11 -m pip install --no-cache-dir wheel==0.45.1 && \
+    python3.11 -m wheel tags --python-tag cp311 --abi-tag abi3 \
+        --platform-tag linux_x86_64 --remove /wheels/opencv_python_headless-*.whl && \
+    ls /wheels/opencv_python_headless-*-cp311-abi3-linux_x86_64.whl
