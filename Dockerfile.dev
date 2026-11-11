@@ -20,8 +20,10 @@ ENV SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt \
     UV_NATIVE_TLS=true \
     NODE_EXTRA_CA_CERTS=/etc/pki/tls/certs/ca-bundle.crt
 
-# Install Python 3.11, Node.js, and system dependencies
-RUN microdnf install -y --nodocs \
+# Install Python 3.11, Node.js 22, and system dependencies. The UBI default nodejs stream
+# is Node 16; the UI tooling (Vite 8, react-router 7) needs Node 20.19 or newer.
+RUN microdnf module enable -y nodejs:22 && \
+    microdnf install -y --nodocs \
     python3.11 \
     python3.11-pip \
     python3.11-devel \

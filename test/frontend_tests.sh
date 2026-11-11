@@ -37,10 +37,10 @@ cd frontend
 echo "Frontend tests:"
 echo "============================================="
 
-if [ -f "node_modules/react-scripts/bin/react-scripts.js" ]; then
-  REACT_SCRIPTS=(node ./node_modules/react-scripts/bin/react-scripts.js)
+if [ -f "node_modules/jest/bin/jest.js" ]; then
+  JEST=(node ./node_modules/jest/bin/jest.js)
 else
-  REACT_SCRIPTS=(npx react-scripts)
+  JEST=(npx jest)
 fi
 
 set +e
@@ -48,12 +48,12 @@ set +e
 # Run Jest tests
 echo "Jest tests:"
 if [ "$VERBOSE_MODE" = true ]; then
-  "${REACT_SCRIPTS[@]}" test --watchAll=false --passWithNoTests --runInBand --verbose
+  CI=true "${JEST[@]}" --watchAll=false --passWithNoTests --runInBand --verbose
 else
   # Application console output can be extremely noisy and can push Jest's
   # failure report past CI log limits. Jest still prints failed assertions,
   # stack traces, and its final summary when --silent is enabled.
-  "${REACT_SCRIPTS[@]}" test --watchAll=false --passWithNoTests --runInBand --silent \
+  CI=true "${JEST[@]}" --watchAll=false --passWithNoTests --runInBand --silent \
     --reporters=./scripts/compact-jest-reporter.js
 fi
 JEST_EXIT_CODE=$?

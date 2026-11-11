@@ -57,10 +57,6 @@ install_frontend_dependencies() {
     
     say "Frontend dependencies installed successfully"
     
-    # Install additional development optimizations
-    say "Installing additional optimization packages..."
-    npm install --save-dev webpack-bundle-analyzer react-app-rewired
-    
     say "Frontend installation complete!"
     say "Run './run.sh' to start the development server"
 }

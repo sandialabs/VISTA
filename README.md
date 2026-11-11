@@ -249,7 +249,7 @@ pytest --coverage                               # With coverage report
 **Frontend tests (Jest):**
 ```bash
 cd frontend
-npm test                    # Interactive mode
+npm test                    # Run all suites once
 npm test -- --coverage      # With coverage report
 ```
 

@@ -1,4 +1,3 @@
-/* eslint-env worker */
 /* eslint-disable no-restricted-globals */
 function parsePly(text) {
   const lines = text.split(/\r?\n/);

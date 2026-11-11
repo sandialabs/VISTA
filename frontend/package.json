@@ -7,74 +7,51 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.18.5",
-    "react-scripts": "^5.0.1",
     "three": "^0.185.1"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "vite",
     "dev": "node scripts/start-react-dev.js",
     "dev:fast": "node scripts/start-react-dev.js --fast",
-    "build": "react-scripts build",
-    "build:analyze": "npm run build && npx webpack-bundle-analyzer build/static/js/*.js",
-    "build:profile": "react-scripts --profile build",
-    "test": "react-scripts test --runInBand --watchAll=false --all",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "jest --runInBand --watchAll=false",
     "test:e2e": "playwright test --project=chromium-local",
     "test:e2e:browsers": "playwright test --config=playwright.cross-browser.config.js",
     "test:e2e:install-browsers": "node scripts/install-cross-browser-browsers.js",
     "test:e2e:pr03": "playwright test e2e/specs/inspection-workbench.spec.js",
     "test:e2e:headed": "playwright test --headed --project=chromium-local",
-    "eject": "react-scripts eject",
-    "lint": "eslint src --ext .js,.jsx --ignore-pattern '**/__tests__/**' --ignore-pattern '**/*.test.js' --ignore-pattern src/setupTests.js --max-warnings 0",
-    "test:unit:ci": "CI=true react-scripts test --runInBand --watchAll=false --silent --reporters=./scripts/compact-jest-reporter.js",
+    "lint": "eslint src --max-warnings 0",
+    "test:unit:ci": "CI=true jest --runInBand --watchAll=false --silent --reporters=./scripts/compact-jest-reporter.js",
     "test:ci": "npm run test:unit:ci && npm run test:e2e"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
   "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@babel/preset-env": "7.29.7",
+    "@babel/preset-react": "7.29.7",
+    "@eslint/js": "9.39.5",
     "@playwright/test": "^1.59.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
-    "http-proxy-middleware": "^2.0.9",
+    "@vitejs/plugin-react": "6.1.2",
+    "babel-jest": "30.5.2",
+    "eslint": "9.39.5",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "jest": "30.5.2",
+    "jest-environment-jsdom": "30.5.2",
     "playwright": "^1.59.1",
-    "react-app-rewired": "^2.2.1",
-    "typescript": "^4.9.5",
-    "webpack-bundle-analyzer": "^4.10.2"
+    "vite": "8.3.5"
   },
   "overrides": {
-    "nth-check": ">=2.0.1",
     "postcss": ">=8.4.31",
     "cross-spawn": ">=6.0.6",
-    "node-forge": ">=1.3.2",
-    "underscore": "^1.13.8",
-    "serialize-javascript": "^7.1.4",
-    "sockjs": {
-      "uuid": "^11.1.1"
-    },
-    "http-proxy-agent": {
-      "@tootallnate/once": "^2.0.1"
-    }
-  },
-  "jest": {
-    "moduleNameMapper": {
-      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js"
-    }
+    "glob": "14.0.2",
+    "minimatch@>=7": "11.0.1"
   }
 }

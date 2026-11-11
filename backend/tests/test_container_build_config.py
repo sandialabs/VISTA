@@ -180,6 +180,9 @@ def test_frontend_is_built_in_its_own_node_stage():
     assert "FROM ${UBI_NODEJS} AS ui" in dockerfile
     assert "RUN npm ci --no-audit --no-fund" in ui
     assert "RUN npm run build" in ui
+    # The UI builds with Vite: its entry HTML and config must reach the stage.
+    assert "COPY ./frontend/index.html ./frontend/vite.config.mjs ./" in ui
+    assert "config-overrides" not in ui
     assert "COPY --from=ui /app/frontend/build /app/ui2" in dockerfile
 
 

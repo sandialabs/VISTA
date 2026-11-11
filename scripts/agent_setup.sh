@@ -67,7 +67,7 @@ echo "--- Installation Complete ---"
 echo "Remember to configure API keys and restart your shell for changes to take effect."
 
 # --- Project frontend dependencies ---
-echo "--- Ensuring frontend dependencies are installed (react-scripts) ---"
+echo "--- Ensuring frontend dependencies are installed (Vite, Jest) ---"
 if [ -f "/workspace/VISTA/frontend/package.json" ]; then
   (cd /workspace/VISTA/frontend && npm install)
   echo "Frontend dependencies installed."

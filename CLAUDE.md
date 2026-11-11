@@ -8,7 +8,7 @@ VISTA is a full-stack application for image management, classification, and coll
 
 **Stack:**
 - **Backend:** FastAPI (Python 3.11+) with async SQLAlchemy
-- **Frontend:** React 18 with React Router
+- **Frontend:** React 18 with React Router, built with Vite
 - **Database:** PostgreSQL 15 (with Alembic migrations)
 - **Storage:** MinIO/S3 for object storage
 - **Package Management:** `uv` for Python (via `pyproject.toml` + `uv.lock`), `npm` for JavaScript
@@ -81,17 +81,17 @@ pytest -v                                       # Verbose output
 pytest -k "test_auth"                           # Run tests matching pattern
 ```
 
-Frontend tests use Jest via `react-scripts`:
+Frontend tests use Jest (`frontend/jest.config.js`):
 ```bash
 cd frontend
-npm test                    # Interactive mode
+npm test                    # Run all suites once
 npm test -- --coverage      # With coverage
 ```
 
 ### Building
 
 ```bash
-# Frontend production build
+# Frontend production build (Vite, output in frontend/build)
 cd frontend
 npm run build
 
@@ -427,10 +427,14 @@ Single container deployment via `Dockerfile`:
 The UI uses `react-router-dom` 7.x (imports come only from `react-router-dom`; the app uses `BrowserRouter`-style routing, no framework mode). Things to keep in mind:
 
 - Router 7 requires Node 20+; CI workflows use Node 20.
-- Create React App's Jest cannot read the `exports` map in `package.json`, so `frontend/package.json` has a `jest.moduleNameMapper` entry for `react-router/dom`. Do not remove it or the suites that import the router fail to load.
 - Router 7 needs `TextEncoder`/`TextDecoder`, which jsdom omits; `frontend/src/setupTests.js` defines them.
 - Lockfiles (`uv.lock`, `frontend/package-lock.json`) must resolve only from public indexes (`pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`). Never commit internal mirror URLs or insecure-host/TLS-skipping settings; pass such flags only on a local command line.
-- `frontend/package.json` `overrides` patch Create React App's pinned transitive dependencies: `underscore` ^1.13.8, `serialize-javascript` ^7.1.4, `uuid` ^11.1.1 (under `sockjs`) and `@tootallnate/once` ^2.0.1 (under `http-proxy-agent`). Each is API-compatible with its caller; `backend/tests/test_frontend_package_scripts.py` keeps them in place. `npm audit` is 18 findings (4 high, 2 moderate, 12 low). The remaining highs (`svgo` via `@svgr/plugin-svgo`, `webpack-dev-server`, `webpack-dev-middleware`) need major versions that `react-scripts` 5 cannot use, and they cannot be fixed without migrating off CRA. They are build or dev-server tooling only: the production image ships only the compiled bundle, and `src` imports no SVG components. Do not run `npm audit fix --force`; it installs `react-scripts@0.0.0`.
+- The UI builds with Vite 8 (`frontend/vite.config.mjs`, entry `frontend/index.html`) and tests with Jest 30 run directly (`frontend/jest.config.js`); Create React App (`react-scripts`) was removed because its pinned webpack, webpack-dev-server, svgo and Jest releases carried advisories no override could fix. `backend/tests/test_frontend_package_scripts.py` keeps it out.
+- Vite compatibility choices: output stays in `build/` with assets under `build/static/` (the backend mounts only `/static`); JSX in `.js` files is compiled by the `vista:jsx-in-js` plugin in `vite.config.mjs` (oxc treats `.js` as plain JS, and is stricter than Babel: JSX text may not contain a bare `>`, write `&gt;`); `process.env.NODE_ENV` and `REACT_APP_*` variables are inlined as before; the dev server reads `HOST`/`PORT` and proxies `/api` to `REACT_APP_BACKEND_URL` (replacing `src/setupProxy.js`). Vite and the dev image need Node 20.19 or newer (`Dockerfile.dev` enables the `nodejs:22` module stream).
+- `frontend/jest.config.js` reproduces the react-scripts Jest defaults: `resetMocks: true`, the CSS and file transforms in `frontend/config/jest/`, a global `fetch` stub (`config/jest/polyfills.js`, replacing `react-app-polyfill/jsdom`), and the Jest 27 snapshot format. Jest 30 honors package `exports`, so `moduleNameMapper` points `react-router/dom` and the ESM-only `flexlayout-react` at loadable files; do not remove those entries.
+- Vite's dev server serves each source module by its own URL, so e2e mocks must not use the glob `'**/api/**'`, which also matches `/src/api/*.js` and breaks the app in dev mode (the nightly CI e2e run uses the dev server). Use `API_REQUEST` from `frontend/e2e/fixtures/apiRoutes.js` or a specific `**/api/<path>` pattern. Workers whose files use `import` must be created with `{ type: 'module' }` (see `pt3SplatAssetWorker.js`).
+- Lint uses an ESLint 9 flat config (`frontend/eslint.config.mjs`) that carries over the `eslint-config-react-app` rules, including `caughtErrors: 'none'`. ESLint 9 is the newest major `eslint-plugin-react` supports.
+- `frontend/package.json` `overrides` force fixed `glob` (14.0.2) and `minimatch` (11.0.1 for the 7.x and later copies) under Jest. `npm audit` reports only `deepmerge` (low, no fixed release exists), through `jest-config`.
 
 ## Container Image Scan
 

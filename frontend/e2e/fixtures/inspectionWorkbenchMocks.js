@@ -1,3 +1,5 @@
+const { API_REQUEST } = require('./apiRoutes');
+
 const projectId = 'proj-pt1';
 
 function parseMetadataBoolean(value) {
@@ -364,7 +366,7 @@ async function mockInspectionWorkbenchRoutes(page, {
     segment_ids: Array.isArray(realSplatSegmentIds) ? realSplatSegmentIds : [null, null, null, null],
   };
 
-  await page.route('**/api/**', async (route) => {
+  await page.route(API_REQUEST, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
 

@@ -210,7 +210,8 @@ services:
       - ./frontend/scripts:/app/frontend/scripts:ro
       - ./frontend/package.json:/app/frontend/package.json:ro
       - ./frontend/package-lock.json:/app/frontend/package-lock.json:ro
-      - ./frontend/config-overrides.js:/app/frontend/config-overrides.js:ro
+      - ./frontend/index.html:/app/frontend/index.html:ro
+      - ./frontend/vite.config.mjs:/app/frontend/vite.config.mjs:ro
       # Named volume for node_modules (avoid host/container conflicts)
       - frontend_node_modules:/app/frontend/node_modules
     environment:
@@ -220,9 +221,7 @@ services:
       - no_proxy=localhost,127.0.0.1,postgres,minio,backend-dev,frontend-dev,toolbox-models
       - REACT_APP_API_URL=http://localhost:8000
       - REACT_APP_BACKEND_URL=http://backend-dev:8000
-      - FAST_REFRESH=true
-      - SKIP_PREFLIGHT_CHECK=true
-      - WATCHPACK_POLLING=true
+      # Bind-mounted sources on Podman/WSL2 need polling for Vite to see edits.
       - CHOKIDAR_USEPOLLING=true
     depends_on:
       backend-dev:

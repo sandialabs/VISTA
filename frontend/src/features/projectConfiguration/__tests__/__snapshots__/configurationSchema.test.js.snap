@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`normalizeProjectConfiguration characterization normalizes a missing configuration for project type " pt1 " 1`] = `
 "{

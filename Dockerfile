@@ -43,10 +43,10 @@ WORKDIR /app/frontend
 # Copy package.json and package-lock.json first for better caching
 COPY ./frontend/package.json ./frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-# Copy frontend source and config files (not node_modules)
+# Copy frontend source and the Vite build config (not node_modules)
+COPY ./frontend/index.html ./frontend/vite.config.mjs ./
 COPY ./frontend/public ./public
 COPY ./frontend/src ./src
-COPY ./frontend/config-overrides.js ./
 RUN npm run build
 
 # ---- checkpoints: public default weights, verified by SHA-256. Only the files are copied out. ----

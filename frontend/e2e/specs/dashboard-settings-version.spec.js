@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { API_REQUEST } = require('../fixtures/apiRoutes');
 
 const commitSha = 'abc123def4567890abc123def4567890abc123de';
 const appUrl = process.env.E2E_BASE_URL || '/';
@@ -12,7 +13,7 @@ function fulfillJson(route, body) {
 }
 
 test('shows GitLab commit SHA in dashboard settings', async ({ page }) => {
-  await page.route('**/api/**', (route) => {
+  await page.route(API_REQUEST, (route) => {
     const requestUrl = new URL(route.request().url());
     const path = requestUrl.pathname;
 

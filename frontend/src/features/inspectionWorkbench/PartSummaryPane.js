@@ -187,10 +187,10 @@ export function PartSummaryPane({ chipFilters, partRows }) {
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value)}
           >
-            <option value="part_asc">Part # (A -> Z)</option>
-            <option value="batch_asc">Batch # (A -> Z)</option>
+            <option value="part_asc">Part # (A -&gt; Z)</option>
+            <option value="batch_asc">Batch # (A -&gt; Z)</option>
             <option value="status_asc">Inspection status</option>
-            <option value="defect_desc">Defect count (high -> low)</option>
+            <option value="defect_desc">Defect count (high -&gt; low)</option>
           </select>
         </div>
         <div className="workbench-list">

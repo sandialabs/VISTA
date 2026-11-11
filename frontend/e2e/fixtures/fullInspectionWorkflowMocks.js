@@ -1,3 +1,5 @@
+const { API_REQUEST } = require('./apiRoutes');
+
 const projectId = 'proj-e2e-inspection';
 
 const initialProject = {
@@ -126,7 +128,7 @@ async function mockFullInspectionWorkflowRoutes(page) {
     },
   ];
 
-  await page.route('**/api/**', async (route) => {
+  await page.route(API_REQUEST, async (route) => {
     const request = route.request();
     const url = request.url();
     const method = request.method();

@@ -9,10 +9,10 @@ FRONTEND_PACKAGE_JSON = REPO_ROOT / "frontend" / "package.json"
 SCRIPT_COMMAND_PACKAGES = {
     "cross-env": "cross-env",
     "cross-env-shell": "cross-env",
+    "eslint": "eslint",
+    "jest": "jest",
     "playwright": "playwright",
-    "react-app-rewired": "react-app-rewired",
-    "react-scripts": "react-scripts",
-    "webpack-bundle-analyzer": "webpack-bundle-analyzer",
+    "vite": "vite",
 }
 
 SHELL_OPERATORS = {"&&", "||", ";", "|"}
@@ -69,34 +69,63 @@ def test_frontend_npm_script_commands_are_declared_dependencies():
     )
 
 
-# Security overrides for Create React App's pinned transitive dependencies. Each maps to a
-# patched release that is API-compatible with its caller; dropping one reintroduces advisories.
-SECURITY_OVERRIDES = {
-    "underscore": "^1.13.8",
-    "serialize-javascript": "^7.1.4",
-    "sockjs": {"uuid": "^11.1.1"},
-    "http-proxy-agent": {"@tootallnate/once": "^2.0.1"},
-}
+
+# The UI builds with Vite and tests with Jest directly. react-scripts (Create React App)
+# pinned old webpack, webpack-dev-server, svgo and jest releases with open advisories that
+# no override could fix; it must not come back.
+REMOVED_TOOLCHAIN = (
+    "react-scripts",
+    "react-app-rewired",
+    "webpack",
+    "webpack-dev-server",
+    "webpack-bundle-analyzer",
+    "eslint-config-react-app",
+)
+
+# Patched releases forced for Jest's transitive dependencies.
+SECURITY_OVERRIDES = {"glob": "14.0.2", "minimatch@>=7": "11.0.1"}
+
+
+def _lock_packages():
+    lock_path = REPO_ROOT / "frontend" / "package-lock.json"
+    return json.loads(lock_path.read_text(encoding="utf-8"))["packages"]
 
 
 def _locked_versions(name):
-    lock_path = REPO_ROOT / "frontend" / "package-lock.json"
-    packages = json.loads(lock_path.read_text(encoding="utf-8"))["packages"]
     suffix = f"node_modules/{name}"
-    return {meta["version"] for path, meta in packages.items() if path.endswith(suffix)}
+    return {meta["version"] for path, meta in _lock_packages().items() if path.endswith(suffix)}
+
+
+def _version_tuple(version):
+    return tuple(int(part) for part in version.split(".")[:3])
+
+
+def test_create_react_app_toolchain_is_not_installed():
+    package = _load_frontend_package()
+    declared = set(package.get("dependencies", {})) | set(package.get("devDependencies", {}))
+    for name in REMOVED_TOOLCHAIN:
+        assert name not in declared, name
+        assert not _locked_versions(name), f"{name} is still in package-lock.json"
+    for name in ("vite", "jest", "eslint"):
+        assert name in declared, name
 
 
 def test_security_overrides_stay_in_package_json_and_the_lockfile():
     overrides = _load_frontend_package()["overrides"]
     for name, spec in SECURITY_OVERRIDES.items():
         assert overrides.get(name) == spec, name
-    for name, floor in (
-        ("underscore", (1, 13, 8)),
-        ("serialize-javascript", (7, 1, 4)),
-        ("uuid", (11, 1, 1)),
-        ("@tootallnate/once", (2, 0, 1)),
-    ):
-        versions = _locked_versions(name)
-        assert versions, name
-        for version in versions:
-            assert tuple(int(part) for part in version.split(".")[:3]) >= floor, (name, version)
+    globs = _locked_versions("glob")
+    assert globs and all(_version_tuple(v) >= (14, 0, 2) for v in globs), globs
+    for version in _locked_versions("minimatch"):
+        major = _version_tuple(version)[0]
+        # minimatch 3 is outside the advisory range (>=7.0.0 <11.0.1); 7 and later must be fixed.
+        assert major < 7 or _version_tuple(version) >= (11, 0, 1), version
+
+
+def test_lockfile_resolves_only_from_the_public_registry():
+    hosts = {
+        meta["resolved"].split("/")[2]
+        for meta in _lock_packages().values()
+        if meta.get("resolved", "").startswith("http")
+    }
+    assert hosts == {"registry.npmjs.org"}, hosts

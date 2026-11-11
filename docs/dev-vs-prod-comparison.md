@@ -24,7 +24,7 @@ Internal → Backend (FastAPI on :8000)
            └─ /api/* → API endpoints only
 ```
 - **Two separate servers**: Frontend :3000, Backend :8000
-- Frontend uses `setupProxy.js` to proxy `/api/*` to `http://backend-dev:8000`
+- Frontend (Vite dev server) proxies `/api/*` to `http://backend-dev:8000` (`server.proxy` in `frontend/vite.config.mjs`)
 - Backend runs with `DEBUG=true`, skips static file serving
 - **Hot reload** enabled for both services
 
@@ -45,7 +45,7 @@ Host → Backend (FastAPI on :8000)
 |--------|-----------|-------------------|-------|
 | **Servers** | 1 (backend only) | 2 (frontend + backend) | ⚠️ Medium |
 | **Frontend Serving** | Backend serves static files | Webpack dev server | ⚠️ Medium |
-| **API Routing** | Direct `/api/*` | Proxied through setupProxy.js | ⚠️ Low |
+| **API Routing** | Direct `/api/*` | Proxied by the Vite dev server | ⚠️ Low |
 | **CORS** | Not needed (same origin) | Required (different ports) | ⚠️ High |
 | **Static Files** | Pre-built in Docker image | Generated on-the-fly | ⚠️ Low |
 | **Environment Variables** | `DEBUG=false` | `DEBUG=true` | ⚠️ Medium |
@@ -100,7 +100,7 @@ If frontend code uses absolute URLs like `http://localhost:8000/api/...` instead
 Check frontend code to ensure all API calls use relative paths (`/api/...`) or properly use `REACT_APP_API_URL`.
 
 **Current Status:**
-✅ Likely safe: The `setupProxy.js` only proxies `/api` paths, suggesting the frontend uses relative URLs.
+✅ Likely safe: The Vite dev proxy only forwards `/api` paths, suggesting the frontend uses relative URLs.
 
 #### 4. **React Router Catch-All Route**
 **Problem:**
@@ -155,7 +155,7 @@ Silent failure - backend starts successfully but frontend doesn't load.
 
 #### 7. **Proxy Configuration Differences**
 **Problem:**
-- Docker dev uses `setupProxy.js` with `REACT_APP_BACKEND_URL=http://backend-dev:8000`
+- Docker dev uses the Vite dev proxy with `REACT_APP_BACKEND_URL=http://backend-dev:8000`
 - Local dev uses `package.json` proxy: `"proxy": "http://localhost:8000"`
 - Production uses no proxy
 
@@ -163,7 +163,7 @@ Silent failure - backend starts successfully but frontend doesn't load.
 Low - The proxy configuration is only used during development and doesn't affect the production build.
 
 **Note:**
-The `setupProxy.js` file we created will NOT be included in the production build because React's build process doesn't bundle backend code.
+The dev proxy in `vite.config.mjs` is not part of the production build; production serves the UI and API from the same origin.
 
 #### 8. **File Logging Behavior**
 **Problem:**

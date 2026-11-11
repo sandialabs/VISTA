@@ -1,4 +1,3 @@
-/* eslint-env worker */
 /* eslint-disable no-restricted-globals */
 import { handleSplatAssetMessage } from './pt3SplatAssetParser';
 
