@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from ..accelerator import resolve_torch_device
 from ._shared import (
     NativeRuntime,
     SegmentationBackend,
@@ -144,7 +145,7 @@ def _load_sam_runtime() -> tuple[type, type]:
             self._model = sam_model_registry[model_type](
                 checkpoint=config.get("model_checkpoint")
             )
-            self._model.to(device=config.get("device") or "cpu")
+            self._model.to(device=config.get("device") or resolve_torch_device())
 
         def run(self, data):
             image = (
@@ -195,7 +196,7 @@ def _mask_entry_from_array(
     if score is not None:
         try:
             score_value = float(score)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             score_value = None
     return {
         "segmentation": None,
@@ -216,12 +217,12 @@ def _mask_entry_from_dict(mask: dict[str, Any], index: int) -> dict[str, Any] | 
         return None
     try:
         bbox_values = [float(value) for value in bbox[:4]]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     score = mask.get("score", mask.get("predicted_iou", mask.get("stability_score")))
     try:
         score = None if score is None else float(score)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         score = None
     area = mask.get("area") or (bbox_values[2] * bbox_values[3])
     return {

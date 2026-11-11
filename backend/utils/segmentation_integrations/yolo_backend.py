@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from ..accelerator import resolve_torch_device
 from ._shared import (
     NativeRuntime,
     SegmentationBackend,
@@ -59,6 +60,8 @@ def _load_yolo_runtime() -> tuple[type, type]:
                 for name in _PREDICT_OPTION_NAMES
                 if hasattr(data, name)
             }
+            if predict_kwargs.get("device") in (None, ""):
+                predict_kwargs["device"] = resolve_torch_device()
             source = (
                 data.source if getattr(data, "source", None) is not None else data.image
             )
@@ -93,7 +96,7 @@ def _as_numpy(value: Any) -> np.ndarray | None:
 def _bbox_xywh_from_xyxy(values: Any) -> list[float] | None:
     try:
         x1, y1, x2, y2 = [float(value) for value in list(values)[:4]]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     width = max(1.0, x2 - x1)
     height = max(1.0, y2 - y1)

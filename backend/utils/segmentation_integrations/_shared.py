@@ -134,7 +134,7 @@ def prompted_bbox_xywh(image: Image.Image, prompts: dict[str, Any]) -> list[floa
     if isinstance(box, Iterable) and not isinstance(box, (str, bytes, dict)):
         try:
             values = [float(value) for value in list(box)[:4]]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             values = []
         if len(values) == 4:
             x1, y1, x2, y2 = values
@@ -213,7 +213,7 @@ def masks_from_entries(entries: Any, *, label_prefix: str) -> list[dict[str, Any
             continue
         try:
             bbox_values = [float(value) for value in bbox[:4]]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         area = entry.get("area") or (bbox_values[2] * bbox_values[3])
         score = entry.get("score")

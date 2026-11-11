@@ -16,6 +16,7 @@ from ._shared import (
     options_from_payload,
     rgb_image_from_payload,
 )
+from .anomalib_runtime import bbox_from_mask, load_runtime
 
 _CONFIG_OPTION_NAMES = {
     "model_name",
@@ -32,11 +33,11 @@ _CONFIG_OPTION_NAMES = {
 
 
 def _load_anomalib_runtime() -> tuple[type, type]:
-    """Return the operational Anomalib runtime.
+    """Return the Anomalib runtime for trained checkpoints (GPU when available).
 
-    Dependency-free NumPy and Pillow PatchCore-like fallback.
+    Requests without a trained checkpoint use ``_builtin_patchcore_runtime``.
     """
-    return _builtin_patchcore_runtime()
+    return load_runtime()
 
 
 def _builtin_patchcore_runtime() -> tuple[type, type]:
@@ -125,15 +126,7 @@ def _patchcore_like_mask(image: Image.Image, *, threshold: float) -> np.ndarray:
     return score >= max(0.05, threshold)
 
 
-def _bbox_from_mask(mask: np.ndarray) -> list[float] | None:
-    y_indices, x_indices = np.where(mask)
-    if x_indices.size == 0 or y_indices.size == 0:
-        return None
-    x_min = int(x_indices.min())
-    y_min = int(y_indices.min())
-    x_max = int(x_indices.max()) + 1
-    y_max = int(y_indices.max()) + 1
-    return [float(x_min), float(y_min), float(x_max - x_min), float(y_max - y_min)]
+_bbox_from_mask = bbox_from_mask
 
 
 def _runtime_config(options: dict[str, Any]) -> dict[str, Any]:
@@ -145,7 +138,8 @@ def _runtime_config(options: dict[str, Any]) -> dict[str, Any]:
     config.setdefault("model_name", "patchcore")
     config.setdefault("threshold", 0.5)
     config.setdefault("min_mask_area_px", 1.0)
-    config.setdefault("accelerator", "cpu")
+    # "auto" resolves through utils.accelerator (VISTA_MODEL_SERVICE_DEVICE).
+    config.setdefault("accelerator", "auto")
     config.setdefault("devices", 1)
     config.setdefault("return_predictions", True)
     config.setdefault("batch_size", 1)
@@ -192,6 +186,7 @@ def _normalize_toolkit_output(result: Any, payload: dict[str, Any]) -> dict[str,
         "metrics": {
             "runtime": str(metadata.get("runtime") or "analysis_toolkit.anomalib"),
             "mask_count": len(masks),
+            **({"device": str(metadata["device"])} if metadata.get("device") else {}),
         },
         "raw_output": {
             **({"heatmap": heatmap} if heatmap is not None else {}),
@@ -217,7 +212,7 @@ def _anomaly_score_from_sources(*sources: Any) -> float | None:
                 value = _metadata_value(source, key)
                 if value is not None:
                     return float(value)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
     return None
 
@@ -234,9 +229,11 @@ def _fallback_output(payload: dict[str, Any], reason: str) -> dict[str, Any]:
 
 def _run_native(payload: dict[str, Any], runtime: NativeRuntime) -> dict[str, Any]:
     options = options_from_payload(payload)
-    if not runtime.available and _uses_default_patchcore(options):
-        # The built-in PatchCore-like scorer has no native dependencies, so the
-        # default model stays usable while native runtimes are disabled.
+    if _uses_default_patchcore(options) and not runtime.patched:
+        # PatchCore without a trained memory bank has nothing to infer with, so
+        # untrained requests use the built-in scorer (unless a test patched the
+        # loader), which also keeps the default model usable while native
+        # runtimes are disabled.
         anomalib_cls, input_cls = _builtin_patchcore_runtime()
     else:
         anomalib_cls, input_cls = runtime.load()

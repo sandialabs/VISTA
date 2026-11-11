@@ -712,7 +712,7 @@ def test_anomalib_adapter_calls_toolkit_runtime_and_normalizes_masks(monkeypatch
         "model_name": "padim",
         "threshold": 0.6,
         "min_mask_area_px": 1.0,
-        "accelerator": "cpu",
+        "accelerator": "auto",
         "devices": 1,
         "return_predictions": True,
         "batch_size": 1,

@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image
 
 from core.config import settings
+from utils.accelerator import resolve_torch_device
 
 _YOLO_MODEL_CACHE: dict[str, Any] = {}
 
@@ -168,7 +169,10 @@ def run_ultralytics_yolo(
 ) -> YoloResult:
     model = _load_yolo_model(model_name)
     results = model(
-        image.convert("RGB"), conf=max(0.0, min(1.0, float(confidence))), verbose=False
+        image.convert("RGB"),
+        conf=max(0.0, min(1.0, float(confidence))),
+        device=resolve_torch_device(),
+        verbose=False,
     )
     result = list(results)[0] if results else None
     if result is None:

@@ -590,7 +590,9 @@ def test_yolov8_object_detection_uses_ultralytics_runtime_when_available(monkeyp
         def __init__(self, model_name):
             self.model_name = model_name
 
-        def __call__(self, source, conf, verbose=False):
+        def __call__(self, source, conf, device=None, verbose=False):
+            # The runtime always passes the device resolved by utils.accelerator.
+            assert device in {"cpu", "cuda:0", "mps"}
             assert self.model_name == "custom-yolo.pt"
             assert source.mode == "RGB"
             assert conf == 0.4
@@ -661,7 +663,9 @@ def test_yolov8_detection_resolves_sequence_names_and_publishes_detection_metada
         def __init__(self, model_name):
             self.model_name = model_name
 
-        def __call__(self, source, conf, verbose=False):
+        def __call__(self, source, conf, device=None, verbose=False):
+            # The runtime always passes the device resolved by utils.accelerator.
+            assert device in {"cpu", "cuda:0", "mps"}
             assert self.model_name == "custom-yolo-list-names.pt"
             return [FakeResult()]
 
@@ -750,7 +754,9 @@ def test_offered_yolo_segmentation_uses_ultralytics_runtime_when_available(monke
         def __init__(self, model_name):
             self.model_name = model_name
 
-        def __call__(self, source, conf, verbose=False):
+        def __call__(self, source, conf, device=None, verbose=False):
+            # The runtime always passes the device resolved by utils.accelerator.
+            assert device in {"cpu", "cuda:0", "mps"}
             assert self.model_name == "custom-yolo-seg.pt"
             assert source.mode == "RGB"
             assert conf == 0.45
