@@ -101,7 +101,7 @@ def dtype_from_pillow_mode(image: Image.Image) -> tuple[str | None, int | None, 
         bits_per_sample = bits_per_sample[0]
     try:
         bit_depth = int(bits_per_sample) if bits_per_sample is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         bit_depth = None
 
     if mode in {"I;16", "I;16L", "I;16B", "I;16N"}:
@@ -188,7 +188,7 @@ def dtype_metadata_from_numpy_descr(dtype_descr: str) -> dict[str, Any]:
     """Return dtype/bit-depth metadata parsed from a NumPy dtype descriptor."""
     try:
         dtype = np.dtype(dtype_descr)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     metadata: dict[str, Any] = {
         "pixel_dtype": dtype.name,
@@ -504,7 +504,7 @@ def repaired_single_frame_tiff_metadata(
     try:
         if metadata.get("frame_count") is not None:
             frame_count = int(metadata.get("frame_count"))
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         frame_count = None
 
     shape = (
@@ -516,7 +516,7 @@ def repaired_single_frame_tiff_metadata(
         axial_count = (
             int(shape.get("axial")) if shape.get("axial") is not None else None
         )
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         axial_count = None
 
     is_single_frame = (

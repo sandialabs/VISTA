@@ -147,7 +147,7 @@ def _matching_record_positions(
 def _is_uuid(value: str) -> bool:
     try:
         uuid.UUID(value)
-    except (TypeError, ValueError, AttributeError):
+    except TypeError, ValueError, AttributeError:
         return False
     return True
 

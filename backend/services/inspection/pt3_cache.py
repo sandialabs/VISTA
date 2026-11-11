@@ -93,7 +93,7 @@ def pt3_cache_root() -> Path:
         root = REPO_ROOT / root
     try:
         return prepare_pt3_cache_candidate(root)
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         fallback = Path(tempfile.gettempdir()) / f"vista-pt3-cache-{os.getuid()}"
         try:
             return prepare_pt3_cache_candidate(fallback)

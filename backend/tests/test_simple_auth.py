@@ -2,7 +2,6 @@
 Simple test for the new authentication system.
 """
 
-import pytest
 from unittest.mock import patch
 from utils.dependencies import get_user_from_header
 from core.group_auth_helper import is_user_in_group, clear_cache

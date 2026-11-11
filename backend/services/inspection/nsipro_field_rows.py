@@ -47,7 +47,7 @@ def _metadata_fingerprint(metadata: object) -> str:
             metadata, ensure_ascii=False, allow_nan=False, separators=(",", ":")
         )
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-    except (TypeError, ValueError, OverflowError, RecursionError):
+    except TypeError, ValueError, OverflowError, RecursionError:
         # Let the flattener produce the domain-specific validation error.
         # Invalid trees are not shared through the cache.
         return f"invalid:{id(metadata)}"

@@ -1,4 +1,3 @@
-import pytest
 from core.config import settings
 from core.group_auth_helper import is_user_in_group
 

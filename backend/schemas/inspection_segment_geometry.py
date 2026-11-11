@@ -42,7 +42,7 @@ def _require_finite_segment_coordinate(value: Any, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a finite number")
     try:
         numeric_value = float(value)
-    except (OverflowError, ValueError):
+    except OverflowError, ValueError:
         raise ValueError(f"{field_name} must be a finite number") from None
     if not math.isfinite(numeric_value):
         raise ValueError(f"{field_name} must be a finite number")

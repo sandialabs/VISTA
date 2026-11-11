@@ -226,7 +226,7 @@ def _records_from_metadata(metadata: Any) -> list[EvidenceRecord]:
 def _safe_uuid(value: Any) -> uuid.UUID | None:
     try:
         return uuid.UUID(str(value))
-    except (TypeError, ValueError, AttributeError):
+    except TypeError, ValueError, AttributeError:
         return None
 
 
@@ -463,7 +463,7 @@ class BoundedImageLoader:
                 raise EvidenceUnavailable("Image exceeds the per-image size limit")
             try:
                 data = base64.b64decode(encoded, validate=True)
-            except (binascii.Error, ValueError):
+            except binascii.Error, ValueError:
                 raise EvidenceUnavailable("Inline image data is invalid") from None
             return self._accept_bytes(data)
 
@@ -534,7 +534,7 @@ def decode_pillow_image(data: bytes) -> Image.Image:
             return output
     except EvidenceUnavailable:
         raise
-    except (UnidentifiedImageError, OSError, SyntaxError, ValueError):
+    except UnidentifiedImageError, OSError, SyntaxError, ValueError:
         raise EvidenceUnavailable("Image data is corrupt or unsupported") from None
     except Image.DecompressionBombError:
         raise EvidenceUnavailable("Decoded image exceeds the pixel limit") from None

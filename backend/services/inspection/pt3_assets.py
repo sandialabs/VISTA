@@ -46,7 +46,7 @@ def cleanup_pt3_simplified_splat_job_input(
         )
         input_path = input_parent / pt3_cache.pt3_cache_component(job_id)
         remove_direct_child_cache_path(input_path, parent=input_parent)
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         return
 
 
@@ -74,7 +74,7 @@ def prune_stale_pt3_simplified_splat_output(
             if referenced_path_text
             else None
         )
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         return
     if (
         candidate.parent == expected_root
@@ -98,7 +98,7 @@ def prune_pt3_simplified_splat_outputs(
             "pt3_splat_assets", project_id, part_id
         )
         keep_path = keep_asset_path.resolve()
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         return
     if keep_path.parent != output_root or not output_root.is_dir():
         return
@@ -113,7 +113,7 @@ def prune_pt3_simplified_splat_outputs(
                 and resolved_candidate.is_file()
             ):
                 resolved_candidate.unlink(missing_ok=True)
-        except (OSError, RuntimeError):
+        except OSError, RuntimeError:
             continue
 
 
@@ -139,7 +139,7 @@ def cleanup_pt3_real_splat_job_cache(
                 parent / pt3_cache.pt3_cache_component(job_id),
                 parent=parent,
             )
-        except (OSError, RuntimeError):
+        except OSError, RuntimeError:
             continue
 
 
@@ -202,7 +202,7 @@ def contained_pt3_real_splat_asset_path(
             if job_id
             else None
         )
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         return None
     if (
         expected_root not in asset_path.parents
@@ -280,7 +280,7 @@ def contained_pt3_simplified_splat_asset_path(
             "pt3_splat_assets", project_id, part_id
         )
         asset_path = Path(raw_path).expanduser().resolve()
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         return None
     if (
         asset_path.parent != expected_root

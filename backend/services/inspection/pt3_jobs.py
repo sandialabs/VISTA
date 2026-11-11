@@ -134,7 +134,7 @@ async def update_job_progress(
     """Publish progress only while this job still owns a pending asset."""
     try:
         safe_progress = min(99.0, max(0.0, float(progress_percent)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     await job_db.rollback()
     part = await inspection_repository.get_inspection_part_for_update(

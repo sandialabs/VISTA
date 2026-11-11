@@ -74,7 +74,7 @@ class DataInstance(DataInstanceBase):
                     return json.loads(value)
                 except json.JSONDecodeError:
                     return {"value": value}
-        except (TypeError, ValueError, AttributeError):
+        except TypeError, ValueError, AttributeError:
             logger.warning(
                 "Failed to parse JSON value, using default",
                 extra={"value_type": type(value).__name__},

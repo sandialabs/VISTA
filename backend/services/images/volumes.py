@@ -482,7 +482,7 @@ def persisted_npy_volume_meta(
             dtype,
             limits=limits,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     meta = volume_meta_from_shape(
         safe_shape + ((channel_count,) if channel_count != 1 else ()),
@@ -504,13 +504,13 @@ def dtype_from_persisted_volume_metadata(metadata: dict[str, Any]) -> np.dtype:
     if dtype_text:
         try:
             return np.dtype(dtype_text)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
     try:
         bit_depth = int(
             metadata.get("bit_depth") or metadata.get("bits_per_sample") or 8
         )
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         bit_depth = 8
     bit_depth = max(1, min(bit_depth, 64))
     if bit_depth <= 8:
@@ -533,7 +533,7 @@ def persisted_tiff_volume_meta(
     """Return trusted persisted TIFF volume metadata, or None when stale/partial."""
     try:
         frame_count = int(metadata.get("frame_count") or 0)
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         frame_count = 0
     if not (
         metadata.get("load_mode") == "volume"
@@ -561,13 +561,13 @@ def persisted_tiff_volume_meta(
     elif raw_color_mode is None:
         try:
             channel_count = int(raw_channel_count)
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return None
         color_mode = {1: "scalar", 3: "rgb", 4: "rgba"}.get(channel_count)
     else:
         try:
             channel_count = int(raw_channel_count)
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return None
         color_mode = str(raw_color_mode or "").strip().lower()
     if (channel_count, color_mode) not in valid_layouts:

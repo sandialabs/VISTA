@@ -146,7 +146,7 @@ def _enforce_declared_content_length(
         return
     try:
         declared_length = int(content_length)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return
     enforce_materialized_volume_source_limit(declared_length, max_bytes=max_bytes)
 

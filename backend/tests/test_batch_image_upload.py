@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from core import models
 from core.database import Base
-from routers import images as images_router
 from services.images import listing as image_listing_service
 from services.images import storage_limits as image_storage_limit_service
 from services.images import upload as image_upload_service

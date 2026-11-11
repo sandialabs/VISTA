@@ -25,7 +25,7 @@ def safe_uuid(value: Any) -> uuid.UUID | None:
         return None
     try:
         return uuid.UUID(str(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

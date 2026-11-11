@@ -806,9 +806,7 @@ async def get_accessible_checkpoint(
     )
     if checkpoint is None:
         raise NotFoundError("Checkpoint not found")
-    if not is_user_in_group(
-        current_user.email, checkpoint.meta_group_id, current_user
-    ):
+    if not is_user_in_group(current_user.email, checkpoint.meta_group_id, current_user):
         raise ForbiddenError("Access forbidden")
     return checkpoint
 

@@ -1,66 +1,19 @@
-import shutil
-import tempfile
-
 import pytest
-from diskcache import Cache
 
 
 class TestCacheLimits:
     """Test cache size limits and LRU eviction functionality."""
 
     @pytest.fixture
-    def temp_cache_dir(self):
-        """Create a temporary directory for cache testing."""
-        temp_dir = tempfile.mkdtemp()
-        yield temp_dir
-        shutil.rmtree(temp_dir, ignore_errors=True)
+    def small_cache_manager(self, monkeypatch):
+        """Create a CacheManager backed by a temporary directory (1 MB limit)."""
+        from core.config import settings
+        from utils.cache_manager import CacheManager
 
-    @pytest.fixture
-    def small_cache_manager(self, temp_cache_dir):
-        """Create a cache manager with a very small size limit for testing."""
-
-        # Create a simple wrapper with small size for testing
-        class SmallCacheManager:
-            def __init__(self, directory):
-                self.cache = Cache(
-                    directory=directory,
-                    size_limit=1024 * 1024,  # 1MB in bytes
-                    eviction_policy="least-recently-used",
-                )
-
-            def set(self, key, value, expire=None):
-                return self.cache.set(key, value, expire=expire)
-
-            def get(self, key, default=None):
-                return self.cache.get(key, default)
-
-            def delete(self, key):
-                return self.cache.delete(key)
-
-            def clear_pattern(self, pattern):
-                keys_to_delete = []
-                for key in self.cache:
-                    if pattern in key:
-                        keys_to_delete.append(key)
-                for key in keys_to_delete:
-                    self.cache.delete(key)
-
-            def clear(self):
-                self.cache.clear()
-
-            def stats(self):
-                volume = self.cache.volume()
-                return {
-                    "size_bytes": volume,
-                    "size_mb": round(volume / (1024 * 1024), 2),
-                    "limit_mb": 1,
-                    "usage_percent": round((volume / (1024 * 1024)) * 100, 2)
-                    if volume
-                    else 0,
-                    "count": len(self.cache),
-                }
-
-        return SmallCacheManager(temp_cache_dir)
+        monkeypatch.setattr(settings, "CACHE_SIZE_MB", 1)
+        manager = CacheManager()
+        yield manager
+        manager.clear()
 
     def test_cache_size_limit_enforcement(self, small_cache_manager):
         """Test that cache respects size limits and evicts data when exceeded."""

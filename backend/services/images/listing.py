@@ -118,7 +118,9 @@ async def list_project_images(
     )
     cached_images = cache.get(cache_key)
     if cached_images is not None:
-        return cached_images
+        return [
+            image_schemas.DataInstance.model_validate(item) for item in cached_images
+        ]
 
     images = await _fetch_project_images(db, project_id, filters, skip, limit)
     if images and await image_metadata_service.repair_stale_single_frame_tiff_records(
@@ -134,7 +136,11 @@ async def list_project_images(
         )
 
     response_images = _serialize_listed_images(images or [], filters)
-    cache.set(cache_key, response_images, expire=PROJECT_IMAGES_CACHE_SECONDS)
+    cache.set(
+        cache_key,
+        [image.model_dump(mode="json") for image in response_images],
+        expire=PROJECT_IMAGES_CACHE_SECONDS,
+    )
     return response_images
 
 
@@ -226,7 +232,7 @@ async def get_image_record(
     cache_key = cache_manager.image_metadata_key(db_image.id, user_email)
     cached_metadata = cache.get(cache_key)
     if cached_metadata is not None:
-        return cached_metadata
+        return image_schemas.DataInstance.model_validate(cached_metadata)
 
     if str(db_image.filename or "").lower().endswith((".tif", ".tiff")):
         repaired_metadata = image_metadata_service.repaired_single_frame_tiff_metadata(
@@ -242,5 +248,7 @@ async def get_image_record(
             )
 
     result = to_data_instance_schema(db_image)
-    cache.set(cache_key, result, expire=IMAGE_METADATA_CACHE_SECONDS)
+    cache.set(
+        cache_key, result.model_dump(mode="json"), expire=IMAGE_METADATA_CACHE_SECONDS
+    )
     return result

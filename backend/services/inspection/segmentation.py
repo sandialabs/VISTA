@@ -55,7 +55,7 @@ def normalize_segment_region(entry: object, index: int) -> dict | None:
         return None
     try:
         x1, y1, x2, y2 = [float(value) for value in bbox[:4]]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if x2 <= x1 or y2 <= y1:
         return None
@@ -64,22 +64,22 @@ def normalize_segment_region(entry: object, index: int) -> dict | None:
     if isinstance(raw_centroid, list) and len(raw_centroid) >= 2:
         try:
             centroid = [float(raw_centroid[0]), float(raw_centroid[1])]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             centroid = None
     raw_label = entry.get("label", index + 1)
     try:
         label = int(raw_label)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         label = index + 1
     area = entry.get("area_px", (x2 - x1) * (y2 - y1))
     try:
         area_px = float(area)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         area_px = float((x2 - x1) * (y2 - y1))
     confidence = entry.get("confidence")
     try:
         confidence_value = float(confidence) if confidence is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         confidence_value = None
     return {
         "label": label,

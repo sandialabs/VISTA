@@ -3681,7 +3681,6 @@ def test_npy_volume_slice_storage_error_keeps_safe_status_and_detail(
 
 
 def test_volume_metadata_cache_failure_is_sanitized_server_error(client, monkeypatch):
-    from routers import images as images_router
 
     pid = _create_project(client, name="volume-metadata-cache-error")
     payload = io.BytesIO()
@@ -3713,7 +3712,6 @@ def test_volume_metadata_cache_failure_is_sanitized_server_error(client, monkeyp
 
 
 def test_volume_slice_cache_failure_is_sanitized_server_error(client, monkeypatch):
-    from routers import images as images_router
 
     pid = _create_project(client, name="volume-slice-cache-error")
     payload = io.BytesIO()
@@ -3741,7 +3739,6 @@ def test_volume_slice_cache_failure_is_sanitized_server_error(client, monkeypatc
 
 
 def test_malformed_npy_volume_remains_client_error(client, monkeypatch):
-    from routers import images as images_router
 
     pid = _create_project(client, name="malformed-volume-client-error")
     payload = io.BytesIO()

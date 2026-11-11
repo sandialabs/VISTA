@@ -28,7 +28,7 @@ def positive_setting_int(value: int, default: int) -> int:
     """Return `value` as a positive int, or `default` if invalid or non-positive."""
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     return parsed if parsed > 0 else default
 

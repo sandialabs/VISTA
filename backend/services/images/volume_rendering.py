@@ -306,7 +306,7 @@ def connected_volume_comparison_value(
         return None
     try:
         numeric = channels.astype(np.float64, copy=False)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not np.all(np.isfinite(numeric)):
         return None

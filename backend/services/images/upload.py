@@ -61,7 +61,7 @@ def _format_byte_limit(byte_count: int) -> str:
 def _positive_setting_int(value: int, default: int) -> int:
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     return parsed if parsed > 0 else default
 

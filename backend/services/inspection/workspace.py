@@ -52,7 +52,7 @@ def normalize_panel_dimension(
     """Coerce a panel dimension to an int clamped between minimum and maximum."""
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return fallback
     return max(minimum, min(maximum, parsed))
 

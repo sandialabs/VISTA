@@ -1,4 +1,6 @@
 import logging
+import re
+import shutil
 import tempfile
 import threading
 import uuid
@@ -6,15 +8,18 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from diskcache import Cache
-
 from core.config import settings
+from utils.file_cache import FileCache
 
 logger = logging.getLogger(__name__)
 
 
 class CacheManager:
-    """Simple wrapper around diskcache with project-specific configuration."""
+    """Response cache with project-specific configuration.
+
+    Values must be JSON types, bytes or tuples (see ``utils.file_cache``); callers
+    store Pydantic models as ``model_dump(mode="json")`` and validate them on read.
+    """
 
     def __init__(self):
         # In testing/CI environments, prefer temp directory for cache
@@ -31,17 +36,12 @@ class CacheManager:
         # Convert MB to bytes for size limit
         size_limit = settings.CACHE_SIZE_MB * 1024 * 1024
 
+        _remove_legacy_diskcache_files(cache_dir)
         try:
-            self.cache = Cache(
-                directory=str(cache_dir),
-                size_limit=size_limit,
-                eviction_policy="least-recently-used",
-            )
+            self.cache = FileCache(directory=cache_dir, size_limit=size_limit)
         except Exception as e:
             # Fallback to memory for test environments where disk cache might fail.
-            import logging
-
-            logging.warning(
+            logger.warning(
                 f"Failed to initialize disk cache, falling back to in-memory cache: {e}"
             )
             self._memory_cache = {}
@@ -73,13 +73,7 @@ class CacheManager:
     def clear_pattern(self, pattern: str):
         """Clear all cache entries whose keys contain the pattern."""
         if self.cache is not None:
-            keys_to_delete = []
-            for key in self.cache:
-                if pattern in key:
-                    keys_to_delete.append(key)
-
-            for key in keys_to_delete:
-                self.cache.delete(key)
+            self.cache.clear_pattern(pattern)
         else:
             keys_to_delete = [key for key in self._memory_cache if pattern in key]
             for key in keys_to_delete:
@@ -115,6 +109,26 @@ class CacheManager:
                 "usage_percent": 0,
                 "count": len(self._memory_cache),
             }
+
+
+_LEGACY_DISKCACHE_FILES = ("cache.db", "cache.db-wal", "cache.db-shm")
+_LEGACY_DISKCACHE_DIR = re.compile(r"^[0-9a-f]{2}$")
+
+
+def _remove_legacy_diskcache_files(cache_dir: Path) -> None:
+    """Delete entries left by the former diskcache backend (pickled values).
+
+    They are never read again; removing them keeps stale pickles off the disk.
+    diskcache kept its index in cache.db and values in two-hex-digit subdirectories.
+    """
+    if not (cache_dir / "cache.db").exists():
+        return
+    for name in _LEGACY_DISKCACHE_FILES:
+        (cache_dir / name).unlink(missing_ok=True)
+    for child in cache_dir.iterdir():
+        if child.is_dir() and _LEGACY_DISKCACHE_DIR.match(child.name):
+            shutil.rmtree(child, ignore_errors=True)
+    logger.info("Removed legacy diskcache files from %s", cache_dir)
 
 
 # Global cache manager instance with thread lock

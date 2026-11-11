@@ -211,7 +211,7 @@ def _ordered_stack_records(metadata: dict) -> list[dict]:
         raw_index = item.get("slice_index")
         try:
             index = int(raw_index)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             index = 10**9
         return (index, str(item.get("filename") or ""))
 

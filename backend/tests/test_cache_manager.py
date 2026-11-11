@@ -1,66 +1,19 @@
-import shutil
-import tempfile
-
 import pytest
-from diskcache import Cache
 
 
 class TestCacheManager:
-    """Unit tests for the CacheManager using diskcache."""
+    """Unit tests for the CacheManager on the JSON file cache."""
 
     @pytest.fixture
-    def temp_cache_dir(self):
-        """Create a temporary directory for cache testing."""
-        temp_dir = tempfile.mkdtemp()
-        yield temp_dir
-        shutil.rmtree(temp_dir, ignore_errors=True)
+    def cache_manager(self, monkeypatch):
+        """Create a CacheManager backed by a temporary directory (100 MB limit)."""
+        from core.config import settings
+        from utils.cache_manager import CacheManager
 
-    @pytest.fixture
-    def cache_manager(self, temp_cache_dir):
-        """Create a simple cache manager for testing."""
-
-        # Create a simple wrapper around diskcache for testing
-        class SimpleCacheManager:
-            def __init__(self, directory):
-                self.cache = Cache(
-                    directory=directory,
-                    size_limit=100 * 1024 * 1024,  # 100MB
-                    eviction_policy="least-recently-used",
-                )
-
-            def set(self, key, value, expire=None):
-                return self.cache.set(key, value, expire=expire)
-
-            def get(self, key, default=None):
-                return self.cache.get(key, default)
-
-            def delete(self, key):
-                return self.cache.delete(key)
-
-            def clear_pattern(self, pattern):
-                keys_to_delete = []
-                for key in self.cache:
-                    if pattern in key:
-                        keys_to_delete.append(key)
-                for key in keys_to_delete:
-                    self.cache.delete(key)
-
-            def clear(self):
-                self.cache.clear()
-
-            def stats(self):
-                volume = self.cache.volume()
-                return {
-                    "size_bytes": volume,
-                    "size_mb": round(volume / (1024 * 1024), 2),
-                    "limit_mb": 100,
-                    "usage_percent": round((volume / (100 * 1024 * 1024)) * 100, 2)
-                    if volume
-                    else 0,
-                    "count": len(self.cache),
-                }
-
-        return SimpleCacheManager(temp_cache_dir)
+        monkeypatch.setattr(settings, "CACHE_SIZE_MB", 100)
+        manager = CacheManager()
+        yield manager
+        manager.clear()
 
     def test_cache_set_and_get(self, cache_manager):
         """Test basic cache set and get operations."""
@@ -89,7 +42,7 @@ class TestCacheManager:
         assert result == "expire_value"
 
         # Test that the key exists and will expire (we don't wait for actual expiration
-        # in unit tests as it's time-dependent and diskcache handles it internally)
+        # in unit tests; test_file_cache.py covers expiry with a controlled clock)
 
     def test_cache_delete(self, cache_manager):
         """Test cache deletion."""
