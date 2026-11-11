@@ -728,6 +728,28 @@ if __name__ == "__main__":
     run_ml_analysis(image_id="your-image-id", image_path="/path/to/image.jpg")
 ```
 
+## GPU Inference for Built-in Analyze Runtimes
+
+The built-in SAM, YOLO and Anomalib runtimes (Analyze workflows, not the external pipeline
+API above) place their models with `utils/accelerator.py`:
+
+- `VISTA_MODEL_SERVICE_DEVICE=auto` (default) uses the first CUDA GPU, then Apple MPS, then
+  the CPU; `cpu` forces the CPU; a value such as `cuda:1` pins a device. The model service's
+  `/gpu` endpoint reports what was detected and selected.
+- The production image ships the CUDA build of PyTorch. It sees a GPU only when the container
+  runtime passes one in, for example `podman run --device nvidia.com/gpu=all ...` with the
+  NVIDIA Container Toolkit and a CDI spec (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`);
+  the dev compose `toolbox-models` service requests it the same way.
+- Anomalib runs the real `anomalib` package when a trained checkpoint (PatchCore, PaDiM, ...)
+  is selected. It loads with `weights_only=True`, which restricts unpickling to tensors and
+  allowlisted types. Without a trained checkpoint the dependency-free `vista.patchcore` scorer
+  runs instead.
+- Checkpoint loading never runs a full unpickle in the images: SAM uses torch's default
+  `weights_only=True`, and the images set `ULTRALYTICS_SAFE_LOAD=1`, so YOLO `.pt` files load
+  with `weights_only=True` plus ultralytics' allowlist of model classes. A YOLO checkpoint
+  with a custom architecture outside that allowlist fails to load (the Analyze node reports
+  the fallback); set `ULTRALYTICS_SAFE_LOAD=0` only for checkpoints you trust.
+
 ## Testing
 
 ### Using the Test Script

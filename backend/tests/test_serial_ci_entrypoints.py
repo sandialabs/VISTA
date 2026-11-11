@@ -48,10 +48,11 @@ def test_historical_production_build_keeps_runtime_and_safe_context() -> None:
         (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
     )
 
-    assert "FROM ${UBI_MINIMAL} AS base" in dockerfile
+    assert "FROM scratch AS base" in dockerfile
+    assert "COPY --from=rootfs /rootfs /" in dockerfile
     assert "uv sync --frozen --no-dev --no-install-project" in dockerfile
     assert "COPY ./backend /app/backend" in dockerfile
-    assert "RUN npm ci --no-audit --no-fund" in dockerfile
+    assert "npm ci --no-audit --no-fund" in dockerfile
     assert "RUN npm run build" in dockerfile
     assert "COPY --from=ui /app/frontend/build /app/ui2" in dockerfile
     assert "ENV FRONTEND_BUILD_PATH=/app/ui2" in dockerfile

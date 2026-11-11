@@ -4,7 +4,7 @@ name: CI/CD Pipeline
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: sandialabs/vista
-  PYTHON_VERSION: "3.11"
+  PYTHON_VERSION: "3.14"
 
 on:
   push:
@@ -155,6 +155,13 @@ jobs:
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+    - name: Compute the weekly OS refresh key
+      # Passed as OS_REFRESH to every image build below (one value, so the push reuses the
+      # test build's cache). It re-runs the Dockerfile's rootfs install once a week, so base
+      # package fixes land even though every other layer comes from the GHA cache.
+      id: refresh
+      run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
     
     - name: Log in to GitHub Container Registry
       if: github.event_name != 'pull_request'
@@ -173,6 +180,8 @@ jobs:
         load: true
         tags: |
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
+        build-args: |
+          OS_REFRESH=${{ steps.refresh.outputs.week }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -220,6 +229,9 @@ jobs:
 
     - name: Run tests in container
       run: |
+        # The image leaves the test suites out (.dockerignore), and many tests read other
+        # repository files, so mount the checkout and run its tests with the image's Python
+        # and venv. --inexact --no-install-package keeps the FFmpeg-free OpenCV.
         docker run --rm \
           -e DATABASE_URL="sqlite+aiosqlite:///./test.db" \
           -e FAST_TEST_MODE=true \
@@ -230,9 +242,10 @@ jobs:
           -e POSTGRES_PASSWORD=postgres \
           -e POSTGRES_DB=postgres \
           -e POSTGRES_SERVER=localhost \
-          --workdir /app \
+          -v "$PWD:/workspace" \
+          --workdir /workspace \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test \
-          bash -c "uv sync --frozen && bash test/run_tests.sh --backend"
+          bash -c "uv sync --frozen --inexact --no-install-package opencv-python-headless && bash test/run_tests.sh --backend"
 
     - name: Push Docker image
       if: github.event_name != 'pull_request'
@@ -243,6 +256,8 @@ jobs:
         tags: |
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        build-args: |
+          OS_REFRESH=${{ steps.refresh.outputs.week }}
         cache-from: type=gha
 
         cache-to: type=gha,mode=max

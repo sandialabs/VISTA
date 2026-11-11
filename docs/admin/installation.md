@@ -26,7 +26,7 @@ This guide covers installation and deployment options for the VISTA application.
 - Reverse proxy with authentication (nginx, Apache, etc.)
 
 **For Development:**
-- Python 3.11+
+- Python 3.14+
 - Node.js 22+
 - uv (Python package manager)
 

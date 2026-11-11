@@ -32,7 +32,7 @@ VISTA is a full-stack web application for managing, classifying, and collaborati
 ### Architecture
 
 **Components:**
-- **Backend:** FastAPI (Python 3.11+) REST API
+- **Backend:** FastAPI (Python 3.14+) REST API
 - **Frontend:** React 18 single-page application
 - **Database:** PostgreSQL 15+ for metadata
 - **Storage:** S3-compatible object storage (MinIO or AWS S3) for images

@@ -65,7 +65,7 @@ The backend test suite includes:
 
 ### Requirements
 
-- Python 3.11+
+- Python 3.14+
 - pytest
 - pytest-asyncio
 - All backend dependencies (see `pyproject.toml`)

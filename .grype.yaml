@@ -1,0 +1,16 @@
+# Grype configuration for scripts/scan_image.sh (and any grype run from the repository root).
+#
+# Every rule here suppresses a verified false positive, never a real finding. Keep each rule
+# as narrow as possible and record why; scan_image.sh prints how many matches were ignored.
+ignore:
+  # Grype's NVD-derived Python records (namespace nvd:language:python) attach Apache Airflow
+  # CVEs to the PyPI package name "lightning" (PyTorch Lightning, an anomalib dependency).
+  # Checked 2026-11-11 for lightning 2.6.6: all 26 matches describe Apache Airflow (DAG
+  # authors, the scheduler, Connections) with Airflow version ranges (fixed in 2.9.3, 3.2.0,
+  # ...), and neither OSV nor the GitHub Advisory Database lists any advisory affecting
+  # lightning 2.6.6. Real lightning advisories come from the GitHub namespace
+  # (github:language:python), which this rule does not touch.
+  - namespace: nvd:language:python
+    package:
+      name: lightning
+      type: python

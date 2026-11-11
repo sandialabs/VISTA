@@ -39,7 +39,7 @@ A full-stack web application for managing, classifying, and collaborating on vis
 ## Requirements
 
 - **Node.js** 22+
-- **Python** 3.11+
+- **Python** 3.14+ (`uv python install 3.14` provides it)
 - **Podman** (for PostgreSQL and MinIO)
 - **uv** - Python package manager (`pip install uv`)
 
@@ -399,7 +399,7 @@ See `deployment-test/` directory for Kubernetes manifests.
 
 ### Technology Stack
 
-- **Backend:** FastAPI (Python 3.11+) with async SQLAlchemy
+- **Backend:** FastAPI (Python 3.14+) with async SQLAlchemy
 - **Frontend:** React 18 with React Router
 - **Database:** PostgreSQL 15
 - **Storage:** MinIO/S3 compatible object storage

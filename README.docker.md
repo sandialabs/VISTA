@@ -431,7 +431,7 @@ docker compose -f docker-compose.dev.yml build
 - Easier debugging with IDE
 
 **Cons:**
-- Requires Python 3.11+ and Node.js installation
+- Requires Python 3.14+ and Node.js installation
 - Manual virtual environment setup
 - Environment differences between developers
 - Manual database migration execution

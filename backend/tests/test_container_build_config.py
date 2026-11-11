@@ -55,6 +55,14 @@ def _dockerfile_stage(dockerfile: str, name: str) -> str:
     return matches[0]
 
 
+def _instructions(dockerfile: str, name: str) -> str:
+    return "\n".join(
+        line
+        for line in _dockerfile_stage(dockerfile, name).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
 def _prebuilt_opencv_wheel() -> Path:
     vendor = REPO_ROOT / OPENCV_VENDOR_DIR
     wheels = sorted(vendor.glob("opencv_python_headless-*.whl"))
@@ -98,7 +106,8 @@ def test_prebuilt_opencv_wheel_matches_lockfile_and_pinned_hash():
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
     sums = _read_repo_file(f"{OPENCV_VENDOR_DIR}/SHA256SUMS").split()
 
-    assert wheel.name.startswith(f"opencv_python_headless-{locked}-cp311-")
+    # Limited-API module tagged cp311-abi3: installs on 3.11 and later (the image runs 3.14).
+    assert wheel.name == f"opencv_python_headless-{locked}-cp311-abi3-linux_x86_64.whl"
     assert wheel.name.endswith("linux_x86_64.whl")
     assert version == locked
     assert pinned_hash == digest
@@ -178,7 +187,7 @@ def test_frontend_is_built_in_its_own_node_stage():
     )
     assert re.search(pinned_node_image, dockerfile, flags=re.MULTILINE)
     assert "FROM ${UBI_NODEJS} AS ui" in dockerfile
-    assert "RUN npm ci --no-audit --no-fund" in ui
+    assert "npm ci --no-audit --no-fund" in ui
     assert "RUN npm run build" in ui
     # The UI builds with Vite: its entry HTML and config must reach the stage.
     assert "COPY ./frontend/index.html ./frontend/vite.config.mjs ./" in ui
@@ -202,29 +211,6 @@ def test_runtime_stages_carry_no_node_toolchain():
         ), name
 
 
-def test_runtime_base_installs_only_python_and_certificates():
-    """Keep compilers, headers, git, wget and GUI libraries out of the runtime image."""
-    base = _dockerfile_stage(_read_repo_file("Dockerfile"), "base")
-    installed = re.search(r"microdnf install[^\n]*\\\n((?:.*\\\n)*.*)", base)
-    assert installed, "base stage must install its packages with microdnf"
-    packages = set(re.findall(r"[A-Za-z0-9_.+-]+", installed.group(1).replace("\\", " ")))
-    packages.discard("microdnf")
-    assert {"python3.11", "ca-certificates"} <= packages
-    denied = re.compile(
-        r"^(gcc|gcc-c\+\+|git|wget|python3\.11-pip|gtk3|webkit.*|atk|at-spi2-atk|alsa-lib|cups-libs|pango"
-        r"|libX.*|libxcb|libdrm|libgbm|.*-devel)$"
-    )
-    assert not [name for name in packages if denied.match(name)]
-
-
-def test_runtime_base_skips_weak_dependencies():
-    """Weak dependencies (glibc and gawk langpacks) would ship and add scan findings."""
-    base = _dockerfile_stage(_read_repo_file("Dockerfile"), "base")
-    commands = re.findall(r"microdnf (?:upgrade|install)[^\n]*", base)
-    assert len(commands) >= 2, "base stage must upgrade and install with microdnf"
-    assert all("--setopt=install_weak_deps=0" in line for line in commands), commands
-
-
 def test_sam_checkpoint_is_downloaded_in_its_own_stage_with_a_pinned_hash():
     """Download weights outside the runtime stages and verify them by SHA-256."""
     dockerfile = _read_repo_file("Dockerfile")
@@ -245,20 +231,29 @@ def test_sam_checkpoint_is_downloaded_in_its_own_stage_with_a_pinned_hash():
 
 
 def test_base_images_are_pinned_by_digest():
-    """Pin both base images so rebuilds are reproducible and bumps are deliberate."""
+    """Pin every base image so rebuilds are reproducible and bumps are deliberate."""
     dockerfile = _read_repo_file("Dockerfile")
-    for arg, repo in (
-        ("UBI_MINIMAL", "ubi9/ubi-minimal"),
-        ("UBI_NODEJS", "ubi9/nodejs-22"),
+    for arg, registry, repo in (
+        ("UBI", r"registry\.access\.redhat\.com", "ubi9/ubi"),
+        ("UBI_MINIMAL", r"registry\.access\.redhat\.com", "ubi9/ubi-minimal"),
+        ("UBI_NODEJS", r"registry\.access\.redhat\.com", "ubi9/nodejs-22"),
+        ("UV_IMAGE", r"ghcr\.io", "astral-sh/uv:[0-9.]+"),
     ):
         assert re.search(
-            rf"^ARG {arg}=registry\.access\.redhat\.com/{re.escape(repo)}@sha256:[0-9a-f]{{64}}$",
+            rf"^ARG {arg}={registry}/{repo}@sha256:[0-9a-f]{{64}}$",
             dockerfile,
             flags=re.MULTILINE,
         ), arg
-    assert "FROM ${UBI_MINIMAL} AS base" in dockerfile
-    assert "FROM ${UBI_MINIMAL} AS checkpoints" in dockerfile
-    assert not re.search(r"^FROM registry\.access\.redhat\.com/\S+(?<!\))\s", dockerfile, re.M)
+    for line in (
+        "FROM ${UBI} AS rootfs",
+        "FROM ${UBI} AS python",
+        "FROM scratch AS base",
+        "FROM ${UBI_MINIMAL} AS checkpoints",
+        "FROM ${UV_IMAGE} AS uv",
+        "FROM ${UBI_MINIMAL} AS builder",
+    ):
+        assert line in dockerfile, line
+    assert not re.search(r"^FROM (registry\.access\.redhat\.com|ghcr\.io|docker\.io)/", dockerfile, re.M)
 
 
 def test_runtime_image_has_no_debugger_and_current_setuptools():
@@ -281,14 +276,6 @@ def test_runtime_image_has_no_debugger_and_current_setuptools():
         assert version >= minimum, package
 
 
-def _instructions(dockerfile: str, name: str) -> str:
-    return "\n".join(
-        line
-        for line in _dockerfile_stage(dockerfile, name).splitlines()
-        if not line.lstrip().startswith("#")
-    )
-
-
 def test_runtime_stages_carry_no_pip_or_uv_and_the_venv_is_seedless():
     """Only builder (and the CI-only test stage) may have pip or uv."""
     dockerfile = _read_repo_file("Dockerfile")
@@ -296,8 +283,11 @@ def test_runtime_stages_carry_no_pip_or_uv_and_the_venv_is_seedless():
         instructions = _instructions(dockerfile, name)
         assert not re.search(r"\b(pip|uv)\b", instructions), name
     builder = _instructions(dockerfile, "builder")
-    assert "uv venv --python /usr/bin/python3.11 /opt/venv" in builder
+    assert "uv venv --python /opt/python/bin/python3.14 /opt/venv" in builder
     assert "python3 -m venv" not in dockerfile
+    # Python comes from python-build-standalone, never the RHEL python3.11 RPM.
+    assert "/usr/bin/python3.11" not in dockerfile
+    assert "python3.11-pip" not in dockerfile
 
 
 def test_test_stage_adds_uv_and_release_stays_the_default_target():

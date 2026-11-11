@@ -37,7 +37,15 @@ def test_dev_dockerfile_points_https_clients_at_system_bundle():
 
 def test_dev_build_files_never_disable_tls_verification():
     """TLS errors are fixed with CA injection, never by skipping verification."""
-    files = ("Dockerfile.dev", "docker-compose.dev.yml", "scripts/dev.sh")
+    files = (
+        "Dockerfile.dev",
+        "docker-compose.dev.yml",
+        "scripts/dev.sh",
+        "Dockerfile",
+        "vendor/opencv/Dockerfile.build",
+        "scripts/build_image.sh",
+        "scripts/check_image_ca.sh",
+    )
     checked = "\n".join(
         line
         for path in files
@@ -45,7 +53,15 @@ def test_dev_build_files_never_disable_tls_verification():
         if not line.lstrip().startswith("#")
     )
 
-    for pattern in (r"--trusted-host", r"--insecure\b", r"strict-ssl", r"--no-check-certificate", r"\bcurl\s+-k\b"):
+    for pattern in (
+        r"--trusted-host",
+        r"--insecure\b",
+        r"strict-ssl",
+        r"--no-check-certificate",
+        r"\bcurl\s+(-\w*k|--insecure)\b",
+        r"NODE_TLS_REJECT_UNAUTHORIZED",
+        r"UV_INSECURE_HOST|--allow-insecure-host",
+    ):
         assert not re.search(pattern, checked), pattern
 
 

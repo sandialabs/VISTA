@@ -24,7 +24,7 @@ VISTA is a full-stack application for managing, classifying, and collaborating o
 ### Technology Stack
 
 **Backend:**
-- FastAPI (Python 3.11+) - Modern async web framework
+- FastAPI (Python 3.14+) - Modern async web framework
 - SQLAlchemy 2.0+ - Async ORM for PostgreSQL
 - Alembic - Database migrations
 - Pydantic - Data validation and serialization
@@ -107,7 +107,7 @@ Pipeline Studio is implemented by `backend/analyze_toolbox/` and the React `Anal
 ### Prerequisites
 
 - Git
-- Python 3.11+
+- Python 3.14+
 - Node.js 22+
 - Docker and Docker Compose
 - uv package manager: `pip install uv`

@@ -112,7 +112,10 @@ def test_substring_pattern_scans_keys(cache):
 
 
 def test_lru_eviction_keeps_recently_read_entries(tmp_path):
-    cache = FileCache(tmp_path / "small", size_limit=300 * 1024)
+    # Four ~100 KB entries exceed the 350 KB limit by one entry; eviction trims to 90%
+    # of the limit (315 KB), so exactly the least recently used entry goes.
+    limit = 350 * 1024
+    cache = FileCache(tmp_path / "small", size_limit=limit)
     blob = b"x" * (100 * 1024)
     cache.set("old", blob)
     cache.set("recent", blob)
@@ -121,10 +124,11 @@ def test_lru_eviction_keeps_recently_read_entries(tmp_path):
         os.utime(cache._path_for(key), (past, past))
     assert cache.get("recent") == blob  # refreshes its modification time
     cache.set("third", blob)
-    cache.set("fourth", blob)  # pushes the cache over its 300 KB limit
+    assert len(cache) == 3
+    cache.set("fourth", blob)  # pushes the cache over its limit
     assert cache.get("old") is None
-    assert cache.get("recent") == blob
-    assert cache.volume() <= 300 * 1024
+    assert sorted(cache.keys()) == ["fourth", "recent", "third"]
+    assert cache.volume() <= limit
 
 
 def test_corrupt_and_truncated_entries_are_misses(cache):

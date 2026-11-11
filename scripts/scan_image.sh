@@ -16,6 +16,9 @@
 #                      download. Verification is never disabled.
 #   GRYPE_DB_DIR       vulnerability database cache (default ~/.cache/vista-scan/grype-db)
 #
+# The repository's .grype.yaml (verified false positives only) is applied, and the number of
+# matches it ignored is printed. Bundled library versions in /opt/python are printed too.
+#
 # Reports findings only: the exit status is 0 unless --fail-on is given and a finding at or
 # above that severity (critical, high, medium, low) exists.
 
@@ -61,7 +64,9 @@ log() { if [[ "$VERBOSE" == true ]]; then echo "$*" >&2; fi; }
 
 log "Exporting the filesystem of $IMAGE"
 rm -rf "$ROOTFS" && mkdir -p "$ROOTFS"
-cid="$("$RUNTIME" create "$IMAGE")"
+# The container is only exported, never started, so a placeholder command lets images
+# without a CMD (such as a FROM scratch base stage) be scanned too.
+cid="$("$RUNTIME" create --entrypoint "" "$IMAGE" /scan-placeholder)"
 trap '"$RUNTIME" rm "$cid" >/dev/null 2>&1 || true' EXIT
 "$RUNTIME" export "$cid" | tar -x --no-same-owner --no-same-permissions -C "$ROOTFS"
 # Image directories can be read-only; keep the tree removable.
@@ -79,8 +84,25 @@ grype_args=(--rm -e GRYPE_CHECK_FOR_APP_UPDATE=false -e GRYPE_DB_CACHE_DIR=/db
 if [[ -n "${SCAN_CA_BUNDLE:-}" ]]; then
   grype_args+=(-e SSL_CERT_FILE=/etc/ssl/scan-ca.pem -v "$SCAN_CA_BUNDLE":/etc/ssl/scan-ca.pem:ro)
 fi
-"$RUNTIME" run "${grype_args[@]}" "$GRYPE_IMAGE" \
+# Verified false positives are suppressed by the repository's .grype.yaml (each rule
+# documents why); the summary below reports how many matches it ignored.
+GRYPE_CONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.grype.yaml"
+config_args=()
+if [[ -f "$GRYPE_CONFIG" ]]; then
+  grype_args+=(-v "$GRYPE_CONFIG":/etc/vista-grype.yaml:ro)
+  config_args=(--config /etc/vista-grype.yaml)
+fi
+"$RUNTIME" run "${grype_args[@]}" "$GRYPE_IMAGE" "${config_args[@]}" \
   sbom:/out/sbom.spdx.json -o json --file /out/grype.json -q
+
+# python-build-standalone links OpenSSL, SQLite and expat statically, so Syft cannot see
+# them. Ask the image's own Python for their versions (in a throwaway container without
+# network) so a stale bundle is noticed; bumping PBS_RELEASE is how they get patched.
+if [[ -x "$ROOTFS/opt/python/bin/python3" ]]; then
+  "$RUNTIME" run --rm --network none --entrypoint /opt/python/bin/python3 "$IMAGE" -I -c \
+    "import sys, ssl, sqlite3, pyexpat, zlib; print('bundled in /opt/python (invisible to scanners): CPython', sys.version.split()[0] + ',', ssl.OPENSSL_VERSION + ', SQLite', sqlite3.sqlite_version + ',', pyexpat.EXPAT_VERSION + ', zlib', zlib.ZLIB_RUNTIME_VERSION)" \
+    2>/dev/null || echo "bundled versions: could not run /opt/python/bin/python3 in $IMAGE"
+fi
 
 if [[ "$KEEP_ROOTFS" != true ]]; then chmod -R u+rwX "$ROOTFS" 2>/dev/null || true; rm -rf "$ROOTFS"; fi
 
@@ -111,6 +133,11 @@ now = load(path)
 c, unfixed = counts(now)
 line = "  ".join(f"{s}={c[s]}" for s in ORDER if c[s])
 print(f"findings: {len(now)}  ({line})  unfixed Critical+High={unfixed}")
+ignored = json.load(open(path)).get("ignoredMatches") or []
+if ignored:
+    names = collections.Counter(m["artifact"]["name"] for m in ignored)
+    print(f"  ignored by .grype.yaml (verified false positives): {len(ignored)}",
+          "(" + ", ".join(f"{n} x{k}" for n, k in names.most_common()) + ")")
 by_type = collections.Counter((v[1], v[0]) for v in now.values())
 for t in sorted({k[0] for k in by_type}):
     print(f"  {t:10}", {s: by_type[(t, s)] for s in ORDER if by_type[(t, s)]})
