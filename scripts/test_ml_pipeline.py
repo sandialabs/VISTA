@@ -151,7 +151,10 @@ def run_pipeline(
         # Real S3 upload
         heatmap_bytes = create_fake_heatmap()
         upload_resp = requests.put(
-            upload_url, data=heatmap_bytes, headers={"Content-Type": "image/png"}
+            upload_url,
+            data=heatmap_bytes,
+            headers={"Content-Type": "image/png"},
+            timeout=60,
         )
 
         if upload_resp.status_code not in (200, 204):

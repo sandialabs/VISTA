@@ -217,6 +217,14 @@ def test_runtime_base_installs_only_python_and_certificates():
     assert not [name for name in packages if denied.match(name)]
 
 
+def test_runtime_base_skips_weak_dependencies():
+    """Weak dependencies (glibc and gawk langpacks) would ship and add scan findings."""
+    base = _dockerfile_stage(_read_repo_file("Dockerfile"), "base")
+    commands = re.findall(r"microdnf (?:upgrade|install)[^\n]*", base)
+    assert len(commands) >= 2, "base stage must upgrade and install with microdnf"
+    assert all("--setopt=install_weak_deps=0" in line for line in commands), commands
+
+
 def test_sam_checkpoint_is_downloaded_in_its_own_stage_with_a_pinned_hash():
     """Download weights outside the runtime stages and verify them by SHA-256."""
     dockerfile = _read_repo_file("Dockerfile")

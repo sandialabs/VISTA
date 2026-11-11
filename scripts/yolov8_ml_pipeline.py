@@ -319,7 +319,9 @@ class YOLOv8Pipeline:
         headers = {
             "Content-Type": "image/png" if artifact_type == "heatmap" else "image/jpeg"
         }
-        upload_response = requests.put(upload_url, data=data, headers=headers)
+        upload_response = requests.put(
+            upload_url, data=data, headers=headers, timeout=60
+        )
         upload_response.raise_for_status()
 
         print(f"  Uploaded to {storage_path}")

@@ -16,8 +16,10 @@ FROM ${UBI_MINIMAL} AS base
 # wheel (psycopg2-binary bundles its own libpq), and nothing in the image launches a browser.
 # Keep this list minimal: the final stage inherits everything installed here, and each extra OS
 # package adds image scan findings. test_container_build_config.py guards the denylist.
-RUN microdnf upgrade -y --nodocs && \
-    microdnf install -y --nodocs \
+# Weak dependencies are skipped: since glibc 2.34-290.el9_9 the upgrade otherwise adds
+# glibc-langpack-en and gawk-all-langpacks (Supplements only, nothing requires them).
+RUN microdnf upgrade -y --nodocs --setopt=install_weak_deps=0 && \
+    microdnf install -y --nodocs --setopt=install_weak_deps=0 \
     python3.11 \
     ca-certificates \
     && microdnf clean all

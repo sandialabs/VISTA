@@ -6,12 +6,16 @@ on:
     branches:
       - main # Change to your fork's development branch
 
+# The push authenticates with UPSTREAM_SYNC_TOKEN; the job's GITHUB_TOKEN only needs read access.
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Fork Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
           fetch-depth: 0

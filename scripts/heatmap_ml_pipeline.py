@@ -339,7 +339,9 @@ class HeatmapPipeline:
 
         # Upload to S3
         headers = {"Content-Type": "image/png"}
-        upload_response = requests.put(upload_url, data=data, headers=headers)
+        upload_response = requests.put(
+            upload_url, data=data, headers=headers, timeout=60
+        )
         upload_response.raise_for_status()
 
         print(f"  Uploaded to {storage_path}")
