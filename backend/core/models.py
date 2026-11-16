@@ -310,6 +310,103 @@ class DataInstance(Base):
     )
 
 
+class InspectionNcr(Base):
+    """A nonconformance report raised against an inspection part.
+
+    Failure and disposition codes are snapshotted (code and description) so a
+    later edit to the project's NCR configuration never changes a recorded
+    report. ``part_id`` is nulled rather than cascaded when a part is deleted,
+    and ``part_serial_number`` keeps the report traceable.
+    """
+
+    __tablename__ = "inspection_ncrs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("inspection_parts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    part_serial_number = Column(String(255), nullable=False)
+    ncr_number = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, server_default="open")
+    comment = Column(Text, nullable=False)
+    failure_code = Column(String(64), nullable=False)
+    failure_code_description = Column(String(255), nullable=False, server_default="")
+    disposition_code = Column(String(64), nullable=False)
+    disposition_code_description = Column(
+        String(255), nullable=False, server_default=""
+    )
+    disposition_instructions = Column(Text, nullable=False)
+    version = Column(Integer, nullable=False, server_default="1")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(255), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_by = Column(String(255), nullable=False)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(String(255), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(String(255), nullable=True)
+
+    history = relationship(
+        "InspectionNcrHistory",
+        back_populates="ncr",
+        cascade="all, delete-orphan",
+        order_by="InspectionNcrHistory.version",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "ncr_number", name="uix_inspection_ncrs_project_number"
+        ),
+        CheckConstraint(
+            "status IN ('open', 'approved')", name="ck_inspection_ncrs_status"
+        ),
+    )
+
+
+class InspectionNcrHistory(Base):
+    """Append-only change history for a nonconformance report."""
+
+    __tablename__ = "inspection_ncr_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ncr_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("inspection_ncrs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    # created, updated, approved, deleted
+    action = Column(String(32), nullable=False)
+    actor = Column(String(255), nullable=False)
+    at = Column(DateTime(timezone=True), nullable=False)
+    # {field: {"from": old, "to": new}} for every field the action changed.
+    changes = Column(JSON, nullable=False)
+
+    ncr = relationship("InspectionNcr", back_populates="history")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "ncr_id", "version", name="uix_inspection_ncr_history_ncr_version"
+        ),
+    )
+
+
 class ImageDeletionEvent(Base):
     __tablename__ = "image_deletion_events"
 

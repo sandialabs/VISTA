@@ -142,8 +142,24 @@ def toml_scalar(value) -> str:
     if value is None:
         return '""'
     if isinstance(value, (dict, list)):
-        return json.dumps(json.dumps(value, indent=2, sort_keys=True))
-    return json.dumps(str(value))
+        return toml_basic_string(json.dumps(value, indent=2, sort_keys=True))
+    return toml_basic_string(str(value))
+
+
+def toml_basic_string(text: str) -> str:
+    """Return a TOML basic string literal for arbitrary text.
+
+    ``json.dumps`` with its default ASCII escaping writes characters outside the
+    Basic Multilingual Plane as UTF-16 surrogate pairs, which TOML rejects, so
+    emit Unicode directly. JSON already escapes quotes, backslashes, and C0
+    control characters; TOML additionally forbids a raw DEL, and lone
+    surrogates cannot be encoded as UTF-8, so those are handled here.
+    """
+    safe = "".join(
+        "\ufffd" if 0xD800 <= ord(character) <= 0xDFFF else character
+        for character in text
+    )
+    return json.dumps(safe, ensure_ascii=False).replace("\x7f", "\\u007F")
 
 
 def toml_table(name: str, values: dict) -> str:
@@ -252,8 +268,15 @@ async def collect_project_bundle_payload(
         ).where(models.InspectionPart.project_id == project_id)
     )
     part_metadata_rows = part_metadata_result.all()
+    # Imported lazily: report_ncrs imports the inspection service, which in
+    # turn depends on modules that import this one.
+    from services.export import report_ncrs
 
-    return build_project_bundle_payload(
+    ncr_rows = await report_ncrs.load_project_ncr_report_rows(
+        db=db, project_id=project_id
+    )
+
+    payload = build_project_bundle_payload(
         project={
             "id": str(db_project.id),
             "name": db_project.name,
@@ -264,6 +287,11 @@ async def collect_project_bundle_payload(
         total_image_bytes=image_totals.total_image_bytes,
         part_metadata_rows=part_metadata_rows,
     )
+    payload["bundle_summary"]["ncrs"] = {
+        **report_ncrs.summarize_ncr_rows(ncr_rows),
+        "records": ncr_rows,
+    }
+    return payload
 
 
 def build_project_bundle_payload(

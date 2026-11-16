@@ -19,6 +19,7 @@ export const MODALITY_METADATA_KEY = 'modality';
 export const INSPECTION_VIEW_ALL_IMAGES_TAB = 'view_all_images';
 export const INSPECTION_VIEW_PARTS_TAB = 'view_parts';
 export const INSPECTION_FILTER_IMAGES_COLUMN = 'filter_images';
+export const INSPECTION_NCR_TAB = 'ncrs';
 export const DEFAULT_INSPECTOR_HOTKEYS = {
   accept_classification: 'a',
   reject_classification: 'r',

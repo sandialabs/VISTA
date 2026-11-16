@@ -639,7 +639,8 @@ def test_project_json_report_v3_has_one_ordered_row_per_part_and_explicit_v2_com
     assert report_resp.status_code == 200, report_resp.text
     payload = report_resp.json()
 
-    assert set(payload) == {"schema_version", "project", "summary", "parts"}
+    assert set(payload) == {"schema_version", "project", "summary", "parts", "ncrs"}
+    assert payload["ncrs"] == []
     assert payload["schema_version"] == 3
     assert set(payload["project"]) == {"id", "name", "project_type", "meta_group_id"}
     assert payload["project"] == {
@@ -745,6 +746,7 @@ def test_project_json_report_v3_empty_project(client):
             "part_status_counts": {"pass": 0, "reject": 0, "unreviewed": 0},
         },
         "parts": [],
+        "ncrs": [],
     }
 
 

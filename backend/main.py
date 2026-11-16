@@ -31,6 +31,7 @@ from routers import (
     groups,
     image_classes,
     images,
+    inspection_ncrs,
     inspection_workbench,
     ml_analyses,
     project_metadata,
@@ -353,6 +354,7 @@ def create_app() -> FastAPI:
     api_router.include_router(reviews.router)
     api_router.include_router(groups.router)
     api_router.include_router(inspection_workbench.router)
+    api_router.include_router(inspection_ncrs.router)
     api_router.include_router(analyze.router)
     api_router.include_router(dashboard_settings.router)
 

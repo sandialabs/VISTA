@@ -209,6 +209,11 @@ def default_defect_types(project_type: str | None) -> list[dict]:
     ]
 
 
+def default_ncr_configuration() -> dict:
+    """Return the default (empty) NCR code lists."""
+    return {"failure_codes": [], "disposition_codes": []}
+
+
 def default_project_configuration(
     project_type: str | None = DEFAULT_PROJECT_TYPE,
 ) -> dict:
@@ -280,6 +285,7 @@ def default_project_configuration(
         "interface_layout": {
             "default_model": None,
         },
+        "ncr_configuration": default_ncr_configuration(),
     }
     if project_type_name != "PT1":
         config["file_naming_scheme"] = {
@@ -469,6 +475,10 @@ async def get_project_configuration(*, db, project_id, project) -> dict:
         else default_config
     )
     resolved_config = configuration_for_project_type(raw_config, project.project_type)
+    # Configs stored before NCRs existed lack the section; expose the default
+    # so clients always see the code lists.
+    if not isinstance(resolved_config.get("ncr_configuration"), dict):
+        resolved_config["ncr_configuration"] = default_ncr_configuration()
     interface_layout = resolved_config.get("interface_layout")
     has_project_default_layout = isinstance(interface_layout, dict) and isinstance(
         interface_layout.get("default_model"), dict

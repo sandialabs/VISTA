@@ -72,6 +72,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": false,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -107,9 +108,14 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -186,6 +192,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": false,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -221,9 +228,14 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -300,6 +312,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": false,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -335,9 +348,14 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -414,6 +432,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -449,6 +468,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -508,6 +528,10 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -584,6 +608,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -619,6 +644,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -678,6 +704,10 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -754,6 +784,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -789,6 +820,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -848,6 +880,10 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -924,6 +960,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": false,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -959,9 +996,14 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -1038,6 +1080,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"project_configuration.filename_convention\\": false,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -1073,9 +1116,14 @@ exports[`normalizeProjectConfiguration characterization normalizes a missing con
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -1167,6 +1215,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a valid confi
     \\"project_configuration.filename_convention\\": false,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -1202,9 +1251,14 @@ exports[`normalizeProjectConfiguration characterization normalizes a valid confi
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   },
   \\"calibration\\": {
     \\"pixels_per_mm\\": 10,
@@ -1305,6 +1359,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a valid confi
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -1340,6 +1395,7 @@ exports[`normalizeProjectConfiguration characterization normalizes a valid confi
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -1399,6 +1455,10 @@ exports[`normalizeProjectConfiguration characterization normalizes a valid confi
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   },
   \\"calibration\\": {
     \\"pixels_per_mm\\": 10,
@@ -1485,6 +1545,7 @@ exports[`normalizeProjectConfiguration characterization normalizes invalid value
     \\"project_configuration.filename_convention\\": false,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -1520,9 +1581,14 @@ exports[`normalizeProjectConfiguration characterization normalizes invalid value
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -1600,6 +1666,7 @@ exports[`normalizeProjectConfiguration characterization normalizes invalid value
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -1635,6 +1702,7 @@ exports[`normalizeProjectConfiguration characterization normalizes invalid value
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -1676,6 +1744,10 @@ exports[`normalizeProjectConfiguration characterization normalizes invalid value
       ],
       \\"remove_from_base_filename\\": false
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -1752,6 +1824,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -1787,6 +1860,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -1846,6 +1920,10 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -1924,6 +2002,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -1959,6 +2038,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -2018,6 +2098,10 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -2094,6 +2178,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -2129,6 +2214,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -2188,6 +2274,10 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -2264,6 +2354,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -2299,6 +2390,7 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -2358,6 +2450,10 @@ exports[`normalizeProjectConfiguration characterization normalizes non-object in
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;
@@ -2418,6 +2514,7 @@ exports[`normalizeProjectConfiguration characterization pins EMPTY_CONFIG 1`] = 
     \\"project_configuration.filename_convention\\": true,
     \\"project_configuration.hotkeys\\": true,
     \\"project_configuration.ui_configuration\\": true,
+    \\"project_configuration.ncr_configuration\\": true,
     \\"project_configuration.owner_section\\": true,
     \\"project_configuration.user_section\\": true,
     \\"project_configuration.calibration\\": true,
@@ -2453,6 +2550,7 @@ exports[`normalizeProjectConfiguration characterization pins EMPTY_CONFIG 1`] = 
     \\"inspection.inspector\\": true,
     \\"inspection.image_metadata\\": true,
     \\"inspection.annotations\\": true,
+    \\"inspection.ncrs\\": true,
     \\"inspection.visual_workspace\\": true,
     \\"main.report\\": true,
     \\"report.project_report\\": true
@@ -2510,6 +2608,10 @@ exports[`normalizeProjectConfiguration characterization pins EMPTY_CONFIG 1`] = 
       ],
       \\"remove_from_base_filename\\": true
     }
+  },
+  \\"ncr_configuration\\": {
+    \\"failure_codes\\": [],
+    \\"disposition_codes\\": []
   }
 }"
 `;

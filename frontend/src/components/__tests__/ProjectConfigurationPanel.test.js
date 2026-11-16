@@ -386,7 +386,7 @@ describe('ProjectConfigurationPanel', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(detail);
     expect(accessGroupInput).toHaveValue('restricted-group');
-    expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument();
+    expect(screen.getByRole('tablist', { name: 'Configuration sections' })).toBeInTheDocument();
     expect(onProjectUpdated).not.toHaveBeenCalled();
   });
 
@@ -993,7 +993,7 @@ describe('ProjectConfigurationPanel', () => {
 
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-    await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tablist', { name: 'Configuration sections' })).toBeInTheDocument());
     expect(global.fetch.mock.calls.map(([url]) => url)).toContain('/api/projects/');
     expect(global.fetch.mock.calls.map(([url]) => url)).not.toContain('/api/projects');
   });
@@ -1330,6 +1330,7 @@ describe('ProjectConfigurationPanel', () => {
         'project_configuration.filename_convention': false,
         'project_configuration.hotkeys': false,
         'project_configuration.ui_configuration': false,
+        'project_configuration.ncr_configuration': false,
       },
     };
     mockFetch(config, 'PT2');
@@ -1697,9 +1698,10 @@ describe('ProjectConfigurationPanel', () => {
 
         render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-        await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole('tablist', { name: 'Configuration sections' })).toBeInTheDocument());
 
-        expect(screen.getAllByRole('heading', { name: 'Modalities' }).length).toBeGreaterThan(0);
+        // The summary cards (including a "Modalities" heading) were removed.
+        expect(screen.queryByRole('heading', { name: 'Modalities' })).not.toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'Serial Number Scheme' })).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
@@ -2282,7 +2284,7 @@ describe('ProjectConfigurationPanel', () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tablist', { name: 'Configuration sections' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Current Interface as Project Default' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save Current Interface as PT1 Default' }));

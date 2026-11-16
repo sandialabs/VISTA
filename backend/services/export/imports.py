@@ -15,6 +15,7 @@ from core import models
 from repositories import users as user_repository
 from services.errors import ForbiddenError
 from services.export import bundles as export_bundle_service
+from services.export import ncr_import as ncr_import_service
 from services.export import storage as export_storage_service
 from utils import cache_manager
 
@@ -113,6 +114,7 @@ async def clear_project_import_data(db: AsyncSession, project_id: uuid.UUID) -> 
     await db.execute(
         delete(models.ImageClass).where(models.ImageClass.project_id == project_id)
     )
+    await ncr_import_service.clear_project_ncrs(db, project_id)
     await db.execute(
         delete(models.InspectionPart).where(
             models.InspectionPart.project_id == project_id
@@ -296,6 +298,13 @@ async def import_project_backup_payload(
         await db.flush()
         part_map[str(source_part.get("id"))] = db_part.id
 
+    ncrs_restored = await ncr_import_service.restore_project_ncrs(
+        db,
+        project_id=db_project.id,
+        records=payload.get("ncrs"),
+        part_map=part_map,
+    )
+
     image_map: dict[str, uuid.UUID] = {}
     files_uploaded = 0
     missing_files = 0
@@ -469,4 +478,5 @@ async def import_project_backup_payload(
         "images_created": len(image_map),
         "files_uploaded": files_uploaded,
         "missing_files": missing_files,
+        "ncrs_created": ncrs_restored,
     }

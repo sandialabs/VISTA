@@ -101,6 +101,9 @@ def preview_project_backup_import_payload(archive: zipfile.ZipFile) -> dict:
                 "comments": len(payload.get("comments", [])),
                 "classifications": len(payload.get("classifications", [])),
                 "reviews": len(payload.get("reviews", [])),
+                "ncrs": len(payload.get("ncrs", []))
+                if isinstance(payload.get("ncrs"), list)
+                else 0,
                 "missing_artifacts": len(project_missing),
             }
         )
@@ -319,6 +322,19 @@ def project_backup_entries(
                         ),
                     ),
                 ]
+            )
+        if options.get("include_metadata", True):
+            entries.append(
+                StreamingZipEntry(
+                    "ncrs.toml",
+                    lambda: export_bundle_service.build_toml_document(
+                        arrays={
+                            "ncrs": export_bundle_service.json_safe(
+                                backup_payload.get("ncrs", [])
+                            )
+                        }
+                    ),
+                )
             )
         if options.get("include_created_overlays", True):
             entries.append(

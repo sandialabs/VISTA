@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from core import models
 from services.export import bundles as export_bundle_service
+from services.export import report_ncrs as report_ncr_service
 from services.inspection.workspace import (
     PROJECT_CONFIGURATION_KEY,
     default_project_configuration,
@@ -30,6 +31,9 @@ async def collect_project_backup_payload(
     """Collect a restorable project backup payload plus artifact references."""
     bundle_payload = await export_bundle_service.collect_project_bundle_payload(
         project_id=project_id, db=db, db_project=db_project
+    )
+    ncr_records = await report_ncr_service.load_project_ncr_export_records(
+        db=db, project_id=project_id
     )
     image_query = (
         select(models.DataInstance)
@@ -358,6 +362,8 @@ async def collect_project_backup_payload(
             }
             for part in part_rows
         ],
+        # Every NCR with its full change history, including soft-deleted ones.
+        "ncrs": ncr_records,
         "image_classes": [
             {
                 "id": str(image_class.id),

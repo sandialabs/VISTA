@@ -7,6 +7,7 @@ import {
   fetchProjectReportWithImagesPdfResponse,
 } from '../api/exports';
 import { downloadExcel } from '../utils/downloadExcel';
+import ProjectReportNcrTable from './ProjectReportNcrTable';
 
 const EXPORT_ACTIONS = {
   bundle_summary: 'bundle_summary',
@@ -478,6 +479,7 @@ function ProjectReportTab({ projectId, projectName, setError }) {
               </table>
             </div>
           )}
+          <ProjectReportNcrTable report={report} />
         </article>
       )}
     </section>

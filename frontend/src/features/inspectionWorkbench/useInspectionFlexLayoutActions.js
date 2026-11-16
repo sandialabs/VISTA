@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { Actions } from 'flexlayout-react';
 import {
   INSPECTION_FLEX_TABSET_IDS,
+  INSPECTION_NCR_TAB,
   INSPECTION_VIEW_ALL_IMAGES_TAB,
   RESIZE_HANDLE_WIDTH_PX,
 } from './inspectionConstants';
@@ -34,9 +35,15 @@ export function useInspectionFlexLayoutActions({
   availableLayoutWidth,
   inspectionResizeSaveTimerRef,
   saveInspectionColumnWidths,
+  setActiveRightTab = null,
 }) {
   const handleInspectionViewTabSelection = useCallback((tabId) => {
     const tabKey = String(tabId || '').replace(/^inspection-tab-/, '');
+    // Remember the right-column tab so a rebuilt layout model keeps it selected.
+    if (setActiveRightTab && (tabKey === INSPECTION_NCR_TAB || tabKey === inspectionHierarchy.rightColumn)) {
+      setActiveRightTab(tabKey);
+      return;
+    }
     if (!inspectionHierarchy.centerTabs.includes(tabKey)) return;
     setActiveInspectionViewTab(tabKey);
     if (tabKey === INSPECTION_VIEW_ALL_IMAGES_TAB) {
@@ -44,7 +51,15 @@ export function useInspectionFlexLayoutActions({
     } else if (selectedPartId === ALL_PARTS_ID) {
       setSelectedPartId(filteredParts[0]?.id || '');
     }
-  }, [filteredParts, inspectionHierarchy.centerTabs, selectedPartId, setActiveInspectionViewTab, setSelectedPartId]);
+  }, [
+    filteredParts,
+    inspectionHierarchy.centerTabs,
+    inspectionHierarchy.rightColumn,
+    selectedPartId,
+    setActiveInspectionViewTab,
+    setActiveRightTab,
+    setSelectedPartId,
+  ]);
 
   const handleInspectionFlexLayoutAction = useCallback((action) => {
     if (action?.type === Actions.SELECT_TAB) {

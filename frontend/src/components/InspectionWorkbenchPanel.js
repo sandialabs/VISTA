@@ -14,6 +14,8 @@ import useInspectionWorkbenchLayoutMetrics from '../features/inspectionWorkbench
 import useAnnotationMutation from '../features/inspectionWorkbench/useAnnotationMutation';
 import useAnnotationDrafts from '../features/inspectionWorkbench/useAnnotationDrafts';
 import useInspectionPartSelection from '../features/inspectionWorkbench/useInspectionPartSelection';
+import useInspectionNcrPane from '../features/inspectionWorkbench/useInspectionNcrPane';
+import { NcrPane } from '../features/inspectionWorkbench/NcrPane';
 import useReadOnlyInspectionCleanup from '../features/inspectionWorkbench/useReadOnlyInspectionCleanup';
 import useCollapsedPartRows from '../features/inspectionWorkbench/useCollapsedPartRows';
 import useInspectionViewTab from '../features/inspectionWorkbench/useInspectionViewTab';
@@ -287,12 +289,17 @@ function InspectionWorkbenchPanel({
     selectedPartId,
     sortMode,
   });
+  const { showNcrTab, activeRightTab, setActiveRightTab, ncrPaneProps } = useInspectionNcrPane({
+    projectId, projectConfiguration, selectedPart, readOnly,
+  });
   const {
     availableLayoutWidth,
     inspectionFlexLayoutModel,
     saveInspectionColumnWidths,
     workbenchFlexLayoutStyle,
   } = useInspectionLayoutModel({
+    showNcrTab,
+    activeRightTab,
     activeInspectionViewTab,
     inspectionColumnWidths,
     inspectionHierarchy,
@@ -691,6 +698,7 @@ function InspectionWorkbenchPanel({
     availableLayoutWidth,
     inspectionResizeSaveTimerRef,
     saveInspectionColumnWidths,
+    setActiveRightTab,
   });
 
   const calibratedGeometry = createCalibratedAnnotationGeometry({
@@ -859,7 +867,7 @@ function InspectionWorkbenchPanel({
     mprViewportProps, projectId, projectType, readOnly, setSelectedAnnotationId,
   });
   const inspectionFlexLayoutFactory = createInspectionFlexLayoutFactory({
-    annotationsPaneProps, centerPaneProps, inspectionHierarchy, partPaneProps,
+    annotationsPaneProps, centerPaneProps, inspectionHierarchy, ncrPaneProps, partPaneProps,
   });
   const segmentationHelperSliceImage = buildSegmentationHelperSliceImage({
     activeVolumeOverlayCaches, displayWindow, hasVolumeImageSource, mprDerived, mprProjectionMirror,
@@ -898,6 +906,7 @@ function InspectionWorkbenchPanel({
                 }}
                 mprViewport={<MprViewport {...mprViewportProps} />}
                 annotationsPane={<AnnotationsPane {...annotationsPaneProps} />}
+                ncrPane={ncrPaneProps ? <NcrPane {...ncrPaneProps} /> : null}
                 workbenchModal={<WorkbenchUtilityModal {...workbenchUtilityModalProps} />}
               />
             ) : (

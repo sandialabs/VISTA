@@ -1355,7 +1355,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         await page.getByRole('tab', { name: 'Project Configuration' }).click();
 
         await expect(page.getByRole('heading', { name: 'Project Configuration' })).toBeVisible();
-        await expect(page.getByTestId('project-configuration-summary')).toBeVisible();
+        await expect(page.getByRole('tablist', { name: 'Configuration sections' })).toBeVisible();
 
         await page.getByRole('button', { name: 'Add Defect Type' }).click();
         const newDefectIndex = 2;

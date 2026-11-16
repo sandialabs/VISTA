@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import models
 from services.export import bundles as export_bundle_service
+from services.export import report_ncrs as report_ncr_service
 
 
 def normalize_part_report_status(review_state: object) -> str:
@@ -232,6 +233,9 @@ async def build_project_report_payload(
 
     total_parts = len(parts)
     reviewed_parts = part_status_counts["pass"] + part_status_counts["reject"]
+    ncrs = await report_ncr_service.load_project_ncr_report_rows(
+        db=db, project_id=project_id
+    )
 
     return {
         "schema_version": schema_version,
@@ -248,4 +252,6 @@ async def build_project_report_payload(
             "part_status_counts": part_status_counts,
         },
         "parts": parts,
+        # Additive in v3: nonconformance reports, ordered by NCR number.
+        "ncrs": ncrs,
     }
