@@ -10,11 +10,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core import group_snapshot, models
+from core import group_snapshot, locks, models
+from core.activity import mark_project_activity
 from core.config import settings
 from core.database import get_db
 from core.group_auth import parse_groups_header
-from core.group_auth_helper import is_user_in_group
+from core.group_auth_helper import is_user_in_group, list_accessible_groups
 from repositories import api_keys as api_key_repository
 from repositories import images as image_repository
 from repositories import projects as project_repository
@@ -205,18 +206,60 @@ async def require_authenticated_user(
 # --- Project / image access ---
 
 
+async def get_accessible_group_ids(db: AsyncSession, user: User) -> list[str]:
+    """Every access group the user can see, including groups with no projects."""
+    candidates = await project_repository.get_known_group_ids(db)
+    return list_accessible_groups(user.email, user, candidates)
+
+
+async def get_accessible_projects_page(
+    db: AsyncSession,
+    user: User,
+    skip: int = 0,
+    limit: int | None = 100,
+    include_archived: bool = False,
+    meta_group_ids: list[str] | None = None,
+) -> tuple[list[models.Project], int]:
+    """Projects the user can access, filtered by group in SQL before paging.
+
+    Returns ``(page, total)``. Projects inside an archived folder count as
+    archived (hidden unless ``include_archived``).
+    """
+    groups = await get_accessible_group_ids(db, user)
+    if meta_group_ids is not None:
+        allowed = set(groups)
+        groups = [g for g in meta_group_ids if g in allowed]
+    hidden = (
+        set()
+        if include_archived
+        else await locks.effectively_archived_folder_ids(db, groups)
+    )
+    return await project_repository.list_projects_in_groups(
+        db,
+        groups,
+        skip=skip,
+        limit=limit,
+        include_archived=include_archived,
+        hidden_folder_ids=hidden,
+    )
+
+
 async def get_accessible_projects_for_user(
     db: AsyncSession,
     user: User,
     skip: int = 0,
-    limit: int = 100,
+    limit: int | None = 100,
     include_archived: bool = False,
 ) -> list[models.Project]:
-    """Return projects the user can access based on group membership."""
-    all_projects = await project_repository.get_all_projects(
-        db, skip, limit, include_archived=include_archived
+    """Return projects the user can access based on group membership.
+
+    Group filtering happens in the query, so ``skip``/``limit`` page over the
+    user's own projects rather than over every project in the database.
+    """
+    page, _total = await get_accessible_projects_page(
+        db, user, skip=skip, limit=limit, include_archived=include_archived
     )
-    return [p for p in all_projects if is_user_in_group(user.email, p.meta_group_id, user)]
+    return page
 
 
 ARCHIVED_PROJECT_DETAIL = (
@@ -224,10 +267,24 @@ ARCHIVED_PROJECT_DETAIL = (
 )
 
 
-def _raise_if_archived(project: models.Project) -> None:
+def locked_by_folder_detail(folder_name: str | None) -> str:
+    return (
+        f"This project is inside the archived folder '{folder_name or 'unknown'}' "
+        "and is read-only. Unarchive the folder to make changes."
+    )
+
+
+async def raise_if_project_locked(db: AsyncSession, project: models.Project) -> None:
+    """403 when the project is archived or inside an archived folder."""
     if project.is_archived:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail=ARCHIVED_PROJECT_DETAIL
+        )
+    state = await locks.project_lock_state(db, project)
+    if state.locked_by_folder_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=locked_by_folder_detail(state.locked_by_folder_name),
         )
 
 
@@ -262,10 +319,25 @@ async def get_project_or_403_writable(
     db: AsyncSession,
     current_user: User,
 ) -> models.Project:
-    """Get a project; raise 404/403 as appropriate; also raise 403 if archived."""
+    """Get a project for a data change; 404/403 as appropriate.
+
+    Raises 403 when the project is archived or inside an archived folder, and
+    records the change for ``projects.last_activity_at`` (``core.activity``).
+    """
     db_project = await get_project_or_403(project_id, db, current_user)
-    _raise_if_archived(db_project)
+    await raise_if_project_locked(db, db_project)
+    mark_project_activity(db, db_project.id)
     return db_project
+
+
+async def require_writable_project(
+    db: AsyncSession, project: models.Project
+) -> models.Project:
+    """Lock check + activity mark for callers that already resolved access
+    (MCP tools, background jobs)."""
+    await raise_if_project_locked(db, project)
+    mark_project_activity(db, project.id)
+    return project
 
 
 async def get_image_or_403(
@@ -302,7 +374,8 @@ async def get_image_or_403_writable(
 ) -> models.DataInstance:
     """Get an image; raise 404/403 as appropriate; also raise 403 if the project is archived."""
     db_image = await get_image_or_403(image_id, db, current_user)
-    _raise_if_archived(db_image.project)
+    await raise_if_project_locked(db, db_image.project)
+    mark_project_activity(db, db_image.project_id)
     return db_image
 
 

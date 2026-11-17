@@ -7,6 +7,7 @@ import logging
 import time
 
 from .config import settings
+from .group_auth import enumerate_user_groups as _core_enumerate_user_groups
 from .group_auth import is_user_in_group as _core_is_user_in_group
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,40 @@ def is_user_in_group(user_email: str, group_id: str, user=None) -> bool:
     )
 
     return is_member
+
+
+def list_accessible_groups(user_email: str, user=None, candidates=None) -> list[str]:
+    """Every access group this user can see, sorted.
+
+    Uses the auth backend's own list when it can enumerate one (so a group with
+    no projects yet still appears), plus any ``candidates`` (groups known to the
+    database) that pass the membership check. An API key that carries its own
+    groups is answered from exactly those.
+    """
+    if not user_email:
+        return []
+    user_email = user_email.lower().strip()
+    key_groups = getattr(user, "key_groups", None)
+    if (
+        key_groups is not None
+        and not (settings.DEBUG or settings.SKIP_HEADER_CHECK)
+        and (getattr(user, "email", "") or "").lower().strip() == user_email
+    ):
+        return sorted(key_groups)
+
+    enumerated = _core_enumerate_user_groups(user_email)
+    groups: set[str] = set(enumerated or [])
+    debug_bypass = settings.DEBUG or settings.SKIP_HEADER_CHECK
+    if enumerated is not None and not debug_bypass:
+        # The backend listed the user's groups authoritatively; probing every
+        # known group would only add N membership checks (and log lines).
+        return sorted(groups)
+    for group_id in candidates or ():
+        if group_id and group_id not in groups and is_user_in_group(
+            user_email, group_id, user
+        ):
+            groups.add(group_id)
+    return sorted(groups)
 
 
 def is_user_in_any_group(user_email: str, group_ids: list[str]) -> bool:

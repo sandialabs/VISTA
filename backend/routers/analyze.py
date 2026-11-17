@@ -51,6 +51,7 @@ from utils.dependencies import (
     get_current_user,
     get_project_or_403,
     get_project_or_403_writable,
+    require_writable_project,
 )
 from utils.file_security import sanitize_filename
 
@@ -122,6 +123,10 @@ def _remote_job_registrar(run_id: str) -> Callable[[str, str], None]:
     return register
 
 
+class AnalyzeProjectLocked(Exception):
+    """The project became read-only while a workflow was running."""
+
+
 async def _execute_analyze_workflow_body(
     *,
     project_id: uuid.UUID,
@@ -152,6 +157,19 @@ async def _execute_analyze_workflow_body(
         raise AnalyzeExecutionCancelled(
             "Analyze workflow execution was stopped by the user."
         )
+    # Re-check right before results are saved: the project (or a folder above
+    # it) may have been archived while the workflow ran.
+    # populate_existing: re-read the row; the copy cached at request start
+    # would hide an archive that happened while the workflow ran.
+    db_project = await db.get(models.Project, project_id, populate_existing=True)
+    if db_project is None:
+        raise ValueError("Project no longer exists.")
+    try:
+        await require_writable_project(db, db_project)
+    except HTTPException as exc:
+        raise AnalyzeProjectLocked(
+            "Project archived during run; results were not saved. " + str(exc.detail)
+        ) from exc
     attached_result = await analyze_artifact_service.attach_analysis_outputs_to_parts(
         project_id=project_id,
         workflow=workflow,
@@ -468,7 +486,7 @@ async def execute_analyze_workflow(
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await get_project_or_403(project_id, db, current_user)
+    project = await get_project_or_403_writable(project_id, db, current_user)
     workflow = await _workflow_with_server_source(
         project_id=project_id, workflow=workflow, db=db
     )
@@ -492,6 +510,10 @@ async def execute_analyze_workflow(
             warnings=[str(exc)],
         )
         return cancelled
+    except AnalyzeProjectLocked as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -514,7 +536,7 @@ async def start_analyze_workflow(
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
 ):
-    project = await get_project_or_403(project_id, db, current_user)
+    project = await get_project_or_403_writable(project_id, db, current_user)
     workflow = await _workflow_with_server_source(
         project_id=project_id, workflow=workflow, db=db
     )

@@ -26,11 +26,12 @@ test.describe('Full inspection workflow end-to-end', () => {
     await page.getByRole('button', { name: 'Create Your First Project' }).click();
     await page.getByLabel('Project Name *').fill('Workflow E2E Project');
     await page.getByLabel('Description').fill('Workflow coverage for upload, inspection, and reporting');
-    await page.getByLabel('Access Group *').fill('qa-team');
+    // The access group comes from the groups the user belongs to.
+    await expect(page.getByLabel('Access Group *')).toHaveValue('qa-team');
     await page.getByLabel('Project Type *').selectOption('PT1');
     await page.getByRole('button', { name: 'Create Project' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Your Projects (1)' })).toBeVisible();
+    await expect(page.getByText('0 folders, 1 project total')).toBeVisible();
     await page.getByRole('link', { name: 'Workflow E2E Project' }).click();
 
     await expect(page).toHaveURL(new RegExp(`/project/${projectId}$`));

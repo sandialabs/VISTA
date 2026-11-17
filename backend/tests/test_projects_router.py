@@ -50,13 +50,15 @@ def test_create_project_stores_created_by(client):
     assert proj["archived_at"] is None
 
 
-def test_update_project_access_group_persists_for_authorized_destination(client):
+def test_update_project_access_group_is_refused_even_for_member_destination(client):
+    """Projects never move between access groups, even when the caller belongs
+    to both groups."""
     source_group = "project-config-source"
     destination_group = "project-config-destination"
     with _group_membership(return_value=True):
         create_resp = client.post(
             "/api/projects/",
-            json={"name": "Movable Project", "meta_group_id": source_group},
+            json={"name": "Pinned Project", "meta_group_id": source_group},
         )
         assert create_resp.status_code == 201
         project_id = create_resp.json()["id"]
@@ -65,39 +67,27 @@ def test_update_project_access_group_persists_for_authorized_destination(client)
             f"/api/projects/{project_id}",
             json={"meta_group_id": destination_group},
         )
-        assert update_resp.status_code == 200
-        assert update_resp.json()["meta_group_id"] == destination_group
-
-        persisted_resp = client.get(f"/api/projects/{project_id}")
-        assert persisted_resp.status_code == 200
-        assert persisted_resp.json()["meta_group_id"] == destination_group
-
-
-def test_update_project_access_group_rejects_unauthorized_destination_without_mutation(
-    client,
-):
-    source_group = "project-config-source"
-    destination_group = "project-config-restricted"
-    create_resp = client.post(
-        "/api/projects/",
-        json={"name": "Restricted Move", "meta_group_id": source_group},
-    )
-    assert create_resp.status_code == 201
-    project_id = create_resp.json()["id"]
-
-    with _group_membership(
-        side_effect=lambda _email, group_id, _user=None: group_id == source_group
-    ):
-        update_resp = client.put(
-            f"/api/projects/{project_id}",
-            json={"meta_group_id": destination_group},
-        )
         assert update_resp.status_code == 403
-        assert destination_group in update_resp.json()["detail"]
+        assert "between access groups" in update_resp.json()["detail"]
 
         persisted_resp = client.get(f"/api/projects/{project_id}")
         assert persisted_resp.status_code == 200
         assert persisted_resp.json()["meta_group_id"] == source_group
+
+
+def test_update_project_with_unchanged_access_group_is_a_no_op_for_the_group(client):
+    create_resp = client.post(
+        "/api/projects/",
+        json={"name": "Same Group", "meta_group_id": "project-config-source"},
+    )
+    project_id = create_resp.json()["id"]
+    update_resp = client.put(
+        f"/api/projects/{project_id}",
+        json={"meta_group_id": "project-config-source", "name": "Renamed"},
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["name"] == "Renamed"
+    assert update_resp.json()["meta_group_id"] == "project-config-source"
 
 
 @pytest.mark.parametrize("invalid_group", ["", "g" * 256])

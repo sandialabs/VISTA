@@ -18,6 +18,12 @@ class ProjectBase(BaseModel):
         default=DEFAULT_PROJECT_TYPE, pattern=PROJECT_TYPE_PATTERN
     )
 
+    @field_validator("meta_group_id", mode="before")
+    @classmethod
+    def strip_meta_group_id(cls, v):
+        """Membership checks compare trimmed IDs; store them trimmed too."""
+        return v.strip() if isinstance(v, str) else v
+
     @field_validator("project_type", mode="before")
     @classmethod
     def normalize_project_type(cls, v: str) -> str:
@@ -29,6 +35,9 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     """Input schema for creating a project."""
+
+    # Dashboard folder to create the project in (None = access-group root).
+    folder_id: uuid.UUID | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -47,6 +56,19 @@ class ProjectUpdate(BaseModel):
             return v.strip().upper()
         return v
 
+    @field_validator("name", "project_type")
+    @classmethod
+    def reject_explicit_null(cls, v):
+        """``name``/``project_type`` may be omitted but not set to null."""
+        if v is None:
+            raise ValueError("must not be null")
+        return v
+
+    @field_validator("meta_group_id", mode="before")
+    @classmethod
+    def strip_meta_group_id(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
 
 class ProjectDeleteRequest(BaseModel):
     """Confirmation payload for destructive project deletion."""
@@ -62,6 +84,13 @@ class ProjectDeleteResponse(BaseModel):
     deleted_by: EmailStr
 
 
+class FolderPathEntry(BaseModel):
+    """One folder on the path from the access-group root to a project."""
+
+    id: uuid.UUID
+    name: str
+
+
 class Project(ProjectBase):
     """Response schema for a project."""
 
@@ -73,8 +102,30 @@ class Project(ProjectBase):
     archived_at: datetime | None = None
     image_count: int = 0
     part_count: int = 0
+    folder_id: uuid.UUID | None = None
+    last_activity_at: datetime | None = None
+    # Root-first folder path; filled by dashboard/project-detail responses.
+    folder_path: list[FolderPathEntry] = Field(default_factory=list)
+    # Archived itself, or inside an archived folder.
+    effective_archived: bool = False
+    locked_by_folder_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class ProjectMoveRequest(BaseModel):
+    """Move a project to another folder (None = access-group root)."""
+
+    folder_id: uuid.UUID | None = None
+
+
+class ProjectPage(BaseModel):
+    """A page of projects plus the exact total for the filter."""
+
+    items: list[Project]
+    total: int
+    offset: int
+    limit: int
 
 
 class ProjectDataSummary(BaseModel):

@@ -22,6 +22,7 @@ def add_cors_middleware(app, cors_origins: list[str]):
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Total-Count"],
     )
 
 

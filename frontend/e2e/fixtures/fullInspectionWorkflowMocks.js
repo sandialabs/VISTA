@@ -143,6 +143,31 @@ async function mockFullInspectionWorkflowRoutes(page) {
       return;
     }
 
+    // Folder dashboard endpoints (access group "qa-team").
+    const pathname = new URL(url).pathname;
+    if (pathname === '/api/users/me/access-groups' || pathname === '/api/users/me/groups') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(['qa-team']) });
+      return;
+    }
+    if (pathname === '/api/folders/tree') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ folders: [], root_project_count: projects.length, total_project_count: projects.length }),
+      });
+      return;
+    }
+    if (pathname === '/api/dashboard/items') {
+      const ids = new URL(url).searchParams.getAll('ids');
+      const list = ids.length ? projects.filter((p) => ids.includes(String(p.id))) : projects;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ folders: [], projects: list, total_projects: list.length, total_folders: 0 }),
+      });
+      return;
+    }
+
     if ((url.endsWith('/api/projects/') || url.endsWith('/api/projects')) && method === 'POST') {
       const payload = request.postDataJSON() || {};
       const created = {

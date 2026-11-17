@@ -19,6 +19,7 @@
 .env.production.local
 /artifacts/*.png
 /artifacts/playwright-report/
+/artifacts/playwright-fullstack-report/
 /test-results/
 /.local/
 

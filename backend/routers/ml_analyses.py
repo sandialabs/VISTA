@@ -12,7 +12,11 @@ from core.database import get_db
 from repositories import ml_analyses as ml_analysis_repository
 from schemas import ml_analyses as ml_analysis_schemas
 from schemas import users as user_schemas
-from utils.dependencies import get_current_user, get_image_or_403
+from utils.dependencies import (
+    get_current_user,
+    get_image_or_403,
+    get_image_or_403_writable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +194,7 @@ async def create_ml_analysis(
     if image_id != analysis_in.image_id:
         raise HTTPException(status_code=400, detail="Image ID mismatch")
     # Access check
-    await get_image_or_403(image_id, db, current_user)
+    await get_image_or_403_writable(image_id, db, current_user)
     # Basic per-image limit
     existing = await ml_analysis_repository.list_ml_analyses_for_image(
         db, image_id, 0, settings.ML_MAX_ANALYSES_PER_IMAGE + 1
@@ -398,10 +402,14 @@ async def update_ml_analysis_status(
     db_obj = await ml_analysis_repository.get_ml_analysis_for_update(db, analysis_id)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    # Access via image
-    await get_image_or_403(db_obj.image_id, db, current_user)
-
     new_status = payload.status.lower()
+    # A worker must always be able to end a run (failed/canceled), even if the
+    # project was archived meanwhile; any other change needs a writable project.
+    if new_status in {"failed", "canceled"}:
+        await get_image_or_403(db_obj.image_id, db, current_user)
+    else:
+        await get_image_or_403_writable(db_obj.image_id, db, current_user)
+
     old_status = (db_obj.status or "").lower()
     sanitized_old_status = sanitize_for_log(old_status)
     sanitized_new_status = sanitize_for_log(new_status)
@@ -460,7 +468,7 @@ async def bulk_upload_annotations(
     db_obj = await ml_analysis_repository.get_ml_analysis(db, analysis_id)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    await get_image_or_403(db_obj.image_id, db, current_user)
+    await get_image_or_403_writable(db_obj.image_id, db, current_user)
     if len(payload.annotations) > settings.ML_MAX_BULK_ANNOTATIONS:
         raise HTTPException(
             status_code=400, detail="Too many annotations in one request"
@@ -523,7 +531,7 @@ async def presign_artifact_upload(
     db_obj = await ml_analysis_repository.get_ml_analysis(db, analysis_id)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    await get_image_or_403(db_obj.image_id, db, current_user)
+    await get_image_or_403_writable(db_obj.image_id, db, current_user)
 
     import os
     from datetime import timedelta
@@ -589,7 +597,7 @@ async def finalize_analysis(
     db_obj = await ml_analysis_repository.get_ml_analysis(db, analysis_id)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    await get_image_or_403(db_obj.image_id, db, current_user)
+    await get_image_or_403_writable(db_obj.image_id, db, current_user)
     if req.status:
         normalized_new = req.status.lower()
         if db_obj.status == "queued" and normalized_new in {"completed", "failed"}:

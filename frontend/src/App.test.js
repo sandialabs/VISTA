@@ -20,14 +20,57 @@ function createDeferred() {
   return { promise, reject, resolve };
 }
 
+/**
+ * Adapts the legacy per-test fetch mocks (which answer `/api/projects/` with a
+ * flat project list) to the folder dashboard: `/api/users/me/access-groups`,
+ * `/api/folders/tree` and `/api/dashboard/items` are answered from that list,
+ * everything else goes to the original mock.
+ */
+function withDashboardAdapter(legacyFetch) {
+  const json = (body, status = 200) => Promise.resolve({ ok: true, status, json: async () => body });
+  return jest.fn(async (input, init = {}) => {
+    const raw = typeof input === 'string' ? input : input.url;
+    const url = new URL(raw, 'http://localhost');
+    if (url.pathname === '/api/users/me/access-groups') {
+      // Access groups come from the auth backend, never from the project list.
+      let groups = [];
+      try {
+        const response = await legacyFetch('/api/users/me/groups', { method: 'GET' });
+        groups = response.ok ? await response.json() : [];
+      } catch (_) {
+        groups = [];
+      }
+      return json(Array.isArray(groups) && groups.length ? groups : ['test-group']);
+    }
+    if (url.pathname === '/api/folders/tree') {
+      return json({ folders: [], root_project_count: 0, total_project_count: 0 });
+    }
+    if (url.pathname === '/api/dashboard/items') {
+      if (url.searchParams.getAll('ids').length) {
+        return json({ folders: [], projects: [], total_projects: 0, total_folders: 0 });
+      }
+      const response = await legacyFetch('/api/projects/', { method: 'GET' });
+      if (!response.ok) return response;
+      const projects = await response.json();
+      return json({ folders: [], projects, total_projects: projects.length, total_folders: 0 });
+    }
+    return legacyFetch(raw, init);
+  });
+}
+
+function installFetch(legacyFetch) {
+  global.fetch = withDashboardAdapter(legacyFetch);
+}
+
 function projectTypeCardMatcher(projectType) {
-  const expected = `Type: ${getProjectTypeLabel(projectType, { short: true })}`;
-  return (_content, element) => element?.classList?.contains('project-card-meta')
-    && element.textContent.includes(expected);
+  const expected = getProjectTypeLabel(projectType, { short: true });
+  return (_content, element) => element?.classList?.contains('dash-col-type')
+    && element.tagName === 'TD'
+    && element.textContent === expected;
 }
 
 test('renders image management platform header', async () => {
-  global.fetch = jest.fn((input) => {
+  installFetch(jest.fn((input) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url.endsWith('/api/users/me')) {
       return Promise.resolve({ ok: false, status: 401, json: async () => ({ detail: 'Unauthorized' }) });
@@ -39,7 +82,7 @@ test('renders image management platform header', async () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] });
     }
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-  });
+  }));
   await act(async () => {
     render(
       <BrowserRouter>
@@ -53,9 +96,9 @@ test('renders image management platform header', async () => {
 });
 
 
-test('renders project dashboard cards with loaded image and part counts from the projects API', async () => {
+test('renders dashboard project rows with loaded image and part counts', async () => {
   window.scrollTo = jest.fn();
-  global.fetch = jest.fn((input) => {
+  installFetch(jest.fn((input) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url.endsWith('/api/users/me')) {
       return Promise.resolve({ ok: true, status: 200, json: async () => ({ email: 'counts@example.com' }) });
@@ -81,7 +124,7 @@ test('renders project dashboard cards with loaded image and part counts from the
       });
     }
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-  });
+  }));
 
   await act(async () => {
     render(
@@ -93,11 +136,13 @@ test('renders project dashboard cards with loaded image and part counts from the
   });
 
   expect(await screen.findByText('Dashboard Counts Project')).toBeInTheDocument();
-  expect(screen.getByText('Images: 7 • Parts: 3')).toBeInTheDocument();
+  const row = screen.getByTestId('project-row-counts-project');
+  const numbers = within(row).getAllByRole('cell').filter((cell) => cell.classList.contains('dash-col-num'));
+  expect(numbers.map((cell) => cell.textContent)).toEqual(['7', '3']);
 });
 
 test('stops loading and shows an error when projects request fails', async () => {
-  global.fetch = jest.fn((input) => {
+  installFetch(jest.fn((input) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url.endsWith('/api/users/me')) {
       return Promise.resolve({ ok: false, status: 401, json: async () => ({ detail: 'Unauthorized' }) });
@@ -109,7 +154,7 @@ test('stops loading and shows an error when projects request fails', async () =>
       return Promise.reject(new Error('Request timed out after 1ms'));
     }
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-  });
+  }));
 
   await act(async () => {
     render(
@@ -128,7 +173,7 @@ test('stops loading and shows an error when projects request fails', async () =>
 test('dashboard debug mode surfaces detailed persistent project load errors', async () => {
   jest.useFakeTimers();
   window.localStorage.setItem('vista.dashboard.debugMode', 'true');
-  global.fetch = jest.fn((input) => {
+  installFetch(jest.fn((input) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url.endsWith('/api/users/me')) {
       return Promise.resolve({ ok: false, status: 401, json: async () => ({ detail: 'Unauthorized' }) });
@@ -146,7 +191,7 @@ test('dashboard debug mode surfaces detailed persistent project load errors', as
       });
     }
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-  });
+  }));
 
   render(
     <BrowserRouter>
@@ -155,8 +200,8 @@ test('dashboard debug mode surfaces detailed persistent project load errors', as
   );
 
   expect(await screen.findByText(/database relation "projects" does not exist/i)).toBeInTheDocument();
-  expect(screen.getByText(/Debug details: GET \/api\/projects\/ failed with HTTP 500 Internal Server Error/i)).toBeInTheDocument();
-  expect(screen.getByText(/trace-500/i)).toBeInTheDocument();
+  // Debug mode shows the full diagnostic: status and the attempted call.
+  expect(screen.getByText(/Debug details: .*\(500 Internal Server Error\) \| attempted=GET \/api\/dashboard\/items/i)).toBeInTheDocument();
 
   act(() => {
     jest.advanceTimersByTime(6000);
@@ -177,7 +222,7 @@ describe('project type UI exposure', () => {
   ];
 
   function mockDashboardFetches({ projectType, userScenario }) {
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -229,7 +274,7 @@ describe('project type UI exposure', () => {
         status: 200,
         json: async () => ({}),
       });
-    });
+    }));
   }
 
   afterEach(() => {
@@ -240,7 +285,7 @@ describe('project type UI exposure', () => {
     const originalClipboard = navigator.clipboard;
     const writeText = jest.fn(() => Promise.resolve());
     let projects = [];
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -304,7 +349,7 @@ describe('project type UI exposure', () => {
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(
@@ -318,7 +363,8 @@ describe('project type UI exposure', () => {
       configurable: true,
       value: { writeText },
     });
-    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Open dashboard settings' }));
 
     const settingsModal = screen.getByRole('dialog', { name: 'Dashboard Settings' });
     const settingsBody = settingsModal.querySelector('.dashboard-settings-body');
@@ -373,7 +419,7 @@ describe('project type UI exposure', () => {
   test('ignores a stale dashboard preview after the database URL changes', async () => {
     const firstPreview = createDeferred();
     const previewBodies = [];
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -416,12 +462,13 @@ describe('project type UI exposure', () => {
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(<BrowserRouter><App /></BrowserRouter>);
     await screen.findByText('No projects yet');
-    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Open dashboard settings' }));
 
     const urlInput = await screen.findByLabelText('New Postgres URL');
     await user.clear(urlInput);
@@ -462,7 +509,7 @@ describe('project type UI exposure', () => {
 
   test('accepts exactly the displayed preview URL once and locks unsafe controls while switching', async () => {
     const acceptRequest = createDeferred();
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -497,12 +544,13 @@ describe('project type UI exposure', () => {
         return acceptRequest.promise;
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(<BrowserRouter><App /></BrowserRouter>);
     await screen.findByText('No projects yet');
-    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Open dashboard settings' }));
 
     const urlInput = await screen.findByLabelText('New Postgres URL');
     await user.clear(urlInput);
@@ -537,7 +585,7 @@ describe('project type UI exposure', () => {
   });
 
   test('reports a malformed dashboard preview response without rendering a broken modal', async () => {
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -565,12 +613,13 @@ describe('project type UI exposure', () => {
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(<BrowserRouter><App /></BrowserRouter>);
     await screen.findByText('No projects yet');
-    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Open dashboard settings' }));
 
     const urlInput = await screen.findByLabelText('New Postgres URL');
     await user.clear(urlInput);
@@ -584,7 +633,7 @@ describe('project type UI exposure', () => {
   test('keeps a successful database switch successful when the dashboard refresh fails', async () => {
     const refreshRequest = createDeferred();
     let projectLoadCount = 0;
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -616,12 +665,13 @@ describe('project type UI exposure', () => {
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(<BrowserRouter><App /></BrowserRouter>);
     await screen.findByText('No projects yet');
-    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Open dashboard settings' }));
     const urlInput = await screen.findByLabelText('New Postgres URL');
     await user.clear(urlInput);
     await user.type(urlInput, 'postgresql+asyncpg://accepted/db');
@@ -646,7 +696,7 @@ describe('project type UI exposure', () => {
   });
 
   test('handles a malformed accepted database URL without putting a non-string into state', async () => {
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -674,12 +724,13 @@ describe('project type UI exposure', () => {
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(<BrowserRouter><App /></BrowserRouter>);
     await screen.findByText('No projects yet');
-    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Open dashboard settings' }));
     const urlInput = await screen.findByLabelText('New Postgres URL');
     await user.clear(urlInput);
     await user.type(urlInput, 'postgresql+asyncpg://submitted/db');
@@ -709,7 +760,10 @@ describe('project type UI exposure', () => {
 
       await user.click(screen.getByRole('button', { name: 'New Project' }));
       await user.type(screen.getByLabelText('Project Name *'), `${projectType} ${userScenario.label} created`);
-      await user.type(screen.getByLabelText('Access Group *'), `${projectType.toLowerCase()}-${userScenario.label}-new-group`);
+      // The access group is chosen from the groups the user belongs to.
+      const groupSelect = screen.getByLabelText('Access Group *');
+      expect(groupSelect.tagName).toBe('SELECT');
+      expect(groupSelect).toHaveValue(`${projectType.toLowerCase()}-${userScenario.label}-group`);
       await user.selectOptions(screen.getByLabelText('Project Type *'), projectType);
       await user.click(screen.getByRole('button', { name: 'Create Project' }));
 
@@ -722,11 +776,14 @@ describe('project type UI exposure', () => {
           })
         );
       });
+      const post = global.fetch.mock.calls.find(([url, init]) => url === '/api/projects/' && init?.method === 'POST');
+      expect(JSON.parse(post[1].body).meta_group_id).toBe(`${projectType.toLowerCase()}-${userScenario.label}-group`);
     }
   );
 
-  test('keeps selected project type on dashboard card even if create response omits project_type', async () => {
-    global.fetch = jest.fn((input, init = {}) => {
+  test('keeps selected project type on the dashboard row even if create response omits project_type', async () => {
+    const created = [];
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -749,12 +806,15 @@ describe('project type UI exposure', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: async () => ([]),
+          json: async () => created,
         });
       }
 
       if (url.endsWith('/api/projects/') && method === 'POST') {
         const payload = JSON.parse(init.body || '{}');
+        // The stored project keeps the requested type even though this
+        // create response omits it.
+        created.push({ id: 'created-pt2', ...payload });
         return Promise.resolve({
           ok: true,
           status: 201,
@@ -768,7 +828,7 @@ describe('project type UI exposure', () => {
       }
 
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(
@@ -779,15 +839,22 @@ describe('project type UI exposure', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Create Your First Project' }));
     await user.type(screen.getByLabelText('Project Name *'), 'Test PT2');
-    await user.type(screen.getByLabelText('Access Group *'), 'pt2-group');
+    expect(screen.getByLabelText('Access Group *')).toHaveValue('pt2-group');
     await user.selectOptions(screen.getByLabelText('Project Type *'), 'PT2');
     await user.click(screen.getByRole('button', { name: 'Create Project' }));
 
     expect(await screen.findByText(projectTypeCardMatcher('PT2'))).toBeInTheDocument();
   });
 
-  test('shows project card ellipsis menu and allows editing name and type', async () => {
-    global.fetch = jest.fn((input, init = {}) => {
+  test('shows the project row menu and allows editing name and type', async () => {
+    let stored = {
+      id: 'project-1',
+      name: 'Project Original',
+      description: 'Original description',
+      meta_group_id: 'g1',
+      project_type: 'PT1',
+    };
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -810,20 +877,13 @@ describe('project type UI exposure', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: async () => ([
-            {
-              id: 'project-1',
-              name: 'Project Original',
-              description: 'Original description',
-              meta_group_id: 'g1',
-              project_type: 'PT1',
-            },
-          ]),
+          json: async () => ([stored]),
         });
       }
 
       if (url.endsWith('/api/projects/project-1') && method === 'PUT') {
         const payload = JSON.parse(init.body || '{}');
+        stored = { ...stored, ...payload };
         return Promise.resolve({
           ok: true,
           status: 200,
@@ -836,7 +896,7 @@ describe('project type UI exposure', () => {
       }
 
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(
@@ -847,7 +907,7 @@ describe('project type UI exposure', () => {
 
     await screen.findByText('Project Original');
     await user.click(screen.getByRole('button', { name: /Project options for Project Original/i }));
-    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }));
 
     const nameInput = screen.getByLabelText('Project Name *');
     await user.clear(nameInput);
@@ -871,7 +931,7 @@ describe('project type UI exposure', () => {
 
   test('opens a file chooser modal from the single Import Dashboard button', async () => {
     let projectsRequestCount = 0;
-    global.fetch = jest.fn((input, init = {}) => {
+    installFetch(jest.fn((input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       const method = (init.method || 'GET').toUpperCase();
 
@@ -912,7 +972,7 @@ describe('project type UI exposure', () => {
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
+    }));
 
     const user = userEvent.setup();
     render(
@@ -924,7 +984,8 @@ describe('project type UI exposure', () => {
     await screen.findByText('No projects yet');
     expect(screen.queryByRole('button', { name: 'Choose Import File' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Open dashboard settings' }));
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Open dashboard settings' }));
 
     const settingsModal = screen.getByRole('dialog', { name: 'Dashboard Settings' });
     expect(within(settingsModal).getByText('Dashboard Backup')).toBeInTheDocument();
@@ -965,7 +1026,7 @@ describe('project type UI exposure', () => {
       let isDeleted = false;
       const projectName = `${projectType} ${userScenario.label} delete target`;
       const expectedPhrase = `DELETE ${projectName}`;
-      global.fetch = jest.fn((input, init = {}) => {
+      installFetch(jest.fn((input, init = {}) => {
         const url = typeof input === 'string' ? input : input.url;
         const method = (init.method || 'GET').toUpperCase();
 
@@ -1018,7 +1079,7 @@ describe('project type UI exposure', () => {
         }
 
         return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-      });
+      }));
 
       const user = userEvent.setup();
       render(
@@ -1029,7 +1090,7 @@ describe('project type UI exposure', () => {
 
       await screen.findByText(new RegExp(`${projectType} ${userScenario.label} delete target`));
       await user.click(screen.getByRole('button', { name: new RegExp(`Project options for ${projectType} ${userScenario.label} delete target`) }));
-      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
 
       const deleteProjectButton = screen.getByRole('button', { name: 'Delete Project' });
       const confirmationCheckbox = screen.getByRole('checkbox', {
@@ -1061,7 +1122,7 @@ describe('project type UI exposure', () => {
   test.each(projectTypes.flatMap((projectType) => simulatedUsers.map((userScenario) => ({ projectType, userScenario }))))(
     'disables delete menu action when user lacks group authorization for $projectType $userScenario.label workflow',
     async ({ projectType, userScenario }) => {
-      global.fetch = jest.fn((input, init = {}) => {
+      installFetch(jest.fn((input, init = {}) => {
         const url = typeof input === 'string' ? input : input.url;
         const method = (init.method || 'GET').toUpperCase();
 
@@ -1095,7 +1156,7 @@ describe('project type UI exposure', () => {
           });
         }
         return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-      });
+      }));
 
       const user = userEvent.setup();
       render(
@@ -1106,7 +1167,7 @@ describe('project type UI exposure', () => {
 
       await screen.findByText(`${projectType} ${userScenario.label} restricted project`);
       await user.click(screen.getByRole('button', { name: new RegExp(`Project options for ${projectType} ${userScenario.label} restricted project`) }));
-      const deleteMenuItem = screen.getByRole('button', { name: 'Delete' });
+      const deleteMenuItem = screen.getByRole('menuitem', { name: 'Delete' });
       expect(deleteMenuItem).toBeDisabled();
       expect(deleteMenuItem).toHaveAttribute('title', 'You do not have access to delete this project.');
     }

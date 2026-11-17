@@ -15,10 +15,13 @@ JSON error body the routers return for HTTP errors.
 from __future__ import annotations
 
 import json
+import uuid
 import zipfile
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import IO, Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,6 +87,12 @@ async def import_project_backup_archive(
             project_paths = export_backup_service.project_backup_paths(
                 manifest, archive
             )
+            folder_map, folders_created = await restore_dashboard_folders(
+                db,
+                export_backup_service.load_dashboard_folders(archive),
+                user_email=current_user.email,
+                can_access_group=can_access_group,
+            )
             imported_projects = []
             for path in project_paths:
                 payload = export_backup_service.load_project_backup_payload(
@@ -98,6 +107,7 @@ async def import_project_backup_archive(
                         mode=mode,
                         target_project=None,
                         can_access_group=can_access_group,
+                        folder_map=folder_map,
                     )
                 )
     except zipfile.BadZipFile as exc:
@@ -115,6 +125,7 @@ async def import_project_backup_archive(
         "format": manifest.get("format"),
         "projects_created": imported_projects,
         "project_count": len(imported_projects),
+        "folders_created": folders_created,
         "dashboard_state": dashboard_state,
     }
 
@@ -173,3 +184,83 @@ async def import_project_backup_archive_into_active_project(
         "project": imported_project,
         "project_count": 1,
     }
+
+
+async def restore_dashboard_folders(
+    db: AsyncSession,
+    folders: list[dict],
+    *,
+    user_email: str,
+    can_access_group: CanAccessGroup,
+) -> tuple[dict[str, tuple[uuid.UUID, str]], int]:
+    """Recreate backup folders with new IDs.
+
+    Returns ``(old_id -> (new_id, meta_group_id), count)``. Folder rows are
+    validated like API input (names cleaned; invalid rows skipped). Folders in
+    groups the importer cannot access are skipped, a child whose parent is in
+    another access group (or was skipped) is skipped with its subtree, and a
+    name clash with an existing sibling gets " (Imported)", " (Imported 2)", ...
+    appended. Archive flags are kept. Parents come before children.
+    """
+    from core import locks
+    from schemas.folders import FOLDER_DESCRIPTION_MAX, clean_folder_name
+    from services.dashboard import name_key
+
+    folder_map: dict[str, tuple[uuid.UUID, str]] = {}
+    created = 0
+    for row in folders[: 10_000]:
+        old_id = str(row.get("id") or "")
+        group = str(row.get("meta_group_id") or "").strip()
+        try:
+            name = clean_folder_name(str(row.get("name") or ""))
+        except ValueError:
+            continue
+        if not old_id or not group or not can_access_group(user_email, group):
+            continue
+        parent_old = row.get("parent_id")
+        parent_id = None
+        if parent_old:
+            parent_entry = folder_map.get(str(parent_old))
+            if parent_entry is None or parent_entry[1] != group:
+                continue  # Parent skipped or in another access group.
+            parent_id = parent_entry[0]
+        depth = len(await locks.folder_ancestors(db, parent_id)) if parent_id else 0
+        if depth + 1 > locks.MAX_FOLDER_DEPTH:
+            continue
+        candidate = name
+        suffix = 1
+        while True:
+            exists = (
+                await db.execute(
+                    select(models.DashboardFolder.id).where(
+                        models.DashboardFolder.meta_group_id == group,
+                        models.DashboardFolder.name_key == name_key(candidate),
+                        models.DashboardFolder.parent_id.is_(None)
+                        if parent_id is None
+                        else models.DashboardFolder.parent_id == parent_id,
+                    )
+                )
+            ).first()
+            if exists is None:
+                break
+            label = "Imported" if suffix == 1 else f"Imported {suffix}"
+            candidate = f"{name[: 255 - len(label) - 3]} ({label})"
+            suffix += 1
+        description = str(row.get("description") or "")[:FOLDER_DESCRIPTION_MAX] or None
+        archived = bool(row.get("is_archived", False))
+        folder = models.DashboardFolder(
+            meta_group_id=group,
+            parent_id=parent_id,
+            name=candidate,
+            name_key=name_key(candidate),
+            description=description,
+            created_by=user_email,
+            is_archived=archived,
+            archived_at=datetime.now(UTC) if archived else None,
+            archived_by=user_email if archived else None,
+        )
+        db.add(folder)
+        await db.flush()
+        folder_map[old_id] = (folder.id, group)
+        created += 1
+    return folder_map, created

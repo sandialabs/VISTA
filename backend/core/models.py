@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
+from . import activity as _activity  # noqa: F401  (registers the commit hook)
 from .database import Base
 
 
@@ -46,6 +47,63 @@ class User(Base):
     reviews = relationship("ImageReview", back_populates="reviewer")
 
 
+class DashboardFolder(Base):
+    """A folder on the dashboard: a directory inside one access group.
+
+    Folders nest through ``parent_id`` (NULL = the access-group root). A folder
+    is *locked* when it, or any ancestor, is archived; see ``core.locks``.
+    """
+
+    __tablename__ = "dashboard_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meta_group_id = Column(String(255), nullable=False, index=True)
+    parent_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_folders.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    name = Column(String(255), nullable=False)
+    # Lower-cased, trimmed name; sibling uniqueness is enforced on it.
+    name_key = Column(String(1024), nullable=False)
+    description = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # The folder's own edits and moves into or out of it. The effective
+    # "last edited" also folds in descendant projects (computed on read).
+    last_activity_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True, index=True
+    )
+    is_archived = Column(Boolean, default=False, nullable=False, server_default=text("false"))
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archived_by = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        # Siblings under a parent folder.
+        Index(
+            "uix_dashboard_folders_sibling_name",
+            "meta_group_id",
+            "parent_id",
+            "name_key",
+            unique=True,
+            postgresql_where=text("parent_id IS NOT NULL"),
+            sqlite_where=text("parent_id IS NOT NULL"),
+        ),
+        # Siblings at the access-group root (NULL parents never collide in a
+        # plain unique index).
+        Index(
+            "uix_dashboard_folders_root_name",
+            "meta_group_id",
+            "name_key",
+            unique=True,
+            postgresql_where=text("parent_id IS NULL"),
+            sqlite_where=text("parent_id IS NULL"),
+        ),
+    )
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -59,6 +117,22 @@ class Project(Base):
     project_type = Column(String(16), nullable=False, server_default="PT1", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Dashboard folder (NULL = access-group root). Folder deletion removes the
+    # projects through the application so every project delete is audited;
+    # the FK never cascades.
+    folder_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_folders.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # Any data change inside the project (see core.activity).
+    last_activity_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True, index=True
+    )
+    # Unicode-casefolded "name\ndescription" for dashboard keyword search
+    # (SQL lower() is ASCII-only on SQLite and differs from casefold()).
+    search_text = Column(Text, nullable=True)
 
     # Relationships
     images = relationship(
@@ -678,3 +752,20 @@ class UserGroupSnapshot(Base):
     email = Column(String(255), primary_key=True)
     group_id = Column(String(255), primary_key=True)
     asserted_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+def search_fold(*parts: str | None) -> str:
+    """Normalize text for keyword search: NFKC + casefold."""
+    import unicodedata
+
+    joined = "\n".join(p for p in parts if p)
+    return unicodedata.normalize("NFKC", joined).casefold()
+
+
+from sqlalchemy import event as _event  # noqa: E402
+
+
+@_event.listens_for(Project, "before_insert")
+@_event.listens_for(Project, "before_update")
+def _project_search_text(_mapper, _connection, target):
+    target.search_text = search_fold(target.name, target.description)

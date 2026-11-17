@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 import zipfile
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -166,6 +167,22 @@ async def existing_value_counts(
     return counts
 
 
+def _restored_folder_for_group(
+    folder_map: dict | None, source_folder_id, target_group: str
+) -> uuid.UUID | None:
+    """The restored folder for a project, only if it is in the project's group.
+
+    ``folder_map`` values are ``(new_folder_id, meta_group_id)``; a folder in a
+    different access group is ignored (the project lands at the group root), so
+    a crafted backup can never link projects across access groups.
+    """
+    entry = (folder_map or {}).get(str(source_folder_id or ""))
+    if not entry:
+        return None
+    folder_id, folder_group = entry
+    return folder_id if folder_group == target_group else None
+
+
 async def import_project_backup_payload(
     *,
     archive: zipfile.ZipFile,
@@ -175,8 +192,13 @@ async def import_project_backup_payload(
     mode: str,
     can_access_group: Callable[[str, str], bool],
     target_project: models.Project | None = None,
+    folder_map: dict[str, uuid.UUID] | None = None,
 ) -> dict:
-    """Import one project backup payload into a new or existing project."""
+    """Import one project backup payload into a new or existing project.
+
+    ``folder_map`` maps backup folder IDs to restored folders; a project whose
+    folder was not restored lands at the access-group root.
+    """
     source_project = payload["project"]
     if target_project is None:
         target_group = source_project.get("meta_group_id") or ""
@@ -208,6 +230,10 @@ async def import_project_backup_payload(
             created_by=current_user.email,
             is_archived=bool(source_project.get("is_archived", False)),
             archived_at=None,
+            folder_id=_restored_folder_for_group(
+                folder_map, source_project.get("folder_id"), target_group
+            ),
+            last_activity_at=datetime.now(UTC),
         )
         db.add(db_project)
         await db.flush()

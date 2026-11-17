@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useCallback, useState, useEffect, Suspense } from 'react';
 import {
   Navigate,
   Route,
@@ -9,7 +9,6 @@ import {
 import './App.css';
 import DashboardHome from './features/dashboard/components/DashboardHome';
 import useDashboardData from './features/dashboard/useDashboardData';
-import useDashboardProjectActions from './features/dashboard/useDashboardProjectActions';
 import lazyWithRetry from './utils/lazyWithRetry';
 
 // Lazy load components
@@ -38,83 +37,38 @@ function App() {
   // const navigate = useNavigate(); // Commented out - not currently used
   const [toast, setToast] = useState(null);
   const [showDashboardSettings, setShowDashboardSettings] = useState(false);
-  // const [newProject, setNewProject] = useState({  // Commented out - not currently used
-  //   name: '',
-  //   description: '',
-  //   meta_group_id: ''
-  // });
   
-  // Function to show a toast notification
-  const showToast = (message, type = 'error', options = {}) => {
+  // Stable so hooks can depend on them without re-running.
+  const showToast = useCallback((message, type = 'error', options = {}) => {
     setToast({ message, type, persist: Boolean(options.persist) });
-  };
+  }, []);
 
-  // Function to hide the toast
-  const hideToast = () => {
+  const hideToast = useCallback(() => {
     setToast(null);
-  };
+  }, []);
 
   const {
-    projects,
-    setProjects,
-    loading,
-    setLoading,
     currentUser,
+    userLoaded,
     currentUserGroups,
     showArchived,
     setShowArchived,
     dashboardDebugMode,
     handleDashboardDebugModeChange,
-    loadProjects,
   } = useDashboardData(showToast);
 
-  const {
-    deletingProject,
-    editingProject,
-    handleArchiveToggle,
-    handleConfirmDeleteProject,
-    handleCreateProject,
-    handleDeleteProject,
-    handleEditProject,
-    handleUpdateProject,
-    setDeletingProject,
-    setEditingProject,
-    setShowModal,
-    showModal,
-  } = useDashboardProjectActions({
-    currentUserGroups,
-    loadProjects,
-    setLoading,
-    setProjects,
-    showArchived,
-    showToast,
-  });
   const homePage = (
     <DashboardHome
       currentUser={currentUser}
+      userLoaded={userLoaded}
       currentUserGroups={currentUserGroups}
       dashboardDebugMode={dashboardDebugMode}
-      deletingProject={deletingProject}
-      editingProject={editingProject}
-      handleArchiveToggle={handleArchiveToggle}
-      handleConfirmDeleteProject={handleConfirmDeleteProject}
-      handleCreateProject={handleCreateProject}
       handleDashboardDebugModeChange={handleDashboardDebugModeChange}
-      handleDeleteProject={handleDeleteProject}
-      handleEditProject={handleEditProject}
-      handleUpdateProject={handleUpdateProject}
       hideToast={hideToast}
-      loadProjects={loadProjects}
-      loading={loading}
-      projects={projects}
-      setDeletingProject={setDeletingProject}
-      setEditingProject={setEditingProject}
       setShowArchived={setShowArchived}
       setShowDashboardSettings={setShowDashboardSettings}
-      setShowModal={setShowModal}
       showArchived={showArchived}
       showDashboardSettings={showDashboardSettings}
-      showModal={showModal}
       showToast={showToast}
       toast={toast}
     />
@@ -129,7 +83,7 @@ function App() {
         path="/project/:id"
         element={
           <Suspense fallback={<div className="loading-container">Loading project...</div>}>
-            <Project currentUserGroups={currentUserGroups} />
+            <Project currentUserGroups={currentUserGroups} currentUser={currentUser} />
           </Suspense>
         }
       />

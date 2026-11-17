@@ -303,6 +303,8 @@ async def collect_project_backup_payload(
             "archived_at": db_project.archived_at,
             "created_at": db_project.created_at,
             "updated_at": db_project.updated_at,
+            "folder_id": str(db_project.folder_id) if db_project.folder_id else None,
+            "last_activity_at": db_project.last_activity_at,
         },
         "users": [
             {

@@ -17,7 +17,7 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import StaticTokenVerifier
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core import group_snapshot, models
+from core import group_snapshot, locks, models
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.group_auth_helper import is_user_in_group
@@ -103,6 +103,46 @@ async def get_or_create_user(db: AsyncSession, username: str) -> models.User:
     return user
 
 
+async def _locked_error(db, project) -> dict[str, Any] | None:
+    """Error payload when the project is archived or inside an archived folder;
+    otherwise mark the coming change for ``last_activity_at``."""
+    from fastapi import HTTPException
+
+    from utils.dependencies import require_writable_project
+
+    try:
+        await require_writable_project(db, project)
+    except HTTPException as exc:
+        return {"error": str(exc.detail)}
+    return None
+
+
+def _folder_path(index, project) -> list[dict[str, str]]:
+    return [{"id": str(f.id), "name": f.name} for f in index.path(project.folder_id)]
+
+
+def _project_summary(project, index) -> dict[str, Any]:
+    locked = index.effectively_archived()
+    return {
+        "project_id": str(project.id),
+        "id": str(project.id),
+        "name": project.name,
+        "description": project.description,
+        "meta_group_id": project.meta_group_id,
+        "project_type": project.project_type,
+        "is_archived": bool(project.is_archived),
+        "effective_archived": bool(project.is_archived)
+        or (project.folder_id is not None and project.folder_id in locked),
+        "folder_id": str(project.folder_id) if project.folder_id else None,
+        "folder_path": _folder_path(index, project),
+        "created_at": project.created_at.isoformat() if project.created_at else None,
+        "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        "last_activity_at": project.last_activity_at.isoformat()
+        if project.last_activity_at
+        else None,
+    }
+
+
 @mcp.tool()
 async def get_projects(
     username: str, skip: int = 0, limit: int = 100
@@ -130,18 +170,9 @@ async def get_projects(
         user_schema = user_schemas.User.model_validate(user)
 
         projects = await get_accessible_projects_for_user(db, user_schema, skip, limit)
+        index = await locks.load_folder_index(db, {p.meta_group_id for p in projects})
 
-        return [
-            {
-                "project_id": str(p.id),
-                "name": p.name,
-                "description": p.description,
-                "meta_group_id": p.meta_group_id,
-                "created_at": p.created_at.isoformat() if p.created_at else None,
-                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-            }
-            for p in projects
-        ]
+        return [_project_summary(p, index) for p in projects]
 
 
 @mcp.tool()
@@ -171,18 +202,8 @@ async def get_project(username: str, project_id: ProjectUUID) -> dict[str, Any]:
         if not is_user_in_group(user.email, project.meta_group_id):
             return {"error": "Access denied to this project"}
 
-        return {
-            "id": str(project.id),
-            "name": project.name,
-            "description": project.description,
-            "meta_group_id": project.meta_group_id,
-            "created_at": project.created_at.isoformat()
-            if project.created_at
-            else None,
-            "updated_at": project.updated_at.isoformat()
-            if project.updated_at
-            else None,
-        }
+        index = await locks.load_folder_index(db, [project.meta_group_id])
+        return _project_summary(project, index)
 
 
 @mcp.tool()
@@ -352,6 +373,10 @@ async def add_image_metadata(
         if not is_user_in_group(user.email, project.meta_group_id):
             return {"error": "Access denied to this image"}
 
+        locked = await _locked_error(db, project)
+        if locked:
+            return locked
+
         # Update metadata directly using SQLAlchemy
         from sqlalchemy import update
 
@@ -444,6 +469,10 @@ async def add_image_classification(
 
         if not is_user_in_group(user.email, project.meta_group_id):
             return {"error": "Access denied"}
+
+        locked = await _locked_error(db, project)
+        if locked:
+            return locked
 
         # Create classification
         classification_create = image_class_schemas.ImageClassificationCreate(
@@ -541,6 +570,10 @@ async def add_image_comment(username: str, image_id: str, text: str) -> dict[str
 
         if not is_user_in_group(user.email, project.meta_group_id):
             return {"error": "Access denied"}
+
+        locked = await _locked_error(db, project)
+        if locked:
+            return locked
 
         # Create comment
         comment_create = comment_schemas.ImageCommentCreate(
@@ -684,6 +717,10 @@ async def add_project_metadata(
 
         if not is_user_in_group(user.email, project.meta_group_id):
             return {"error": "Access denied"}
+
+        locked = await _locked_error(db, project)
+        if locked:
+            return locked
 
         metadata_create = project_metadata_schemas.ProjectMetadataCreate(
             project_id=pid, key=key, value=value

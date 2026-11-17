@@ -28,6 +28,7 @@ from routers import (
     comments,
     dashboard_settings,
     export,
+    folders,
     groups,
     image_classes,
     images,
@@ -357,6 +358,7 @@ def create_app() -> FastAPI:
     api_router.include_router(inspection_ncrs.router)
     api_router.include_router(analyze.router)
     api_router.include_router(dashboard_settings.router)
+    api_router.include_router(folders.router)
 
     # Add health check endpoint (no auth required)
     @app.get("/api/health")

@@ -33,6 +33,7 @@ from services.export import storage as export_storage_service
 from services.project_report_images import build_project_report_with_images_pdf
 from utils.dependencies import (
     ReadableProject,
+    WritableProject,
     get_accessible_projects_for_user,
     get_current_user,
 )
@@ -387,7 +388,7 @@ async def _download_s3_backup(s3_url: str) -> UploadFile:
 @router.post("/projects/{project_id}/import/s3")
 async def import_project_backup_into_active_project_from_s3(
     project_id: uuid.UUID,
-    db_project: ReadableProject,
+    db_project: WritableProject,
     payload: export_schemas.S3ProjectImportRequest,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -405,7 +406,7 @@ async def import_project_backup_into_active_project_from_s3(
 @router.post("/projects/{project_id}/import")
 async def import_project_backup_into_active_project(
     project_id: uuid.UUID,
-    db_project: ReadableProject,
+    db_project: WritableProject,
     file: UploadFile = File(...),
     mode: str = Form("append_active"),
     confirmation: str = Form(""),

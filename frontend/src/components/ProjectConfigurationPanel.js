@@ -34,6 +34,7 @@ import FilenameConventionPanel from './projectConfiguration/FilenameConventionPa
 import HotkeysConfigurationPanel from './projectConfiguration/HotkeysConfigurationPanel';
 import NcrConfigurationPanel from './projectConfiguration/NcrConfigurationPanel';
 import TransientStatusBanner from './TransientStatusBanner';
+import { isProjectReadOnly } from '../utils/projectLock';
 
 const CONFIGURATION_SUBTABS = [
   { id: 'general', label: 'General', sectionKey: 'project_configuration.general', panelId: 'configuration-general-panel' },
@@ -65,7 +66,7 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
   onProjectUpdated = null,
   onActiveSubtabChange = null,
 }, ref) {
-  const readOnly = project?.is_archived === true;
+  const readOnly = isProjectReadOnly(project);
 
   const {
     config,
