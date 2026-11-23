@@ -649,6 +649,27 @@ async def _delete_inspection_part_metadata_fields(
     )
 
 
+async def _detach_part_ncrs(
+    db: AsyncSession, *, project_id: uuid.UUID, part_id: uuid.UUID | None = None
+) -> None:
+    """Null NCR part links before parts are deleted.
+
+    NCRs outlive their part for traceability (they keep part_serial_number).
+    The FK is ON DELETE SET NULL, but not every supported database enforces
+    foreign keys, so detach explicitly.
+    """
+    statement = (
+        update(models.InspectionNcr)
+        .where(models.InspectionNcr.project_id == project_id)
+        .values(part_id=None)
+    )
+    if part_id is not None:
+        statement = statement.where(models.InspectionNcr.part_id == part_id)
+    else:
+        statement = statement.where(models.InspectionNcr.part_id.is_not(None))
+    await db.execute(statement)
+
+
 async def delete_inspection_part(
     db: AsyncSession,
     project_id: uuid.UUID,
@@ -670,6 +691,7 @@ async def delete_inspection_part(
         project_id=project_id,
         part_id=part_id,
     )
+    await _detach_part_ncrs(db, project_id=project_id, part_id=part_id)
     result = await db.execute(
         delete(models.InspectionPart).where(
             models.InspectionPart.project_id == project_id,
@@ -701,6 +723,7 @@ async def delete_all_inspection_parts(
     # derived-field table is absent because migrations have not caught up, keep
     # the part deletion itself available.
     await _delete_inspection_part_metadata_fields(db, project_id=project_id)
+    await _detach_part_ncrs(db, project_id=project_id)
     result = await db.execute(
         delete(models.InspectionPart).where(
             models.InspectionPart.project_id == project_id,

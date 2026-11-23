@@ -355,6 +355,41 @@ describe('Project image summary loading', () => {
     });
   });
 
+  test('shows the folder breadcrumb, a locked-folder banner, and records the project as recent', async () => {
+    window.localStorage.clear();
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation((url, options) => {
+      if (url === '/api/projects/proj-1') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: 'proj-1',
+            name: 'Large Image Project',
+            project_type: 'PT1',
+            meta_group_id: 'line-group',
+            is_archived: false,
+            effective_archived: true,
+            locked_by_folder_id: 'f-top',
+            folder_id: 'f-sub',
+            folder_path: [{ id: 'f-top', name: 'Top' }, { id: 'f-sub', name: 'Sub' }],
+          }),
+        });
+      }
+      return defaultFetch(url, options);
+    });
+
+    render(<Project currentUser={{ email: 'viewer@example.com' }} />);
+
+    const crumbs = await screen.findByRole('navigation', { name: 'Project location' });
+    expect(crumbs).toHaveTextContent('line-group/Top/Sub');
+    expect(screen.getByRole('note')).toHaveTextContent('inside an archived folder');
+    fireEvent.click(screen.getByRole('link', { name: 'Top' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/?ag=line-group&folder=f-top');
+    fireEvent.click(screen.getByRole('button', { name: /Back to Dashboard/ }));
+    expect(mockNavigate).toHaveBeenCalledWith('/?ag=line-group&folder=f-sub');
+    expect(JSON.parse(window.localStorage.getItem('vista.dashboard.recents.viewer@example.com.line-group'))).toEqual(['proj-1']);
+  });
+
   test('loads lightweight project counts without fetching parts, exports, or image collections', async () => {
     render(<Project />);
 

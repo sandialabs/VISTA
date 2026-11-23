@@ -4656,9 +4656,10 @@ def test_delete_all_parts_requires_project_access(client):
     assert [part["serial_number"] for part in remaining_parts.json()] == ["SN-ACCESS"]
 
 
-def test_delete_all_parts_matches_single_part_delete_behavior_for_archived_projects(
+def test_delete_all_parts_is_refused_for_archived_projects_like_single_part_delete(
     client,
 ):
+    """Archived projects are read-only for every write, bulk part deletion included."""
     project_id, headers = _create_project_for_part_image_tests(
         client, "Archived bulk delete project"
     )
@@ -4676,8 +4677,10 @@ def test_delete_all_parts_matches_single_part_delete_behavior_for_archived_proje
     delete_response = client.delete(
         f"/api/projects/{project_id}/parts", headers=headers
     )
-    assert delete_response.status_code == 204, delete_response.text
-    assert client.get(f"/api/projects/{project_id}/parts", headers=headers).json() == []
+    assert delete_response.status_code == 403, delete_response.text
+    assert delete_response.json()["detail"] == ARCHIVED_PROJECT_DETAIL
+    parts = client.get(f"/api/projects/{project_id}/parts", headers=headers).json()
+    assert [p["serial_number"] for p in parts] == ["SN-ARCHIVED"]
 
 
 def test_overlay_assignment_maps_overlay_to_base_image(client):

@@ -6,6 +6,7 @@ import {
   isValidOptionalProjectCalibration,
   normalizeLower,
 } from './configurationSchema';
+import { isValidOptionalNcrConfiguration } from './ncrConfiguration';
 
 function isValidOptionalPt3GuideSettings(value) {
   if (value === undefined) return true;
@@ -105,7 +106,8 @@ function hasValidSettingsFields(clonedConfig) {
       Number.isInteger(clonedConfig.display_settings.inspection_tile_max_columns)
     ) &&
     isValidOptionalPt3GuideSettings(clonedConfig.display_settings.pt3_3d_guides) &&
-    isValidOptionalProjectCalibration(clonedConfig.calibration)
+    isValidOptionalProjectCalibration(clonedConfig.calibration) &&
+    isValidOptionalNcrConfiguration(clonedConfig.ncr_configuration)
   );
 }
 

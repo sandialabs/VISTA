@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
+from . import activity as _activity  # noqa: F401  (registers the commit hook)
 from .database import Base
 
 
@@ -46,6 +47,63 @@ class User(Base):
     reviews = relationship("ImageReview", back_populates="reviewer")
 
 
+class DashboardFolder(Base):
+    """A folder on the dashboard: a directory inside one access group.
+
+    Folders nest through ``parent_id`` (NULL = the access-group root). A folder
+    is *locked* when it, or any ancestor, is archived; see ``core.locks``.
+    """
+
+    __tablename__ = "dashboard_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meta_group_id = Column(String(255), nullable=False, index=True)
+    parent_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_folders.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    name = Column(String(255), nullable=False)
+    # Lower-cased, trimmed name; sibling uniqueness is enforced on it.
+    name_key = Column(String(1024), nullable=False)
+    description = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # The folder's own edits and moves into or out of it. The effective
+    # "last edited" also folds in descendant projects (computed on read).
+    last_activity_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True, index=True
+    )
+    is_archived = Column(Boolean, default=False, nullable=False, server_default=text("false"))
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archived_by = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        # Siblings under a parent folder.
+        Index(
+            "uix_dashboard_folders_sibling_name",
+            "meta_group_id",
+            "parent_id",
+            "name_key",
+            unique=True,
+            postgresql_where=text("parent_id IS NOT NULL"),
+            sqlite_where=text("parent_id IS NOT NULL"),
+        ),
+        # Siblings at the access-group root (NULL parents never collide in a
+        # plain unique index).
+        Index(
+            "uix_dashboard_folders_root_name",
+            "meta_group_id",
+            "name_key",
+            unique=True,
+            postgresql_where=text("parent_id IS NULL"),
+            sqlite_where=text("parent_id IS NULL"),
+        ),
+    )
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -59,6 +117,22 @@ class Project(Base):
     project_type = Column(String(16), nullable=False, server_default="PT1", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Dashboard folder (NULL = access-group root). Folder deletion removes the
+    # projects through the application so every project delete is audited;
+    # the FK never cascades.
+    folder_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_folders.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # Any data change inside the project (see core.activity).
+    last_activity_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True, index=True
+    )
+    # Unicode-casefolded "name\ndescription" for dashboard keyword search
+    # (SQL lower() is ASCII-only on SQLite and differs from casefold()).
+    search_text = Column(Text, nullable=True)
 
     # Relationships
     images = relationship(
@@ -307,6 +381,103 @@ class DataInstance(Base):
     )
     reviews = relationship(
         "ImageReview", back_populates="image", cascade="all, delete-orphan"
+    )
+
+
+class InspectionNcr(Base):
+    """A nonconformance report raised against an inspection part.
+
+    Failure and disposition codes are snapshotted (code and description) so a
+    later edit to the project's NCR configuration never changes a recorded
+    report. ``part_id`` is nulled rather than cascaded when a part is deleted,
+    and ``part_serial_number`` keeps the report traceable.
+    """
+
+    __tablename__ = "inspection_ncrs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("inspection_parts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    part_serial_number = Column(String(255), nullable=False)
+    ncr_number = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, server_default="open")
+    comment = Column(Text, nullable=False)
+    failure_code = Column(String(64), nullable=False)
+    failure_code_description = Column(String(255), nullable=False, server_default="")
+    disposition_code = Column(String(64), nullable=False)
+    disposition_code_description = Column(
+        String(255), nullable=False, server_default=""
+    )
+    disposition_instructions = Column(Text, nullable=False)
+    version = Column(Integer, nullable=False, server_default="1")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(255), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_by = Column(String(255), nullable=False)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(String(255), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(String(255), nullable=True)
+
+    history = relationship(
+        "InspectionNcrHistory",
+        back_populates="ncr",
+        cascade="all, delete-orphan",
+        order_by="InspectionNcrHistory.version",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "ncr_number", name="uix_inspection_ncrs_project_number"
+        ),
+        CheckConstraint(
+            "status IN ('open', 'approved')", name="ck_inspection_ncrs_status"
+        ),
+    )
+
+
+class InspectionNcrHistory(Base):
+    """Append-only change history for a nonconformance report."""
+
+    __tablename__ = "inspection_ncr_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ncr_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("inspection_ncrs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    # created, updated, approved, deleted
+    action = Column(String(32), nullable=False)
+    actor = Column(String(255), nullable=False)
+    at = Column(DateTime(timezone=True), nullable=False)
+    # {field: {"from": old, "to": new}} for every field the action changed.
+    changes = Column(JSON, nullable=False)
+
+    ncr = relationship("InspectionNcr", back_populates="history")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "ncr_id", "version", name="uix_inspection_ncr_history_ncr_version"
+        ),
     )
 
 
@@ -581,3 +752,20 @@ class UserGroupSnapshot(Base):
     email = Column(String(255), primary_key=True)
     group_id = Column(String(255), primary_key=True)
     asserted_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+def search_fold(*parts: str | None) -> str:
+    """Normalize text for keyword search: NFKC + casefold."""
+    import unicodedata
+
+    joined = "\n".join(p for p in parts if p)
+    return unicodedata.normalize("NFKC", joined).casefold()
+
+
+from sqlalchemy import event as _event  # noqa: E402
+
+
+@_event.listens_for(Project, "before_insert")
+@_event.listens_for(Project, "before_update")
+def _project_search_text(_mapper, _connection, target):
+    target.search_text = search_fold(target.name, target.description)

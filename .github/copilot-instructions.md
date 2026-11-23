@@ -238,6 +238,21 @@ The production `Dockerfile` installs a prebuilt `opencv-python-headless` wheel f
 
 - Annotation overlays (tile, fullscreen, MPR) use `AnnotationOverlaySvg` and a uniform design-unit frame from `frontend/src/features/inspectionWorkbench/annotationOverlayFrame.js`, so line thickness, handle dots, and label text are identical across image aspect ratios. Pass `frame` to the annotation renderers and project coordinates with the frame helpers; never wrap annotation content in a non-uniform `scale(w/1000 h/1000)` group.
 
+## Inspection Nonconformance Reports (NCRs)
+
+- **Codes:** failure and disposition codes (`{code, description}`) live in the project config under `ncr_configuration`, edited in the Project Configuration > NCR Configuration subtab. They are copied with config clone.
+- **Storage:** NCRs and their append-only history are DB tables (`inspection_ncrs`, `inspection_ncr_history`), served by `backend/routers/inspection_ncrs.py` and `backend/services/inspection/ncrs.py`.
+- **Behaviour:**
+  - Per-project numbers (`NCR-0001`), never reused.
+  - Each NCR stores a copy of its codes.
+  - `expected_version` optimistic concurrency (stale version returns 409).
+  - Editing revokes approval; delete is a soft delete.
+  - Users come from the server, never the client.
+- **Approval rules:** put any future role checks in `ensure_can_approve_ncr`.
+- **Frontend:** the Inspection `NCR` tab (`frontend/src/features/inspectionWorkbench/NcrPane.js`) sits next to Annotations. Keep right-tab selection out of the flexlayout model memo deps, or dragged splitters reset.
+- **Reports and backups:** reports (`ncrs` in report JSON v3, NCR PDF pages) and export bundles (`ncrs.toml`, `project-backup.json` with history) include NCRs. Backup import restores them, renumbering when appending into a project that already has NCRs.
+- **ui_sections:** the backend config schema now persists `ui_sections`; they were previously dropped on save.
+
 ## Container Image Hardening (Phased)
 
 - Phase 1: the production `Dockerfile` builds the React bundle in a separate `ui` stage (`ubi9/nodejs-22`, pinned by digest, `ARG UBI_NODEJS`). Only `/app/frontend/build` is copied into `final` (`COPY --from=ui`). Node and npm are no longer installed in `base`, so the runtime image has none (about 300 fewer High findings). Do not add `nodejs`/`npm` back to `base`; `test_container_build_config.py` guards this.

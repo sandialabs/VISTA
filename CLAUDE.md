@@ -143,6 +143,7 @@ Key models and their relationships:
   - **MLArtifact**: Binary outputs stored in S3 (visualizations, processed images)
 - **ImageReview**: Review verification records for images (statuses: pass, reject_pending, reject_confirmed)
 - **ProjectMetadata**: Key-value metadata for projects
+- **InspectionNcr** / **InspectionNcrHistory**: Nonconformance reports on inspection parts and their append-only change history (see "Inspection Nonconformance Reports")
 - **ApiKey**: API key authentication for programmatic access
 
 ### Frontend Structure
@@ -478,6 +479,26 @@ The production `Dockerfile` installs a prebuilt `opencv-python-headless` wheel f
 - Tile, fullscreen, and MPR annotation overlays render through `AnnotationOverlaySvg` (`features/inspectionWorkbench/AnnotationOverlaySvg.js`). The SVG viewBox is the image's pixel size; annotation content is drawn in "design units" inside a single uniform `scale(k)` group, where 1000 units equal the short side of the measured overlay container (`getAnnotationOverlayFrame` in `annotationOverlayFrame.js`, ResizeObserver-driven, square-container fallback when unmeasured).
 - Renderers (`renderAnnotationOverlay`, `renderTileAnnotationEditingTargets`, `FullscreenMeasurementLines`, `FullscreenBoxHandles`, `MprSliceEditHandles`) take a `frame` prop and project image coordinates with `projectAnnotationLine` / `projectAnnotationBox` / the `*ViewBoxPosition(geometry, ..., frame)` helpers. Square images render exactly as before.
 - Do not reintroduce a non-uniform `scale(w/1000 h/1000)` group or per-text counter-scaling; that squished endpoint/corner dots into ovals, changed line thickness by orientation, and changed text size with image aspect ratio.
+
+## Inspection Nonconformance Reports (NCRs)
+
+- **Configuration:** failure and disposition codes are `{code, description}` lists in the project config under `ncr_configuration` (`InspectionProjectNcrConfiguration` in `schemas/inspection_workspace.py`). Codes are trimmed, case-insensitively unique, at most 64 characters, and contain no control characters. They are edited in Project Configuration > NCR Configuration (`components/projectConfiguration/NcrConfigurationPanel.js`; helpers in `features/projectConfiguration/ncrConfiguration.js`). Config clone copies them because it copies the whole config. Configs stored before NCRs get empty lists on GET.
+- **Data:** NCRs live in `inspection_ncrs` and their append-only change history in `inspection_ncr_history` (migration `20261113_0013`).
+  - NCRs are numbered per project (`NCR-0001`; numbers are never reused, including after soft delete). The project row is locked `FOR NO KEY UPDATE` while a number is assigned, with the unique constraint as a backstop.
+  - Each NCR stores a copy (snapshot) of the code and description chosen, so later config edits never change a recorded NCR. Only a newly chosen code must currently be configured.
+  - Every mutation bumps `version` and writes one history row (`created`/`updated`/`approved`/`deleted`) with `{field: {from, to}}` changes in the same transaction. Clients send `expected_version`; a stale version returns 409.
+  - Editing an approved NCR revokes the approval (status back to `open`, recorded as `approval_revoked`). Delete is a soft delete.
+  - Deleting a part sets `part_id` to null (explicitly in `repositories/inspection.py`, because not every database enforces foreign keys); `part_serial_number` keeps traceability. `GET /projects/{id}/ncrs/{ncr_id}` still reaches such NCRs.
+  - NCRs never change the part `review_state`.
+- **API:** `routers/inspection_ncrs.py` (`/projects/{id}/parts/{part_id}/ncrs[...]`, `/approve`, `/projects/{id}/ncrs`). Identity always comes from `current_user.email`; schemas forbid extra fields. Approval authorization is the single hook `ensure_can_approve_ncr` in `services/inspection/ncrs.py` (today: any user with write access); add role checks there.
+- **UI:** the Inspection right column has an `NCR` tab next to Annotations (`INSPECTION_NCR_TAB`, `NcrPane`, `NcrEditorModal`, `NcrHistory`, wired by `useInspectionNcrPane`/`useInspectionNcrs`). PT3 shows it as a side tab in `Pt3FocusedWorkbench`. The tab is hidden with the `inspection.ncrs` ui_section. Right-tab selection is read through a ref in `useInspectionLayoutModel`; do not add it to the model `useMemo` deps, because rebuilding the flexlayout model resets dragged splitter widths.
+- **Reports and exports:**
+  - Report JSON v3 has an additive `ncrs` list (live NCRs only), and the PDF adds NCR pages (`services/export/report_ncrs.py`). `ProjectReportNcrTable` renders the NCR section of the report.
+  - Export bundles carry a `bundle_summary.ncrs` summary, `ncrs.toml` (gated by `include_metadata`), and all NCRs, including deleted ones, with full history in `project-backup.json`.
+  - Backup import restores them (`services/export/ncr_import.py`). Records are validated, and appending into a project that already has NCRs renumbers the imported ones after the existing numbers.
+- **ui_sections persistence:** `InspectionProjectConfiguration` now declares `ui_sections` (strict booleans). Before this change Pydantic silently dropped UI Configuration toggles on every save. The editor does not persist the PT1-forced hidden keys (`features/projectConfiguration/persistedConfiguration.js`).
+- **TOML export strings:** `toml_basic_string` (`services/export/bundles.py`) writes Unicode directly. `json.dumps` surrogate-pair escapes made any sidecar containing an emoji unparseable.
+- **Configuration autosave and validation:** `useProjectConfigurationEditor` keeps validation problems (`validationError`, shown above the editor) separate from load/save failures (`error`, which replaces the editor). Background autosave waits while the config is invalid, for example right after "Add" creates a blank row, instead of failing. Explicit Save and tab-leave flushes still report the problems. Before this, any Add button (NCR codes, defect types) blanked the whole editor about 500 ms later. Do not route validation messages through `setError`.
 
 ## Local Services, OpenCV Adapter, and E2E Notes
 

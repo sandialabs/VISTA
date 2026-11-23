@@ -18,6 +18,7 @@ import {
   normalizeProjectConfiguration,
   validateConfiguration,
 } from './configurationSchema';
+import { toPersistedConfiguration } from './persistedConfiguration';
 
 const AUTOSAVE_DELAY_MS = 500;
 
@@ -40,7 +41,11 @@ export function useProjectConfigurationEditor({
   const [currentProjectType, setCurrentProjectType] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // `error` is a load or save failure that replaces the editor. Validation
+  // problems go in `validationError` instead: they are shown above the
+  // editor, which stays usable so the user can correct them.
   const [error, setError] = useState(null);
+  const [validationError, setValidationError] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [calibrationInputValid, setCalibrationInputValid] = useState(true);
 
@@ -50,6 +55,8 @@ export function useProjectConfigurationEditor({
   const lastSavedSignatureRef = useRef(getConfigurationSignature(EMPTY_CONFIG));
   const saveLoopPromiseRef = useRef(null);
   const autosaveRequestedDuringSaveRef = useRef(false);
+  // Set when an explicit save/flush joins a running background save loop.
+  const explicitSaveRequestedRef = useRef(false);
   const calibrationInputValidRef = useRef(true);
 
   const updateCalibrationInputValidity = useCallback((isValid) => {
@@ -97,6 +104,7 @@ export function useProjectConfigurationEditor({
         setLoading(true);
         loadCompleteRef.current = false;
         setError(null);
+        setValidationError('');
         setStatusMessage('');
 
         const [configData, projectsData] = await Promise.all([
@@ -140,15 +148,20 @@ export function useProjectConfigurationEditor({
     if (readOnly) return false;
     const validationErrors = validateConfiguration(configurationToSave);
     if (validationErrors.length > 0) {
-      setError(validationErrors.join(' '));
+      setValidationError(validationErrors.join(' '));
       setStatusMessage('');
       return false;
     }
+    setValidationError('');
 
     try {
       setSaving(true);
       setError(null);
-      const payload = await updateProjectConfiguration(projectId, configurationToSave, { errorLabel: 'Failed to save project configuration' });
+      const payload = await updateProjectConfiguration(
+        projectId,
+        toPersistedConfiguration(configurationToSave, currentProjectType || projectType),
+        { errorLabel: 'Failed to save project configuration' },
+      );
       markConfigurationSynced(configurationToSave);
       setStatusMessage(statusLabel);
       if (payload?.config && typeof onConfigurationSaved === 'function') {
@@ -162,15 +175,16 @@ export function useProjectConfigurationEditor({
     } finally {
       setSaving(false);
     }
-  }, [markConfigurationSynced, onConfigurationSaved, projectId, readOnly]);
+  }, [currentProjectType, markConfigurationSynced, onConfigurationSaved, projectId, projectType, readOnly]);
 
-  const runAutosave = useCallback((statusLabel = 'Configuration autosaved.') => {
+  const runAutosave = useCallback((statusLabel = 'Configuration autosaved.', { explicit = false } = {}) => {
     if (readOnly) return Promise.resolve(true);
     if (!calibrationInputValidRef.current) {
-      setError('Enter a valid project calibration before saving or leaving Configuration.');
+      setValidationError('Enter a valid project calibration before saving or leaving Configuration.');
       setStatusMessage('');
       return Promise.resolve(false);
     }
+    if (explicit) explicitSaveRequestedRef.current = true;
     if (saveLoopPromiseRef.current) {
       autosaveRequestedDuringSaveRef.current = true;
       return saveLoopPromiseRef.current;
@@ -185,6 +199,13 @@ export function useProjectConfigurationEditor({
         if (latestSignature === lastSavedSignatureRef.current) {
           return true;
         }
+        if (!explicitSaveRequestedRef.current && validateConfiguration(latestConfig).length > 0) {
+          // Background autosave waits for an incomplete edit (for example a
+          // just-added blank row) instead of failing; it runs again on the
+          // next change. Explicit saves still report the problems.
+          setStatusMessage('Unsaved changes will save once the highlighted fields are complete.');
+          return false;
+        }
         const saved = await persistConfiguration(latestConfig, statusLabel);
         if (!saved) {
           return false;
@@ -196,6 +217,7 @@ export function useProjectConfigurationEditor({
       return true;
     })().finally(() => {
       saveLoopPromiseRef.current = null;
+      explicitSaveRequestedRef.current = false;
     });
 
     return saveLoopPromiseRef.current;
@@ -220,11 +242,13 @@ export function useProjectConfigurationEditor({
       return true;
     }
     if (!calibrationInputValidRef.current) {
-      setError('Enter a valid project calibration before saving or leaving Configuration.');
+      setValidationError('Enter a valid project calibration before saving or leaving Configuration.');
       setStatusMessage('');
       return false;
     }
-    return runAutosave(statusLabel);
+    // Leaving the tab or saving explicitly must not silently drop changes, so
+    // report validation problems rather than waiting.
+    return runAutosave(statusLabel, { explicit: true });
   }, [hasPendingAutosave, runAutosave]);
 
   useImperativeHandle(ref, () => ({
@@ -239,6 +263,9 @@ export function useProjectConfigurationEditor({
         autosaveTimerRef.current = null;
       }
       return;
+    }
+    if (validateConfiguration(config).length === 0) {
+      setValidationError('');
     }
     const latestSignature = getConfigurationSignature(config);
     if (latestSignature === lastSavedSignatureRef.current) {
@@ -272,6 +299,7 @@ export function useProjectConfigurationEditor({
     saving,
     error,
     setError,
+    validationError,
     statusMessage,
     setStatusMessage,
     calibrationInputValid,

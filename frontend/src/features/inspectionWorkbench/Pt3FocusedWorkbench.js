@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 function Pt3FocusedContext({ selectedPart, summary, inspectorHotkeys }) {
   const { batchCount, partCount, reviewSummary } = summary;
   return (
@@ -60,8 +62,11 @@ export function Pt3FocusedWorkbench({
   onOpenMetadata,
   mprViewport,
   annotationsPane,
+  ncrPane = null,
   workbenchModal,
 }) {
+  const [sideTab, setSideTab] = useState('annotations');
+  const activeSideTab = ncrPane ? sideTab : 'annotations';
   return (
     <div className="workbench-details workbench-details-pt3" ref={detailsRef}>
       <div className="pt3-mpr-topbar">
@@ -82,7 +87,23 @@ export function Pt3FocusedWorkbench({
           {mprViewport}
         </div>
         <aside className="pt3-annotations-column" aria-label="PT3 annotations">
-          {annotationsPane}
+          {ncrPane && (
+            <div className="project-tabs pt3-side-tabs" role="tablist" aria-label="Inspection side panel">
+              {[['annotations', 'Annotations'], ['ncrs', 'NCR']].map(([tabKey, label]) => (
+                <button
+                  key={tabKey}
+                  type="button"
+                  role="tab"
+                  className={`project-tab ${activeSideTab === tabKey ? 'active' : ''}`}
+                  aria-selected={activeSideTab === tabKey}
+                  onClick={() => setSideTab(tabKey)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {activeSideTab === 'ncrs' ? ncrPane : annotationsPane}
         </aside>
       </div>
       {workbenchModal}

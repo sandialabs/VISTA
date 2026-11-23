@@ -23,6 +23,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import locks, models
+from core.activity import mark_project_activity
 from repositories import inspection as inspection_repository
 
 PROGRESS_TIMEOUT_SECONDS = 15.0
@@ -225,6 +227,21 @@ async def _execute(
         return definition.build_failure_metadata(context, exc), None
 
 
+async def _project_lock_detail(
+    job_db: AsyncSession, project_id: uuid.UUID
+) -> str | None:
+    """Why the project is read-only now, or ``None`` when it is writable."""
+    project = await job_db.get(models.Project, project_id)
+    if project is None:
+        return "The project no longer exists."
+    if project.is_archived:
+        return "The project is archived."
+    state = await locks.project_lock_state(job_db, project)
+    if state.locked_by_folder_id is not None:
+        return f"The project is inside the archived folder '{state.locked_by_folder_name}'."
+    return None
+
+
 async def _publish(
     definition: PT3JobDefinition,
     context: PT3JobContext,
@@ -254,6 +271,27 @@ async def _publish(
         )
         return
     job_succeeded = output_path is not None and final_metadata.get("status") == "ready"
+    lock_detail = await _project_lock_detail(job_db, context.project_id)
+    if lock_detail is not None:
+        # The project (or a folder above it) was archived while the job ran:
+        # record a visible failure instead of publishing the result.
+        definition.discard_output(
+            **ids, output_path=output_path, latest_asset=latest_asset or {}
+        )
+        output_path = None
+        job_succeeded = False
+        final_metadata = {
+            **(latest_asset if isinstance(latest_asset, dict) else {}),
+            "status": "failed",
+            "error": "Project archived during run; results were not saved. "
+            + lock_detail,
+            "failed_at": datetime.now(UTC).isoformat(),
+            "job_id": context.job_id,
+        }
+    else:
+        mark_project_activity(job_db, context.project_id)
+    # finalize_metadata also runs on the lock failure: replace-on-success jobs
+    # keep serving their previously published asset.
     if definition.finalize_metadata is not None:
         final_metadata = definition.finalize_metadata(
             final_metadata, latest_asset, context

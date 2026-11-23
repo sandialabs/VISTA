@@ -101,6 +101,9 @@ def preview_project_backup_import_payload(archive: zipfile.ZipFile) -> dict:
                 "comments": len(payload.get("comments", [])),
                 "classifications": len(payload.get("classifications", [])),
                 "reviews": len(payload.get("reviews", [])),
+                "ncrs": len(payload.get("ncrs", []))
+                if isinstance(payload.get("ncrs"), list)
+                else 0,
                 "missing_artifacts": len(project_missing),
             }
         )
@@ -112,6 +115,7 @@ def preview_project_backup_import_payload(archive: zipfile.ZipFile) -> dict:
         "scope": manifest.get("scope"),
         "projects": projects,
         "project_count": len(projects),
+        "folder_count": len(load_dashboard_folders(archive)),
         "missing_artifacts": missing_artifacts,
         "warnings": ["Some image artifacts are missing from the backup."]
         if missing_artifacts
@@ -320,6 +324,19 @@ def project_backup_entries(
                     ),
                 ]
             )
+        if options.get("include_metadata", True):
+            entries.append(
+                StreamingZipEntry(
+                    "ncrs.toml",
+                    lambda: export_bundle_service.build_toml_document(
+                        arrays={
+                            "ncrs": export_bundle_service.json_safe(
+                                backup_payload.get("ncrs", [])
+                            )
+                        }
+                    ),
+                )
+            )
         if options.get("include_created_overlays", True):
             entries.append(
                 StreamingZipEntry(
@@ -353,8 +370,14 @@ def dashboard_backup_entries(
     *,
     generated_at: str,
     generated_by: str,
+    folders: list[dict] | None = None,
 ) -> tuple[list[StreamingZipEntry], dict, int]:
-    """Build dashboard backup ZIP entries from already-collected project contexts."""
+    """Build dashboard backup ZIP entries from already-collected project contexts.
+
+    ``folders`` is the dashboard folder tree of the exported access groups; it
+    is written to ``folders.json`` and listed in the manifest.
+    """
+    folders = list(folders or [])
     include_archived = bool(options.get("include_archived", False))
     dashboard_state = (
         options.get("dashboard_state")
@@ -369,6 +392,7 @@ def dashboard_backup_entries(
         "scope": "dashboard",
         "project_count": len(contexts),
         "projects": [context["manifest_payload"]["project"] for context in contexts],
+        "folder_count": len(folders),
         "options": {
             "include_archived": include_archived,
             "include_images": bool(options.get("include_images", True)),
@@ -402,6 +426,12 @@ def dashboard_backup_entries(
         StreamingZipEntry(
             "dashboard-state.json",
             lambda: export_bundle_service.json_bytes(dashboard_state),
+        )
+    )
+    entries.append(
+        StreamingZipEntry(
+            "folders.json",
+            lambda: export_bundle_service.json_bytes({"folders": folders}),
         )
     )
     return (
@@ -453,4 +483,50 @@ async def build_dashboard_backup_entries(
         options,
         generated_at=datetime.now(UTC).isoformat(),
         generated_by=current_user.email,
+        folders=await collect_dashboard_folders(
+            db, {project.meta_group_id for project in projects}, include_archived
+        ),
     )
+
+
+async def collect_dashboard_folders(
+    db, meta_group_ids: set[str], include_archived: bool
+) -> list[dict]:
+    """Folder rows of the exported access groups, parents before children."""
+    from core import locks
+
+    index = await locks.load_folder_index(db, meta_group_ids)
+    hidden = set() if include_archived else index.effectively_archived()
+    ordered = sorted(
+        (fid for fid in index.folders if fid not in hidden),
+        key=lambda fid: index.depth(fid),
+    )
+    return [
+        {
+            "id": str(index.folders[fid].id),
+            "parent_id": str(index.folders[fid].parent_id)
+            if index.folders[fid].parent_id
+            else None,
+            "meta_group_id": index.folders[fid].meta_group_id,
+            "name": index.folders[fid].name,
+            "description": index.folders[fid].description or "",
+            "is_archived": bool(index.folders[fid].is_archived),
+            "created_by": index.folders[fid].created_by or "",
+            "created_at": index.folders[fid].created_at,
+        }
+        for fid in ordered
+    ]
+
+
+def load_dashboard_folders(archive) -> list[dict]:
+    """Folder rows from a dashboard backup (empty for older backups)."""
+    import json
+
+    if "folders.json" not in archive.namelist():
+        return []
+    try:
+        data = json.loads(archive.read("folders.json").decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return []
+    folders = data.get("folders") if isinstance(data, dict) else None
+    return [f for f in folders or [] if isinstance(f, dict)]

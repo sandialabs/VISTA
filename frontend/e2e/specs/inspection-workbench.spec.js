@@ -1355,7 +1355,7 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
         await page.getByRole('tab', { name: 'Project Configuration' }).click();
 
         await expect(page.getByRole('heading', { name: 'Project Configuration' })).toBeVisible();
-        await expect(page.getByTestId('project-configuration-summary')).toBeVisible();
+        await expect(page.getByRole('tablist', { name: 'Configuration sections' })).toBeVisible();
 
         await page.getByRole('button', { name: 'Add Defect Type' }).click();
         const newDefectIndex = 2;
@@ -1382,18 +1382,16 @@ for (const projectType of ['PT1', 'PT2', 'PT3']) {
 }
 
 test.describe('Project Configuration Access Group', () => {
-  test('updates and persists Access Group without saving project configuration', async ({ page }) => {
+  test('shows the Access Group read-only; projects never change access group', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     const {
       projectId,
-      getProject,
       getProjectUpdateRequests,
       getSavedConfigurations,
     } = await mockInspectionWorkbenchRoutes(page, {
       type: 'PT2',
       scenario: 'intermediate',
     });
-    const destinationAccessGroup = 'inspection-reviewers-west';
 
     await page.goto(`/project/${projectId}`, { waitUntil: 'networkidle' });
     await page.getByRole('tab', { name: 'Project Configuration' }).click();
@@ -1402,30 +1400,16 @@ test.describe('Project Configuration Access Group', () => {
     const accessGroupInput = page.getByRole('textbox', { name: 'Access Group', exact: true });
     const accessGroupCard = page.getByRole('heading', { name: 'Access Group', exact: true }).locator('..');
     await expect(accessGroupInput).toHaveValue('qa-team');
-
-    await accessGroupInput.fill(destinationAccessGroup);
+    await expect(accessGroupInput).toHaveAttribute('readonly', '');
+    await expect(page.getByRole('button', { name: 'Update Access Group' })).toHaveCount(0);
+    await expect(accessGroupCard).toContainText('fixed when the project is created');
     await page.waitForTimeout(750);
     expect(getSavedConfigurations()).toEqual([]);
     expect(getProjectUpdateRequests()).toEqual([]);
-
-    await page.getByRole('button', { name: 'Update Access Group' }).click();
-    await expect(accessGroupCard.getByRole('status')).toHaveText('Access Group updated.');
-    await expect(accessGroupInput).toHaveValue(destinationAccessGroup);
-    expect(getProjectUpdateRequests()).toEqual([{
-      projectId,
-      payload: { meta_group_id: destinationAccessGroup },
-    }]);
-    expect(getSavedConfigurations()).toEqual([]);
-    expect(getProject().meta_group_id).toBe(destinationAccessGroup);
     await accessGroupCard.screenshot({
       path: accessGroupDesktopScreenshotPath,
       animations: 'disabled',
     });
-
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.getByRole('tab', { name: 'Project Configuration' }).click();
-    await expect(page.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('textbox', { name: 'Access Group', exact: true })).toHaveValue(destinationAccessGroup);
 
     await page.setViewportSize({ width: 430, height: 900 });
     const narrowAccessGroupCard = page.getByRole('heading', { name: 'Access Group', exact: true }).locator('..');

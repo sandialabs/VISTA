@@ -310,140 +310,7 @@ function mockFetch(config, projectType, mockOptions = {}) {
 
 describe('ProjectConfigurationPanel', () => {
 
-  test('updates the Access Group with the exact project payload and returns the full project', async () => {
-    const config = makeConfig('PT1', 'basic');
-    const project = {
-      id: 'proj-1',
-      name: 'Current Project',
-      project_type: 'PT1',
-      meta_group_id: 'source-group',
-      is_archived: false,
-    };
-    const updatedProject = {
-      ...project,
-      meta_group_id: 'destination-group',
-      updated_at: '2026-07-27T01:02:03Z',
-    };
-    const onProjectUpdated = jest.fn();
-    mockFetch(config, 'PT1', { accessGroupResponse: updatedProject });
-
-    render(
-      <ProjectConfigurationPanel
-        projectId="proj-1"
-        project={project}
-        onProjectUpdated={onProjectUpdated}
-      />,
-    );
-
-    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
-    expect(accessGroupInput).toHaveValue('source-group');
-    expect(accessGroupInput).toHaveAttribute('maxlength', '255');
-    expect(screen.getByRole('button', { name: 'Update Access Group' })).toBeDisabled();
-
-    fireEvent.change(accessGroupInput, { target: { value: '  destination-group  ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
-
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
-        '/api/projects/proj-1',
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ meta_group_id: 'destination-group' }),
-        },
-      );
-      expect(onProjectUpdated).toHaveBeenCalledWith(updatedProject);
-    });
-    expect(accessGroupInput).toHaveValue('destination-group');
-    expect(screen.getByText('Access Group updated.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Update Access Group' })).toBeDisabled();
-  });
-
-  test('shows a destination authorization failure locally and preserves the Access Group draft', async () => {
-    const config = makeConfig('PT1', 'basic');
-    const project = {
-      id: 'proj-1',
-      name: 'Current Project',
-      project_type: 'PT1',
-      meta_group_id: 'source-group',
-      is_archived: false,
-    };
-    const onProjectUpdated = jest.fn();
-    const detail = "User 'test@example.com' cannot move project 'proj-1' to group 'restricted-group'.";
-    mockFetch(config, 'PT1', { accessGroupFailureDetail: detail });
-
-    render(
-      <ProjectConfigurationPanel
-        projectId="proj-1"
-        project={project}
-        onProjectUpdated={onProjectUpdated}
-      />,
-    );
-
-    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
-    fireEvent.change(accessGroupInput, { target: { value: 'restricted-group' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(detail);
-    expect(accessGroupInput).toHaveValue('restricted-group');
-    expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument();
-    expect(onProjectUpdated).not.toHaveBeenCalled();
-  });
-
-  test.each([
-    ['non-JSON', { accessGroupInvalidJson: true }],
-    ['missing required fields', { accessGroupResponse: {} }],
-    ['a mismatched project id', {
-      accessGroupResponse: {
-        id: 'another-project',
-        name: 'Current Project',
-        project_type: 'PT1',
-        meta_group_id: 'destination-group',
-        is_archived: false,
-      },
-    }],
-    ['a mismatched Access Group', {
-      accessGroupResponse: {
-        id: 'proj-1',
-        name: 'Current Project',
-        project_type: 'PT1',
-        meta_group_id: 'different-group',
-        is_archived: false,
-      },
-    }],
-  ])('rejects a successful Access Group response containing %s', async (_label, mockOptions) => {
-    const config = makeConfig('PT1', 'basic');
-    const project = {
-      id: 'proj-1',
-      name: 'Current Project',
-      project_type: 'PT1',
-      meta_group_id: 'source-group',
-      is_archived: false,
-    };
-    const onProjectUpdated = jest.fn();
-    mockFetch(config, 'PT1', mockOptions);
-
-    render(
-      <ProjectConfigurationPanel
-        projectId="proj-1"
-        project={project}
-        onProjectUpdated={onProjectUpdated}
-      />,
-    );
-
-    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
-    fireEvent.change(accessGroupInput, { target: { value: '  destination-group  ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Failed to update Access Group (invalid project response).',
-    );
-    expect(accessGroupInput).toHaveValue('  destination-group  ');
-    expect(screen.queryByText('Access Group updated.')).not.toBeInTheDocument();
-    expect(onProjectUpdated).not.toHaveBeenCalled();
-  });
-
-  test('validates blank and oversized Access Groups before sending a request', async () => {
+  test('shows the Access Group read-only because projects never change access group', async () => {
     const config = makeConfig('PT1', 'basic');
     const project = {
       id: 'proj-1',
@@ -453,69 +320,19 @@ describe('ProjectConfigurationPanel', () => {
       is_archived: false,
     };
     mockFetch(config, 'PT1');
-
     render(<ProjectConfigurationPanel projectId="proj-1" project={project} />);
 
     const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
-    fireEvent.change(accessGroupInput, { target: { value: '   ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Access Group is required.');
+    expect(accessGroupInput).toHaveValue('source-group');
+    expect(accessGroupInput).toHaveAttribute('readonly');
+    expect(screen.queryByRole('button', { name: 'Update Access Group' })).not.toBeInTheDocument();
+    expect(screen.getByText(/fixed when the project is created/i)).toBeInTheDocument();
 
-    fireEvent.change(accessGroupInput, { target: { value: 'g'.repeat(256) } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Access Group must be 255 characters or fewer.');
-
+    fireEvent.change(accessGroupInput, { target: { value: 'other-group' } });
     const projectUpdateCalls = global.fetch.mock.calls.filter(
       ([url, options = {}]) => url === '/api/projects/proj-1' && options.method === 'PUT',
     );
     expect(projectUpdateCalls).toHaveLength(0);
-  });
-
-  test('keeps Access Group typing outside configuration autosave state', async () => {
-    const config = makeConfig('PT1', 'basic');
-    const project = {
-      id: 'proj-1',
-      name: 'Current Project',
-      project_type: 'PT1',
-      meta_group_id: 'source-group',
-      is_archived: false,
-    };
-    mockFetch(config, 'PT1');
-    render(<ProjectConfigurationPanel projectId="proj-1" project={project} />);
-
-    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
-    jest.useFakeTimers();
-    fireEvent.change(accessGroupInput, { target: { value: 'draft-group' } });
-    act(() => {
-      jest.advanceTimersByTime(600);
-    });
-
-    const configurationPutCalls = global.fetch.mock.calls.filter(
-      ([url, options = {}]) => (
-        url === '/api/projects/proj-1/configuration' && options.method === 'PUT'
-      ),
-    );
-    expect(configurationPutCalls).toHaveLength(0);
-    expect(screen.queryByText('Unsaved changes will autosave shortly.')).not.toBeInTheDocument();
-  });
-
-  test('disables Access Group changes for archived projects', async () => {
-    const config = makeConfig('PT1', 'basic');
-    mockFetch(config, 'PT1');
-    render(
-      <ProjectConfigurationPanel
-        projectId="proj-1"
-        project={{
-          id: 'proj-1',
-          meta_group_id: 'archived-group',
-          is_archived: true,
-        }}
-      />,
-    );
-
-    expect(await screen.findByRole('textbox', { name: 'Access Group' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Update Access Group' })).toBeDisabled();
-    expect(screen.getByText('Archived projects are read-only.')).toBeInTheDocument();
   });
 
   test('keeps project calibration and configuration saving read-only when archived', async () => {
@@ -593,63 +410,6 @@ describe('ProjectConfigurationPanel', () => {
       ),
     );
     expect(cloneCalls).toHaveLength(0);
-  });
-
-  test('invalidates an in-flight Access Group update when the project becomes archived', async () => {
-    const config = makeConfig('PT1', 'basic');
-    const project = {
-      id: 'proj-1',
-      name: 'Current Project',
-      project_type: 'PT1',
-      meta_group_id: 'source-group',
-      is_archived: false,
-    };
-    let resolveAccessGroupResponse;
-    const accessGroupResponsePromise = new Promise((resolve) => {
-      resolveAccessGroupResponse = resolve;
-    });
-    const onProjectUpdated = jest.fn();
-    mockFetch(config, 'PT1', { accessGroupResponsePromise });
-
-    const { rerender } = render(
-      <ProjectConfigurationPanel
-        projectId="proj-1"
-        project={project}
-        onProjectUpdated={onProjectUpdated}
-      />,
-    );
-
-    const accessGroupInput = await screen.findByRole('textbox', { name: 'Access Group' });
-    fireEvent.change(accessGroupInput, { target: { value: 'destination-group' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update Access Group' }));
-    await waitFor(() => expect(accessGroupInput).toBeDisabled());
-
-    rerender(
-      <ProjectConfigurationPanel
-        projectId="proj-1"
-        project={{ ...project, is_archived: true }}
-        onProjectUpdated={onProjectUpdated}
-      />,
-    );
-    expect(accessGroupInput).toBeDisabled();
-    expect(accessGroupInput).toHaveValue('source-group');
-
-    await act(async () => {
-      resolveAccessGroupResponse({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          ...project,
-          meta_group_id: 'destination-group',
-        }),
-      });
-      await accessGroupResponsePromise;
-    });
-
-    expect(accessGroupInput).toBeDisabled();
-    expect(accessGroupInput).toHaveValue('source-group');
-    expect(screen.queryByText('Access Group updated.')).not.toBeInTheDocument();
-    expect(onProjectUpdated).not.toHaveBeenCalled();
   });
 
   test('uses instance-unique Access Group ids and heading references', async () => {
@@ -993,7 +753,7 @@ describe('ProjectConfigurationPanel', () => {
 
     render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-    await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tablist', { name: 'Configuration sections' })).toBeInTheDocument());
     expect(global.fetch.mock.calls.map(([url]) => url)).toContain('/api/projects/');
     expect(global.fetch.mock.calls.map(([url]) => url)).not.toContain('/api/projects');
   });
@@ -1330,6 +1090,7 @@ describe('ProjectConfigurationPanel', () => {
         'project_configuration.filename_convention': false,
         'project_configuration.hotkeys': false,
         'project_configuration.ui_configuration': false,
+        'project_configuration.ncr_configuration': false,
       },
     };
     mockFetch(config, 'PT2');
@@ -1697,9 +1458,10 @@ describe('ProjectConfigurationPanel', () => {
 
         render(<ProjectConfigurationPanel projectId="proj-1" />);
 
-        await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole('tablist', { name: 'Configuration sections' })).toBeInTheDocument());
 
-        expect(screen.getAllByRole('heading', { name: 'Modalities' }).length).toBeGreaterThan(0);
+        // The summary cards (including a "Modalities" heading) were removed.
+        expect(screen.queryByRole('heading', { name: 'Modalities' })).not.toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'Serial Number Scheme' })).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
 
@@ -2282,7 +2044,7 @@ describe('ProjectConfigurationPanel', () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('project-configuration-summary')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tablist', { name: 'Configuration sections' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Current Interface as Project Default' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save Current Interface as PT1 Default' }));

@@ -128,6 +128,16 @@ def is_member(email: str, group_id: str, now: float | None = None) -> bool:
     return group_id in entry.groups
 
 
+def current_groups(email: str, now: float | None = None) -> frozenset[str]:
+    """The user's groups from their last proxy assertion, if still within the TTL."""
+    email = _norm(email)
+    now = time.time() if now is None else now
+    entry = _entries.get(email)
+    if entry is None or now - entry.asserted_at > settings.GROUPS_SNAPSHOT_TTL_SECONDS:
+        return frozenset()
+    return entry.groups
+
+
 def groups_for_new_key(email: str) -> list[str] | None:
     """The groups a new API key for this user should carry: their groups as just
     asserted by the proxy. None when the backend is not ``custom``."""

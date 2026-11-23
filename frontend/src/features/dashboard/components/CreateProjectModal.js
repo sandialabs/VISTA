@@ -1,21 +1,36 @@
-import React, { memo, useEffect, useRef } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { DEFAULT_PROJECT_TYPE, PROJECT_TYPE_OPTIONS } from '../../../projectTypes';
 
-const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit }) {
+/**
+ * Create a project in the selected access group, inside the current folder.
+ *
+ * The access group comes from the dashboard selector (a dropdown of groups the
+ * user belongs to); it cannot be changed later.
+ */
+const CreateProjectModal = memo(function CreateProjectModal({
+  onClose,
+  onSubmit,
+  accessGroups = [],
+  accessGroup = '',
+  folder = null,
+}) {
   const nameInputRef = useRef(null);
   const descriptionInputRef = useRef(null);
-  const groupIdInputRef = useRef(null);
   const projectTypeInputRef = useRef(null);
+  const [group, setGroup] = useState(accessGroup || accessGroups[0] || '');
+  const inFolder = folder && group === accessGroup ? folder : null;
 
   const handleSubmit = (e) => {
     e.preventDefault();
-
-    onSubmit({
+    if (!group) return;
+    const payload = {
       name: nameInputRef.current.value,
       description: descriptionInputRef.current.value,
-      meta_group_id: groupIdInputRef.current.value,
+      meta_group_id: group,
       project_type: projectTypeInputRef.current.value,
-    });
+    };
+    if (inFolder) payload.folder_id = inFolder.id;
+    onSubmit(payload);
   };
 
   useEffect(() => {
@@ -25,11 +40,11 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit 
   }, []);
 
   return (
-    <div className="modal">
+    <div className="modal" role="dialog" aria-modal="true" aria-labelledby="create-project-title">
       <div className="modal-content">
         <div className="modal-header">
-          <h3>Create New Project</h3>
-          <span className="close" onClick={onClose}>&times;</span>
+          <h3 id="create-project-title">Create New Project</h3>
+          <button type="button" className="modal-close-btn" aria-label="Close" onClick={onClose}>&times;</button>
         </div>
         <div className="modal-body">
           <form id="create-project-form" onSubmit={handleSubmit}>
@@ -40,6 +55,7 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit 
                 id="name"
                 ref={nameInputRef}
                 required
+                maxLength={255}
                 placeholder="Enter a descriptive project name"
                 className="form-control"
               />
@@ -64,17 +80,28 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit 
 
             <div className="form-group">
               <label htmlFor="meta_group_id">Access Group *</label>
-              <input
-                type="text"
+              <select
                 id="meta_group_id"
-                ref={groupIdInputRef}
                 required
-                placeholder="Enter the group ID you have access to"
                 className="form-control"
-              />
+                value={group}
+                onChange={(e) => setGroup(e.target.value)}
+                disabled={accessGroups.length === 0}
+              >
+                {accessGroups.length === 0 && <option value="">No access groups available</option>}
+                {accessGroups.map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
               <small className="form-text">
-                Enter the ID of a group you are a member of
+                Who can open this project. It cannot be changed after the project is created.
               </small>
+            </div>
+            <div className="form-group">
+              <span className="form-label">Folder</span>
+              <div className="form-static" data-testid="create-project-folder">
+                {inFolder ? (inFolder.path || [{ name: inFolder.name }]).map((p) => p.name).join(' / ') : 'Top level'}
+              </div>
             </div>
             <div className="form-group">
               <label htmlFor="project_type">Project Type *</label>
@@ -106,6 +133,7 @@ const CreateProjectModal = memo(function CreateProjectModal({ onClose, onSubmit 
             type="submit"
             form="create-project-form"
             className="btn btn-success btn-large"
+            disabled={!group}
           >
             Create Project
           </button>

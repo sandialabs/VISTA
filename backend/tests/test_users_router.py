@@ -31,7 +31,11 @@ def test_update_user_self(client):
     assert r2.json()["username"] == "u2x"
 
 
-def test_current_user_groups_empty_initially(client):
+def test_current_user_groups_listed_before_any_project_exists(client):
+    """Groups come from the auth backend, not from existing projects, so a new
+    access group appears before anyone has created a project in it."""
+    from core.config import settings
+
     r = client.get("/api/users/me/groups")
     assert r.status_code == 200
-    assert r.json() == []
+    assert r.json() == sorted(set(settings.MOCK_USER_GROUPS))

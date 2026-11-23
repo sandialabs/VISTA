@@ -26,6 +26,15 @@ test('shows GitLab commit SHA in dashboard settings', async ({ page }) => {
     if (path === '/api/projects/') {
       return fulfillJson(route, []);
     }
+    if (path === '/api/users/me/access-groups') {
+      return fulfillJson(route, ['version-group']);
+    }
+    if (path === '/api/folders/tree') {
+      return fulfillJson(route, { folders: [], root_project_count: 0, total_project_count: 0 });
+    }
+    if (path === '/api/dashboard/items') {
+      return fulfillJson(route, { folders: [], projects: [], total_projects: 0, total_folders: 0 });
+    }
     if (path === '/api/dashboard/settings/version') {
       return fulfillJson(route, { gitlab_commit_sha: commitSha });
     }
@@ -39,7 +48,8 @@ test('shows GitLab commit SHA in dashboard settings', async ({ page }) => {
   await page.goto(appUrl, { waitUntil: 'networkidle' });
   await expect(page.getByText('No projects yet')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Open dashboard settings' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Open dashboard settings' }).click();
 
   const modal = page.getByRole('dialog', { name: 'Dashboard Settings' });
   await expect(modal).toBeVisible();

@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import models
@@ -45,13 +45,63 @@ async def get_all_projects(
     return list(result.scalars().all())
 
 
+async def get_known_group_ids(db: AsyncSession) -> list[str]:
+    """Every access-group ID that has projects or dashboard folders."""
+    project_groups = select(models.Project.meta_group_id).distinct()
+    folder_groups = select(models.DashboardFolder.meta_group_id).distinct()
+    rows = await db.execute(project_groups.union(folder_groups))
+    return sorted({row[0] for row in rows if row[0]})
+
+
+async def list_projects_in_groups(
+    db: AsyncSession,
+    group_ids: list[str],
+    *,
+    skip: int = 0,
+    limit: int | None = 100,
+    include_archived: bool = False,
+    hidden_folder_ids: set[uuid.UUID] | None = None,
+) -> tuple[list[models.Project], int]:
+    """Projects in the given access groups, filtered *before* paging.
+
+    ``hidden_folder_ids`` are folders that are archived or below an archived
+    folder; their projects count as archived. Returns ``(page, total)``.
+    """
+    if not group_ids:
+        return [], 0
+    query = select(models.Project).where(models.Project.meta_group_id.in_(group_ids))
+    if not include_archived:
+        query = query.where(models.Project.is_archived.is_(False))
+        if hidden_folder_ids:
+            query = query.where(
+                or_(
+                    models.Project.folder_id.is_(None),
+                    models.Project.folder_id.not_in(list(hidden_folder_ids)),
+                )
+            )
+    total = (
+        await db.execute(select(func.count()).select_from(query.subquery()))
+    ).scalar_one()
+    query = query.order_by(models.Project.created_at, models.Project.id).offset(
+        max(skip, 0)
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    result = await db.execute(query)
+    return list(result.scalars().all()), int(total)
+
+
 async def create_project(
     db: AsyncSession,
     project: project_schemas.ProjectCreate,
     created_by: str | None = None,
 ) -> models.Project:
     """Create a project and record an audit event."""
-    db_project = models.Project(**project.model_dump(), created_by=created_by)
+    db_project = models.Project(
+        **project.model_dump(),
+        created_by=created_by,
+        last_activity_at=datetime.now(UTC),
+    )
     db.add(db_project)
     await db.commit()
     await db.refresh(db_project)

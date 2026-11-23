@@ -28,7 +28,7 @@ const EditProjectModal = memo(function EditProjectModal({ project, onClose, onSu
       <div className="modal-content">
         <div className="modal-header">
           <h3>Edit Project</h3>
-          <span className="close" onClick={onClose}>&times;</span>
+          <button type="button" className="modal-close-btn" aria-label="Close" onClick={onClose}>&times;</button>
         </div>
         <div className="modal-body">
           <form id="edit-project-form" onSubmit={handleSubmit}>

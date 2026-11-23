@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchProjectClasses } from '../../api/classes';
 import { fetchProject } from '../../api/projects';
 import useRouteRequestOwnership from '../../utils/useRouteRequestOwnership';
+import { isProjectReadOnly } from '../../utils/projectLock';
 
 const EMPTY_LIST = Object.freeze([]);
 
@@ -77,7 +78,7 @@ export default function useImageProjectData({ projectId, setError }) {
       .then((data) => {
         if (isCurrentProjectRequest(request) && data && activeProjectIdRef.current === projectId) {
           setProjectArchivedState({
-            archived: !!data.is_archived,
+            archived: isProjectReadOnly(data),
             projectId,
           });
         }

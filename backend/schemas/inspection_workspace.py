@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 
 class InspectionWorkspaceStatePayload(BaseModel):
@@ -225,6 +225,71 @@ class InspectionProjectCalibrationConfig(BaseModel):
         return self
 
 
+NCR_CODE_MAX_LENGTH = 64
+NCR_CODE_DESCRIPTION_MAX_LENGTH = 255
+NCR_CODE_LIST_MAX_ENTRIES = 500
+UI_SECTIONS_MAX_ENTRIES = 500
+UI_SECTION_KEY_MAX_LENGTH = 128
+
+
+class InspectionProjectNcrCodeConfig(BaseModel):
+    """One selectable NCR code (failure code or disposition code)."""
+
+    code: str = Field(..., min_length=1, max_length=NCR_CODE_MAX_LENGTH)
+    description: str = Field(default="", max_length=NCR_CODE_DESCRIPTION_MAX_LENGTH)
+
+    @field_validator("code", "description", mode="before")
+    @classmethod
+    def strip_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("code", "description")
+    @classmethod
+    def reject_control_characters(cls, value: str) -> str:
+        # Codes are copied onto NCR rows; PostgreSQL text cannot hold NUL.
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+            raise ValueError("must not contain control characters")
+        return value
+
+    def model_post_init(self, __context) -> None:
+        # Config is dumped with exclude_unset; always persist the description
+        # so stored entries have a stable shape.
+        self.model_fields_set.add("description")
+
+
+def _validate_unique_ncr_codes(
+    entries: list[InspectionProjectNcrCodeConfig], label: str
+) -> list[InspectionProjectNcrCodeConfig]:
+    seen: set[str] = set()
+    for entry in entries:
+        key = entry.code.casefold()
+        if key in seen:
+            raise ValueError(f"{label} must be unique (case-insensitive): {entry.code}")
+        seen.add(key)
+    return entries
+
+
+class InspectionProjectNcrConfiguration(BaseModel):
+    """Selectable code lists used by nonconformance reports."""
+
+    failure_codes: list[InspectionProjectNcrCodeConfig] = Field(
+        default_factory=list, max_length=NCR_CODE_LIST_MAX_ENTRIES
+    )
+    disposition_codes: list[InspectionProjectNcrCodeConfig] = Field(
+        default_factory=list, max_length=NCR_CODE_LIST_MAX_ENTRIES
+    )
+
+    @field_validator("failure_codes")
+    @classmethod
+    def validate_failure_codes(cls, value):
+        return _validate_unique_ncr_codes(value, "Failure codes")
+
+    @field_validator("disposition_codes")
+    @classmethod
+    def validate_disposition_codes(cls, value):
+        return _validate_unique_ncr_codes(value, "Disposition codes")
+
+
 class InspectionProjectConfiguration(BaseModel):
     image_modalities: list[InspectionProjectModalityConfig] = Field(
         default_factory=list
@@ -256,6 +321,26 @@ class InspectionProjectConfiguration(BaseModel):
         default_factory=InspectionProjectCurrentUserConfig
     )
     calibration: InspectionProjectCalibrationConfig | None = None
+    ncr_configuration: InspectionProjectNcrConfiguration = Field(
+        default_factory=InspectionProjectNcrConfiguration
+    )
+    # Visibility toggles written by the UI Configuration subtab. Without this
+    # field Pydantic silently discarded the toggles on every save.
+    ui_sections: dict[str, StrictBool] = Field(default_factory=dict)
+
+    @field_validator("ui_sections")
+    @classmethod
+    def validate_ui_sections(cls, value: dict[str, bool]) -> dict[str, bool]:
+        if len(value) > UI_SECTIONS_MAX_ENTRIES:
+            raise ValueError(
+                f"ui_sections supports at most {UI_SECTIONS_MAX_ENTRIES} entries"
+            )
+        for key in value:
+            if not key or len(key) > UI_SECTION_KEY_MAX_LENGTH:
+                raise ValueError(
+                    f"ui_sections keys must be 1-{UI_SECTION_KEY_MAX_LENGTH} characters"
+                )
+        return value
 
 
 class InspectionProjectConfigurationPayload(BaseModel):

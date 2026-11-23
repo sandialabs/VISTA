@@ -23,8 +23,10 @@ import useProjectShareLink from './features/project/useProjectShareLink';
 import useProjectTabNavigation from './features/project/useProjectTabNavigation';
 import useProjectUploadHandlers from './features/project/useProjectUploadHandlers';
 import useRecentlyDeletedOverlays from './features/project/useRecentlyDeletedOverlays';
+import { isProjectReadOnly, projectLockMessage } from './utils/projectLock';
+import { recordRecentProject } from './features/dashboard/dashboardPrefs';
 
-function Project({ currentUserGroups = [] }) {
+function Project({ currentUserGroups = [], currentUser = null }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -108,6 +110,25 @@ function Project({ currentUserGroups = [] }) {
     routeOwnership,
   });
 
+  // Opening a project adds it to this browser's "Recent" list on the dashboard.
+  const recentProjectId = project?.id;
+  const recentGroup = project?.meta_group_id;
+  const recentEmail = currentUser?.email;
+  React.useEffect(() => {
+    if (recentProjectId && recentGroup && recentEmail) {
+      recordRecentProject(recentEmail, recentGroup, recentProjectId);
+    }
+  }, [recentProjectId, recentGroup, recentEmail]);
+
+  const dashboardLink = (folderId) => {
+    const params = new URLSearchParams();
+    if (project?.meta_group_id) params.set('ag', project.meta_group_id);
+    if (folderId) params.set('folder', folderId);
+    const query = params.toString();
+    return query ? `/?${query}` : '/';
+  };
+  const lockMessage = projectLockMessage(project);
+
   const currentPhase = resolveCurrentProjectPhase({
     phaseSettings: projectConfiguration?.phase_settings,
     partsLoaded: counts.dataCounts.partsLoaded,
@@ -120,7 +141,7 @@ function Project({ currentUserGroups = [] }) {
         <InspectionWorkbenchPanel
           projectId={id}
           projectType={project?.project_type}
-          readOnly={project?.is_archived !== false}
+          readOnly={project?.is_archived !== false || isProjectReadOnly(project)}
           hierarchy={interfaceHierarchy.inspection}
           launchFilters={inspectionLaunchFilters}
           mprSession={inspectionMprSession}
@@ -218,7 +239,7 @@ function Project({ currentUserGroups = [] }) {
         <div className="project-header-content">
           <div className="project-header-top">
             <div className="project-nav">
-              <button className="back-btn" onClick={() => navigate('/')}>
+              <button className="back-btn" onClick={() => navigate(dashboardLink(project?.folder_id))}>
                 <span className="back-icon">←</span>
                 <span>Back to Dashboard</span>
               </button>
@@ -227,6 +248,24 @@ function Project({ currentUserGroups = [] }) {
               </button>
             </div>
             <div className="project-info">
+              {project && (
+                <nav className="project-breadcrumb" aria-label="Project location">
+                  <a href={dashboardLink(null)} onClick={(event) => { event.preventDefault(); navigate(dashboardLink(null)); }}>
+                    {project.meta_group_id}
+                  </a>
+                  {(project.folder_path || []).map((entry) => (
+                    <React.Fragment key={entry.id}>
+                      <span className="breadcrumb-separator" aria-hidden="true">/</span>
+                      <a
+                        href={dashboardLink(entry.id)}
+                        onClick={(event) => { event.preventDefault(); navigate(dashboardLink(entry.id)); }}
+                      >
+                        {entry.name}
+                      </a>
+                    </React.Fragment>
+                  ))}
+                </nav>
+              )}
               <div className="project-title-row">
                 <h1 className="project-title">{project ? project.name : 'Loading project...'}</h1>
                 <span className="project-group">Type: {getProjectTypeLabel(project?.project_type, { short: true })}</span>
@@ -255,6 +294,10 @@ function Project({ currentUserGroups = [] }) {
               ×
             </button>
           </div>
+        )}
+
+        {lockMessage && (
+          <div className="alert alert-warning" role="note">{lockMessage}</div>
         )}
 
         {autosaveTabDelayMessage && (

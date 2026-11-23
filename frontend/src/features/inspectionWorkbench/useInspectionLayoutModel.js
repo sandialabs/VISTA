@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { updateProjectConfiguration } from '../../api/projects';
 import { createInspectionFlexLayoutModel, normalizeLayoutNumber } from './flexLayout';
 import { INSPECTION_FILTER_IMAGES_COLUMN, INSPECTION_VIEW_PARTS_TAB } from './inspectionConstants';
@@ -18,6 +18,8 @@ export default function useInspectionLayoutModel({
   setProjectConfiguration,
   viewportWidth,
   workbenchWidth,
+  showNcrTab = false,
+  activeRightTab = null,
 }) {
   const isViewAllImagesTabActive = isAllImagesSelection;
   const leftRegion = inspectionHierarchy.regions[inspectionHierarchy.leftColumn];
@@ -39,6 +41,12 @@ export default function useInspectionLayoutModel({
   const defaultRightColumnWidthPx = Math.max(220, Math.round(normalizeLayoutNumber(rightRegion?.widthPx ?? rightRegion?.minWidthPx, 220) * 0.5));
   const configuredLeftColumnWidthPx = inspectionColumnWidths.leftPx ?? defaultLeftColumnWidthPx;
   const configuredRightColumnWidthPx = inspectionColumnWidths.rightPx ?? defaultRightColumnWidthPx;
+  // flexlayout owns right-column tab selection inside its model. Selecting a
+  // tab must not rebuild the model (that would reset dragged splitters), so
+  // the remembered tab is read from a ref and only applied when the model is
+  // rebuilt for another reason.
+  const activeRightTabRef = useRef(activeRightTab);
+  activeRightTabRef.current = activeRightTab;
   const inspectionFlexLayoutModel = useMemo(() => createInspectionFlexLayoutModel({
     inspectionHierarchy: {
       ...inspectionHierarchy,
@@ -76,6 +84,8 @@ export default function useInspectionLayoutModel({
     },
     inspectionLayoutCollapsed,
     centerSelectedIndex: Math.max(0, inspectionHierarchy.centerTabs.indexOf(activeInspectionViewTab)),
+    showNcrTab,
+    rightSelectedTab: activeRightTabRef.current,
   }), [
     activeInspectionViewTab,
     activeLeftComponent,
@@ -90,6 +100,7 @@ export default function useInspectionLayoutModel({
     leftRegion,
     minSideColumnWidthPx,
     rightRegion,
+    showNcrTab,
   ]);
   const workbenchFlexLayoutStyle = {
     '--inspection-grid-template-columns': inspectionLayoutCollapsed

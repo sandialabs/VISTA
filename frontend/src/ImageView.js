@@ -187,7 +187,7 @@ function ImageView() {
 
         {projectArchived === true && (
           <div className="archived-project-notice">
-            <strong>This project is archived.</strong> It is read-only. Classifications, comments, reviews, and other edits are disabled.
+            <strong>This project is archived.</strong> It is read-only (archived itself or inside an archived folder). Classifications, comments, reviews, and other edits are disabled.
           </div>
         )}
         {error && (

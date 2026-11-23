@@ -90,6 +90,47 @@ def is_user_in_group(user_email: str, group_id: str) -> bool:
     return is_member
 
 
+def _demo_user_groups(user_email: str) -> list[str]:
+    """Groups the demo backend grants a user (development/tests only)."""
+    user_group_mapping: Dict[str, List[str]] = {
+        "admin@example.com": ["admin", "data-scientists", "project-alpha-group"],
+        "scientist@example.com": ["data-scientists", "project-alpha-group"],
+        "user@example.com": ["project-alpha-group"],
+        settings.MOCK_USER_EMAIL.lower(): list(settings.MOCK_USER_GROUPS),
+    }
+    return list(user_group_mapping.get(user_email, []))
+
+
+def enumerate_user_groups(user_email: str) -> list[str] | None:
+    """The groups the auth backend says this user belongs to.
+
+    Single source for "which access groups can this user see", independent of
+    which groups currently have projects. Returns ``None`` when the backend
+    cannot enumerate groups (membership can only be tested group by group); the
+    caller then falls back to candidate groups known to the database.
+
+    The DEBUG / SKIP_HEADER_CHECK bypass grants every group; it returns the mock
+    user's groups, and the caller adds the groups known to the database.
+    """
+    if not user_email:
+        return []
+    if settings.DEBUG or settings.SKIP_HEADER_CHECK:
+        if settings.is_production:
+            return []
+        return sorted(set(settings.MOCK_USER_GROUPS))
+
+    user_email = user_email.lower().strip()
+    backend = (settings.VISTA_AUTH_BACKEND or "").strip().lower()
+    if backend == "demo":
+        if settings.is_production:
+            return []
+        return sorted(set(_demo_user_groups(user_email)))
+    if backend == "custom":
+        return sorted(group_snapshot.current_groups(user_email))
+    # Integrator-replaced backends that only answer membership questions.
+    return None
+
+
 def _demo_check_group_membership(user_email: str, group_id: str) -> bool:
     """Hardcoded development/test mapping. NEVER call directly in production.
 

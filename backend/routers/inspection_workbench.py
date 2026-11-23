@@ -81,7 +81,7 @@ def _normalize_layout_model(candidate: object) -> dict:
 )
 async def create_inspection_batch(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     batch: inspection_part_schemas.InspectionBatchCreate,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -115,7 +115,7 @@ async def list_inspection_batches(
 )
 async def delete_inspection_batch(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     batch_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -135,7 +135,7 @@ async def delete_inspection_batch(
 )
 async def update_inspection_batch(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     batch_id: uuid.UUID,
     payload: inspection_part_schemas.InspectionBatchUpdate,
     db: AsyncSession = Depends(get_db),
@@ -157,7 +157,7 @@ async def update_inspection_batch(
 )
 async def create_inspection_part(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part: inspection_part_schemas.InspectionPartCreate,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -193,7 +193,7 @@ async def list_inspection_parts(
 @router.delete("/projects/{project_id}/parts", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_inspection_parts(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
 ):
@@ -235,7 +235,7 @@ async def update_inspection_part_image_display_order(
 )
 async def update_inspection_part_metadata_sources(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_part_schemas.InspectionPartMetadataSourcesUpdateRequest,
     db: AsyncSession = Depends(get_db),
@@ -257,7 +257,7 @@ async def update_inspection_part_metadata_sources(
 )
 async def create_pt3_volume_splat_asset(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_pt3_schemas.PT3SplatConversionRequest,
     background_tasks: BackgroundTasks,
@@ -299,7 +299,7 @@ async def get_pt3_part_volume_splat_status(
 )
 async def create_pt3_real_gaussian_splat_asset(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_pt3_schemas.PT3RealSplatOptimizationRequest,
     background_tasks: BackgroundTasks,
@@ -390,7 +390,7 @@ async def get_pt3_volume_splat_asset(
 )
 async def update_inspection_part_review_state(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_part_schemas.InspectionPartUpdate,
     db: AsyncSession = Depends(get_db),
@@ -410,7 +410,7 @@ async def update_inspection_part_review_state(
 )
 async def delete_inspection_part(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -430,7 +430,7 @@ async def delete_inspection_part(
 )
 async def assign_image_to_part(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     payload: inspection_part_schemas.InspectionPartImageAssignmentRequest,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -449,7 +449,7 @@ async def assign_image_to_part(
 )
 async def assign_overlay_to_base_image(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     payload: inspection_part_schemas.InspectionOverlayAssignmentRequest,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -465,7 +465,7 @@ async def assign_overlay_to_base_image(
 )
 async def assign_part_to_batch(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     payload: inspection_part_schemas.InspectionPartBatchAssignmentRequest,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -486,7 +486,7 @@ async def assign_part_to_batch(
 )
 async def update_inspection_part_source_image(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     image_ref: str,
     payload: inspection_part_schemas.InspectionPartSourceImageUpdateRequest,
@@ -509,7 +509,7 @@ async def update_inspection_part_source_image(
 )
 async def update_inspection_part_manual_flag(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_part_schemas.InspectionPartManualFlagUpdateRequest,
     db: AsyncSession = Depends(get_db),
@@ -536,7 +536,7 @@ async def update_inspection_part_manual_flag(
 )
 async def invoke_part_segmentation(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_volume_schemas.InspectionSegmentationInvokeRequest,
     db: AsyncSession = Depends(get_db),
@@ -576,7 +576,7 @@ async def segment_inspection_slice(
 )
 async def invoke_ai_measurements(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_volume_schemas.InspectionMeasurementInvokeRequest,
     db: AsyncSession = Depends(get_db),
@@ -629,7 +629,7 @@ async def list_part_annotations(
 )
 async def create_part_annotation(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     payload: inspection_annotation_schemas.InspectionAnnotationCreate,
     db: AsyncSession = Depends(get_db),
@@ -661,7 +661,7 @@ async def create_part_annotation(
 )
 async def update_part_annotation(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     annotation_id: uuid.UUID,
     payload: inspection_annotation_schemas.InspectionAnnotationUpdate,
@@ -695,7 +695,7 @@ async def update_part_annotation(
 )
 async def delete_part_annotation(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     part_id: uuid.UUID,
     annotation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -801,7 +801,7 @@ async def update_project_configuration(
 )
 async def save_project_default_interface_layout(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     payload: inspection_workspace_schemas.InspectionInterfaceLayoutDefaultPayload,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),
@@ -821,7 +821,7 @@ async def save_project_default_interface_layout(
 )
 async def save_project_type_default_interface_layout(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     payload: inspection_workspace_schemas.InspectionInterfaceLayoutDefaultPayload,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -898,7 +898,7 @@ async def clone_project_configuration(
 )
 async def load_project_test_data(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     fixture: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(require_authenticated_user),
@@ -918,7 +918,7 @@ async def load_project_test_data(
 )
 async def bulk_ingest_project_parts(
     project_id: uuid.UUID,
-    project: ReadableProject,
+    project: WritableProject,
     payload: inspection_part_schemas.InspectionBulkIngestPayload,
     db: AsyncSession = Depends(get_db),
     current_user: user_schemas.User = Depends(get_current_user),

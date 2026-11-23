@@ -4,6 +4,7 @@ import {
   INSPECTION_VIEW_ALL_IMAGES_TAB,
   INSPECTION_VIEW_PARTS_TAB,
   INSPECTION_FILTER_IMAGES_COLUMN,
+  INSPECTION_NCR_TAB,
   RESIZABLE_COLUMN_MIN_PX,
   RESIZE_HANDLE_WIDTH_PX,
   FLEX_LAYOUT_CENTER_WEIGHT_PX,
@@ -149,6 +150,8 @@ export function createInspectionFlexLayoutModel({
   rightRegion,
   inspectionLayoutCollapsed,
   centerSelectedIndex = 0,
+  showNcrTab = false,
+  rightSelectedTab = null,
 }) {
   const leftWeight = getInspectionPaneWeight(leftRegion, 320);
   const centerWeight = getInspectionPaneWeight(inspectorRegion, FLEX_LAYOUT_CENTER_WEIGHT_PX);
@@ -205,8 +208,10 @@ export function createInspectionFlexLayoutModel({
           minWidth: normalizeLayoutNumber(rightRegion?.minWidthPx, RESIZABLE_COLUMN_MIN_PX),
           maxWidth: normalizeLayoutNumber(rightRegion?.maxWidthPx, 1200),
           minHeight: normalizeLayoutNumber(rightRegion?.minHeightPx, 220),
+          selected: showNcrTab && rightSelectedTab === INSPECTION_NCR_TAB ? 1 : 0,
           children: [
             createInspectionTab(inspectionHierarchy.rightColumn, rightRegion, 'Annotations'),
+            ...(showNcrTab ? [createInspectionTab(INSPECTION_NCR_TAB, { label: 'NCR' }, 'NCR')] : []),
           ],
         },
       ],

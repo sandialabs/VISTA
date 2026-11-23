@@ -6,6 +6,8 @@ import re
 import textwrap
 from urllib.parse import quote
 
+from services.export.report_ncrs import build_ncr_pdf_pages
+
 
 def build_simple_report_pdf(report_payload: dict) -> bytes:
     """Render the current concise report payload as a paginated PDF."""
@@ -115,13 +117,20 @@ def build_simple_report_pdf(report_payload: dict) -> bytes:
         paginated_rows.append(current_page_rows)
     if not paginated_rows:
         paginated_rows = [["(no parts)"]]
+    raw_ncr_rows = report_payload.get("ncrs", [])
+    ncr_rows = (
+        [row for row in raw_ncr_rows if isinstance(row, dict)]
+        if isinstance(raw_ncr_rows, list)
+        else []
+    )
+    ncr_pages = build_ncr_pdf_pages(ncr_rows, _sanitize_text)
 
     def _prefixed_lines(prefix: str, value: object) -> list[str]:
         available_width = max(1, len(table_header) - len(prefix))
         wrapped = _wrap_text(value, available_width)
         return [f"{prefix}{wrapped[0]}", *wrapped[1:]]
 
-    page_count = len(paginated_rows)
+    page_count = len(paginated_rows) + len(ncr_pages)
     page_lines = []
     for page_index, rows in enumerate(paginated_rows, start=1):
         if page_index == 1:
@@ -145,6 +154,17 @@ def build_simple_report_pdf(report_payload: dict) -> bytes:
             [table_header, table_rule, *rows, "", f"Page {page_index} of {page_count}"]
         )
         page_lines.append(lines)
+    for ncr_page_index, rows in enumerate(ncr_pages, start=len(paginated_rows) + 1):
+        page_lines.append(
+            [
+                "VISTA Inspection Report - Nonconformance Reports",
+                *_prefixed_lines("Project: ", project.get("name", "Unknown")),
+                f"Total NCRs: {len(ncr_rows)}",
+                "",
+                *rows,
+                f"Page {ncr_page_index} of {page_count}",
+            ]
+        )
 
     def _encode_pdf_lines(content_lines: list[str]) -> bytes:
         safe_lines = [

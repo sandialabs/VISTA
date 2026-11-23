@@ -5,10 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from core.group_auth_helper import is_user_in_group
-from repositories import projects as project_repository
 from repositories import users as user_repository
 from schemas import users as user_schemas
-from utils.dependencies import get_current_user, require_authenticated_user
+from utils.dependencies import (
+    get_accessible_group_ids,
+    get_current_user,
+    require_authenticated_user,
+)
 
 router = APIRouter(
     tags=["Users"],
@@ -33,27 +36,21 @@ async def read_current_user_groups(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retrieve all groups accessible by the current user.
-    This includes groups granted through project memberships.
-    Returns a list of group identifiers.
+    Retrieve every access group the current user belongs to.
+
+    Comes from the auth backend (so a group with no projects yet still appears)
+    plus any group known to the database that passes the membership check.
     """
-    # Get all projects from the database
-    all_projects = await project_repository.get_all_projects(db)
+    return await get_accessible_group_ids(db, current_user)
 
-    # Initialize empty list for accessible groups
-    user_groups = []
 
-    # For each project, check if the user is a member of the project's group
-    for project in all_projects:
-        if (
-            is_user_in_group(
-                current_user.email, project.meta_group_id, current_user
-            )
-            and project.meta_group_id not in user_groups
-        ):
-            user_groups.append(project.meta_group_id)
-
-    return user_groups
+@router.get("/me/access-groups", response_model=list[str])
+async def read_current_user_access_groups(
+    current_user: user_schemas.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Alias of ``/me/groups`` used by the dashboard access-group selector."""
+    return await get_accessible_group_ids(db, current_user)
 
 
 @router.post("/", response_model=user_schemas.User, status_code=status.HTTP_201_CREATED)

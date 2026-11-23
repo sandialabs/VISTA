@@ -13,6 +13,7 @@ import { isUiSectionEnabled } from '../../utils/uiSections';
 import { IngestValidationPanel, RecentlyDeletedOverlaysPanel } from './ProjectDataActionPanels';
 import { resolveProjectCollectionReadiness } from './projectDataUtils';
 import { LazyProjectDataState } from './projectTabs';
+import { isProjectReadOnly } from '../../utils/projectLock';
 
 // Project Data main tab: summary, subtab bar, and the active subtab. Memoized
 // so unrelated Project state changes do not re-render the data tabs.
@@ -83,7 +84,7 @@ function ProjectDataPanel({
 
       {activeProjectDataTab === 'load_images' && (
         <div className="project-data-tab-panel" role="tabpanel" aria-label="Load Images">
-          {!project?.is_archived && (
+          {!isProjectReadOnly(project) && (
             <div className="management-sections project-data-upload-first">
               <div className="upload-section">
                 <ImageUploader

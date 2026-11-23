@@ -1,5 +1,6 @@
 import React, {
   forwardRef,
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -31,12 +32,16 @@ import GeneralConfigurationPanel from './projectConfiguration/GeneralConfigurati
 import UiConfigurationPanel from './projectConfiguration/UiConfigurationPanel';
 import FilenameConventionPanel from './projectConfiguration/FilenameConventionPanel';
 import HotkeysConfigurationPanel from './projectConfiguration/HotkeysConfigurationPanel';
+import NcrConfigurationPanel from './projectConfiguration/NcrConfigurationPanel';
+import TransientStatusBanner from './TransientStatusBanner';
+import { isProjectReadOnly } from '../utils/projectLock';
 
 const CONFIGURATION_SUBTABS = [
   { id: 'general', label: 'General', sectionKey: 'project_configuration.general', panelId: 'configuration-general-panel' },
   { id: 'filenameConvention', label: 'Filename Convention', sectionKey: 'project_configuration.filename_convention', panelId: 'configuration-filename-convention-panel' },
   { id: 'hotkeys', label: 'Hotkeys', sectionKey: 'project_configuration.hotkeys', panelId: 'configuration-hotkeys-panel' },
   { id: 'uiConfiguration', label: 'UI Configuration', sectionKey: 'project_configuration.ui_configuration', panelId: 'configuration-ui-panel' },
+  { id: 'ncrConfiguration', label: 'NCR Configuration', sectionKey: 'project_configuration.ncr_configuration', panelId: 'configuration-ncr-panel' },
 ];
 
 const GENERAL_CONFIGURATION_SECTIONS = [
@@ -61,7 +66,7 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
   onProjectUpdated = null,
   onActiveSubtabChange = null,
 }, ref) {
-  const readOnly = project?.is_archived === true;
+  const readOnly = isProjectReadOnly(project);
 
   const {
     config,
@@ -72,6 +77,7 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
     saving,
     error,
     setError,
+    validationError,
     statusMessage,
     setStatusMessage,
     calibrationInputValid,
@@ -86,6 +92,10 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
     onConfigurationSaved,
   });
 
+  const dismissStatusMessage = useCallback(() => setStatusMessage(''), [setStatusMessage]);
+  // "Unsaved changes..." describes ongoing state, not an event, so it is shown
+  // quietly in the action bar instead of as a transient banner.
+  const isPendingStatus = /^Unsaved changes/.test(statusMessage || '');
   const [copySourceProjectId, setCopySourceProjectId] = useState('');
   const [copyingConfiguration, setCopyingConfiguration] = useState(false);
   const [activeConfigurationSubtab, setActiveConfigurationSubtab] = useState('general');
@@ -299,25 +309,18 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
           {diagnosticError && <pre>{diagnosticError}</pre>}
         </div>
       )}
-      {statusMessage && !loading && <div className="alert alert-success">{statusMessage}</div>}
+      {validationError && !loading && !error && (
+        <div className="alert alert-error" role="alert" data-testid="configuration-validation-error">
+          {validationError}
+        </div>
+      )}
+      <TransientStatusBanner
+        message={!loading && !validationError && !isPendingStatus ? statusMessage : ''}
+        onDismiss={dismissStatusMessage}
+      />
 
       {!loading && !error && (
         <>
-          <div className="workbench-summary-grid" data-testid="project-configuration-summary">
-            <article className="summary-card">
-              <h3>Modalities</h3>
-              <p>{config.image_modalities.length} filename labels configured</p>
-            </article>
-            <article className="summary-card">
-              <h3>Sides</h3>
-              <p>{config.part_views.length} filename labels configured</p>
-            </article>
-            <article className="summary-card">
-              <h3>Defect Types</h3>
-              <p>{config.defect_types.length} configured</p>
-            </article>
-          </div>
-
           {visibleConfigurationSubtabs.length > 0 ? (
             <div className="configuration-subtabs project-tabs" role="tablist" aria-label="Configuration sections">
               {visibleConfigurationSubtabs.map((subtab) => (
@@ -418,6 +421,10 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
             <HotkeysConfigurationPanel config={config} setConfig={setConfig} />
           )}
 
+          {visibleConfigurationSubtabIds.has('ncrConfiguration') && activeConfigurationSubtab === 'ncrConfiguration' && (
+            <NcrConfigurationPanel config={config} setConfig={setConfig} readOnly={readOnly} />
+          )}
+
           <div
             className={[
               'workbench-controls-row',
@@ -455,7 +462,13 @@ const ProjectConfigurationPanel = forwardRef(function ProjectConfigurationPanel(
                   : `Save Current Interface as ${projectType || 'Type'} Default`}
               </button>
             )}
-            <span>{hasConfiguration ? 'Configuration is populated.' : 'Using defaults until sections are configured.'}</span>
+            <span className="configuration-action-status" aria-live="polite">
+              {saving
+                ? 'Saving…'
+                : isPendingStatus
+                  ? statusMessage
+                  : hasConfiguration ? 'Configuration is populated.' : 'Using defaults until sections are configured.'}
+            </span>
           </div>
         </>
       )}

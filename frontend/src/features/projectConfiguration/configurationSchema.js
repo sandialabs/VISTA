@@ -5,6 +5,11 @@ import {
   normalizePt3GuideSettings,
 } from '../../utils/pt3GuideSettings';
 import { areCalibrationScalesConsistent } from '../../utils/calibration';
+import {
+  DEFAULT_NCR_CONFIGURATION,
+  normalizeNcrConfiguration,
+  validateNcrConfiguration,
+} from './ncrConfiguration';
 
 // Per-section project configuration schema. Each entry may define:
 // - default: value used for EMPTY_CONFIG (omitted sections are not defaulted);
@@ -320,6 +325,11 @@ export const CONFIGURATION_SECTIONS = Object.freeze({
     includeFor: (projectType) => !isPt1ProjectType(projectType),
   },
   calibration: { validate: validateCalibration },
+  ncr_configuration: {
+    default: DEFAULT_NCR_CONFIGURATION,
+    normalize: normalizeNcrConfiguration,
+    validate: validateNcrConfiguration,
+  },
 });
 
 const SECTION_ENTRIES = Object.entries(CONFIGURATION_SECTIONS);
