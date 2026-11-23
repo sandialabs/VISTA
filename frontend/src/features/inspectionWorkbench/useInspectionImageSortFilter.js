@@ -9,6 +9,7 @@ import {
 import {
   DEFAULT_INSPECTION_IMAGE_SORT_ID,
   getInspectionImageOrderKey,
+  getInspectionImageSortLayerLabel,
   getInspectionImageSortSelectOptions,
   normalizeInspectionImageSortLayers,
   sortInspectionImageDisplayEntries,
@@ -160,7 +161,7 @@ export default function useInspectionImageSortFilter({
     ) return;
     const normalizedSortLayers = normalizeInspectionImageSortLayers(sortLayers, imageSortOptions, false);
     const sortLabel = normalizedSortLayers
-      .map((sortId) => imageSortOptions.find((option) => option.id === sortId)?.label || sortId)
+      .map((sortId) => getInspectionImageSortLayerLabel(sortId, imageSortOptions))
       .join(', then ');
 
     if (isAllImagesSelection) {

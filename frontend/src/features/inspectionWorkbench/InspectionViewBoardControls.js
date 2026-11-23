@@ -1,4 +1,9 @@
 import { clampRange } from './inspectionUtils';
+import {
+  getInspectionImageSortBaseId,
+  isInspectionImageSortDescending,
+  setInspectionImageSortDirection,
+} from './imageSorting';
 
 export function InspectionViewBoardControls({ readOnly, tileColumns, imageSort }) {
   const {
@@ -76,22 +81,38 @@ export function InspectionViewBoardControls({ readOnly, tileColumns, imageSort }
                       aria-label="Image sorting options"
                     >
                       <div className="inspection-image-sort-layer-list">
-                        {effectiveImageSortLayers.map((sortId, index) => (
+                        {effectiveImageSortLayers.map((sortId, index) => {
+                          const descending = isInspectionImageSortDescending(sortId);
+                          const layerName = index === 0 ? 'Primary image sort' : `Image sort layer ${index + 1}`;
+                          return (
                           <div className="inspection-image-sort-layer" key={`${index}-${sortId}`}>
                             <label className="sr-only" htmlFor={`inspection-image-sort-layer-${index}`}>
-                              {index === 0 ? 'Primary image sort' : `Image sort layer ${index + 1}`}
+                              {layerName}
                             </label>
                             <select
                               id={`inspection-image-sort-layer-${index}`}
                               className="inspection-image-sort-select"
-                              value={sortId}
+                              value={getInspectionImageSortBaseId(sortId)}
                               disabled={imageOrderSaving}
-                              onChange={(event) => updateImageSortLayer(index, event.target.value)}
+                              onChange={(event) => updateImageSortLayer(
+                                index,
+                                setInspectionImageSortDirection(event.target.value, descending),
+                              )}
                             >
                               {imageSortOptions.map((option) => (
                                 <option key={option.id} value={option.id}>{option.label}</option>
                               ))}
                             </select>
+                            <button
+                              type="button"
+                              className="btn btn-secondary inspection-image-sort-direction"
+                              aria-label={`${layerName} direction: ${descending ? 'descending' : 'ascending'}`}
+                              title={descending ? 'Descending (click for ascending)' : 'Ascending (click for descending)'}
+                              disabled={imageOrderSaving}
+                              onClick={() => updateImageSortLayer(index, setInspectionImageSortDirection(sortId, !descending))}
+                            >
+                              {descending ? 'Desc' : 'Asc'}
+                            </button>
                             {index === effectiveImageSortLayers.length - 1 && (
                               <button
                                 type="button"
@@ -115,7 +136,8 @@ export function InspectionViewBoardControls({ readOnly, tileColumns, imageSort }
                               </button>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                       <button
                         type="button"

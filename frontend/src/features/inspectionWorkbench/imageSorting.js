@@ -35,12 +35,38 @@ export function applyInspectionImageDisplayOrder(entries, imageRefs) {
 }
 
 const INSPECTION_IMAGE_SORT_OPTIONS = [
-  { id: 'filename_asc', label: 'Filename A-Z' },
-  { id: 'filename_desc', label: 'Filename Z-A' },
+  { id: 'filename_asc', label: 'Filename' },
   { id: 'type_asc', label: 'Image type' },
 ];
 export const DEFAULT_INSPECTION_IMAGE_SORT_ID = 'filename_asc';
 const INSPECTION_IMAGE_METADATA_SORT_PREFIX = 'metadata:';
+// A layer sorts descending when its id carries this prefix, e.g. "desc:metadata:camera".
+const INSPECTION_IMAGE_SORT_DESC_PREFIX = 'desc:';
+
+export function isInspectionImageSortDescending(sortId) {
+  const normalized = String(sortId || '').trim();
+  return normalized === 'filename_desc' || normalized.startsWith(INSPECTION_IMAGE_SORT_DESC_PREFIX);
+}
+
+// The sort category without its direction; legacy "filename_desc" maps to "filename_asc".
+export function getInspectionImageSortBaseId(sortId) {
+  const normalized = String(sortId || '').trim();
+  if (normalized === 'filename_desc') return 'filename_asc';
+  return normalized.startsWith(INSPECTION_IMAGE_SORT_DESC_PREFIX)
+    ? normalized.slice(INSPECTION_IMAGE_SORT_DESC_PREFIX.length)
+    : normalized;
+}
+
+export function setInspectionImageSortDirection(sortId, descending) {
+  const baseId = getInspectionImageSortBaseId(sortId);
+  return descending ? `${INSPECTION_IMAGE_SORT_DESC_PREFIX}${baseId}` : baseId;
+}
+
+export function getInspectionImageSortLayerLabel(sortId, sortOptions = INSPECTION_IMAGE_SORT_OPTIONS) {
+  const baseId = getInspectionImageSortBaseId(sortId);
+  const label = sortOptions.find((option) => option.id === baseId)?.label || baseId;
+  return `${label} (${isInspectionImageSortDescending(sortId) ? 'descending' : 'ascending'})`;
+}
 
 const INSPECTION_IMAGE_TYPE_ORDER = { source: 0, overlay: 1, crop: 2 };
 
@@ -126,46 +152,48 @@ export function normalizeInspectionImageSortLayers(
   const optionIds = new Set(sortOptions.map((option) => option.id));
   const normalized = (Array.isArray(sortLayers) ? sortLayers : [sortLayers])
     .map((sortId) => String(sortId || '').trim())
-    .filter((sortId) => sortId && (
-      optionIds.has(sortId)
-      || (allowMetadataSortIds && getInspectionImageMetadataSortKey(sortId))
-    ));
+    .filter((sortId) => {
+      const baseId = getInspectionImageSortBaseId(sortId);
+      return baseId && (
+        optionIds.has(baseId)
+        || (allowMetadataSortIds && getInspectionImageMetadataSortKey(baseId))
+      );
+    })
+    .map((sortId) => setInspectionImageSortDirection(sortId, isInspectionImageSortDescending(sortId)));
   return normalized.length > 0 ? normalized : [DEFAULT_INSPECTION_IMAGE_SORT_ID];
 }
 
-function compareInspectionImageMetadataSortValue(left, right) {
+function compareInspectionImageMetadataSortValue(left, right, direction = 1) {
   const leftValue = formatMetadataValue(left).trim();
   const rightValue = formatMetadataValue(right).trim();
   if (!leftValue && !rightValue) return 0;
+  // Missing values stay last in either direction.
   if (!leftValue) return 1;
   if (!rightValue) return -1;
-  return compareInspectionImageSortText(leftValue, rightValue);
+  return direction * compareInspectionImageSortText(leftValue, rightValue);
 }
 
-function compareInspectionImageDisplayEntryByLayer(leftEntry, rightEntry, sortId, projectImageLookup = {}) {
+function compareInspectionImageDisplayEntryByLayer(leftEntry, rightEntry, layerSortId, projectImageLookup = {}) {
+  const sortId = getInspectionImageSortBaseId(layerSortId);
+  const direction = isInspectionImageSortDescending(layerSortId) ? -1 : 1;
   const metadataSortKey = getInspectionImageMetadataSortKey(sortId);
   if (metadataSortKey) {
     return compareInspectionImageMetadataSortValue(
       getImageRefMetadata(leftEntry, projectImageLookup)[metadataSortKey],
       getImageRefMetadata(rightEntry, projectImageLookup)[metadataSortKey],
-    );
-  }
-  if (sortId === 'filename_desc') {
-    return -compareInspectionImageSortText(
-      getInspectionImageSortFilename(leftEntry, projectImageLookup),
-      getInspectionImageSortFilename(rightEntry, projectImageLookup),
+      direction,
     );
   }
   if (sortId === 'type_asc') {
-    return (
+    return direction * ((
       INSPECTION_IMAGE_TYPE_ORDER[getInspectionImageType(leftEntry)]
       - INSPECTION_IMAGE_TYPE_ORDER[getInspectionImageType(rightEntry)]
     ) || compareInspectionImageSortText(
       getInspectionImageSortLabel(leftEntry),
       getInspectionImageSortLabel(rightEntry),
-    );
+    ));
   }
-  return compareInspectionImageSortText(
+  return direction * compareInspectionImageSortText(
     getInspectionImageSortFilename(leftEntry, projectImageLookup),
     getInspectionImageSortFilename(rightEntry, projectImageLookup),
   );

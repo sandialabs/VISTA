@@ -5889,9 +5889,32 @@ ul li:hover {
 
 .inspection-image-sort-layer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 6px;
   align-items: center;
+}
+
+/* Accessible name for each sort select; visually hidden so it does not take a grid cell. */
+.inspection-image-sort-layer > .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+  white-space: nowrap;
+}
+
+.inspection-image-sort-direction {
+  min-width: 44px;
+  min-height: 28px;
+  padding: 0 6px;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .inspection-image-sort-select {

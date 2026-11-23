@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getInspectionImageSortBaseId } from './imageSorting';
 
 export default function useInspectionImageSortControls({
   activeSelectionId,
@@ -101,7 +102,7 @@ export default function useInspectionImageSortControls({
   const addImageSortLayer = useCallback(() => {
     setImageSortLayers((previous) => {
       const next = normalizeSortLayers(previous, imageSortOptions, false);
-      const used = new Set(next);
+      const used = new Set(next.map(getInspectionImageSortBaseId));
       const nextOption = imageSortOptions.find((option) => !used.has(option.id)) || imageSortOptions[0];
       return nextOption ? [...next, nextOption.id] : next;
     });
