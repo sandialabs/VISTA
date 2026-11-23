@@ -11698,3 +11698,33 @@ ul li:hover {
     border-width: 1px;
   }
 }
+
+.annotation-list-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 8px 0 6px;
+  border-bottom: 1px solid #d0d7de;
+}
+
+.annotation-list-tab {
+  margin-bottom: -1px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: #57606a;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.annotation-list-tab:hover {
+  color: #1f2328;
+}
+
+.annotation-list-tab.active {
+  border-color: #d0d7de;
+  background: #fff;
+  color: #1a56db;
+}

@@ -1,8 +1,10 @@
 import {
   useCallback,
+  useMemo,
   useRef,
   useState,
 } from 'react';
+import { isInspectionItemForImageEntry } from '../features/inspectionWorkbench/partImageRefs';
 import { Layout } from 'flexlayout-react';
 import 'flexlayout-react/style/light.css';
 import {
@@ -423,6 +425,11 @@ function InspectionWorkbenchPanel({
     setHiddenSecondaryImageFilterValues, visibleSelectedPartImageRefs,
   } = imageSortFilter;
   const inspectionAnnotationItems = useInspectionAnnotationItems({ annotations, selectedPartImageRefs, getCalibrationForImage });
+  const selectedImageAnnotationItems = useMemo(() => {
+    const entry = (selectedPartImageRefs || []).find((ref) => ref?.imageRef === selectedImageRef);
+    if (!entry) return [];
+    return inspectionAnnotationItems.filter((item) => isInspectionItemForImageEntry(item, entry, projectImageLookup));
+  }, [inspectionAnnotationItems, projectImageLookup, selectedImageRef, selectedPartImageRefs]);
   const {
     annotationDraft,
     annotationEditDraft,
@@ -812,7 +819,7 @@ function InspectionWorkbenchPanel({
     inspectionHierarchy, openInspectionItemConfigModal, openOtherAnnotationModal, projectId,
     projectImageLookup, projectType, readOnly, selectInspectionAnnotationItem, selectedInspectionItem,
     selectedPart, setAnnotationsVisible, setInspectionItemVisibility, setTileAnnotationMode,
-    tileCalibrationPromptImageId,
+    tileCalibrationPromptImageId, selectedImageAnnotationItems,
   });
   const annotationEditModalProps = buildAnnotationEditModalProps({
     annotationEditDraft, annotationEditModalVisible, annotations, closeAnnotationEditModal,

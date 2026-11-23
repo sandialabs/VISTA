@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import CalibrationManager from '../../components/CalibrationManager';
 import { getAnnotationCreator, formatAnnotationTimestamp, getAnnotationCreatedAt, getAnnotationListType, getAnnotationListValue, getAnnotationTooltip } from './annotationListHelpers';
 import { isBoundingBoxAnnotation } from './inspectionAnnotationGeometry';
@@ -19,6 +20,7 @@ export function AnnotationsPane(props) {
     handleTileCalibrationChange,
     annotationsLoading,
     inspectionAnnotationItems,
+    selectedImageAnnotationItems = [],
     selectedInspectionItem,
     selectInspectionAnnotationItem,
     setInspectionItemVisibility,
@@ -27,6 +29,8 @@ export function AnnotationsPane(props) {
     openInspectionItemConfigModal,
     deleteMeasurementAnnotation,
   } = props;
+  const [annotationListTab, setAnnotationListTab] = useState('all');
+  const listItems = annotationListTab === 'image' ? selectedImageAnnotationItems : inspectionAnnotationItems;
   return (
 	    <section
 	      className="workbench-tabbed-panel"
@@ -131,13 +135,33 @@ export function AnnotationsPane(props) {
             />
           </div>
         )}
+        <div className="annotation-list-tabs" role="tablist" aria-label="Annotation list scope">
+          <button
+            type="button"
+            className={`annotation-list-tab ${annotationListTab === 'all' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={annotationListTab === 'all'}
+            onClick={() => setAnnotationListTab('all')}
+          >
+            All ({inspectionAnnotationItems.length})
+          </button>
+          <button
+            type="button"
+            className={`annotation-list-tab ${annotationListTab === 'image' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={annotationListTab === 'image'}
+            onClick={() => setAnnotationListTab('image')}
+          >
+            Selected image ({selectedImageAnnotationItems.length})
+          </button>
+        </div>
         <ul className="measurement-list" data-testid="annotation-list">
           {annotationsLoading ? (
             <li className="muted">Loading annotations…</li>
-          ) : inspectionAnnotationItems.length === 0 ? (
-            <li className="muted">No annotations captured.</li>
+          ) : listItems.length === 0 ? (
+            <li className="muted">{annotationListTab === 'image' ? 'No annotations for the selected image.' : 'No annotations captured.'}</li>
           ) : (
-            inspectionAnnotationItems.map((item) => {
+            listItems.map((item) => {
               const annotation = item.annotation;
               const isAnnotation = item.source.resource === 'annotation';
               const creator = isAnnotation ? getAnnotationCreator(annotation) : '';

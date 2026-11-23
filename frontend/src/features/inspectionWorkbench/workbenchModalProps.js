@@ -17,6 +17,7 @@ export const buildAnnotationsPaneProps = (input) => ({
   handleTileCalibrationChange: input.handleTileCalibrationChange,
   annotationsLoading: input.annotationsLoading,
   inspectionAnnotationItems: input.inspectionAnnotationItems,
+  selectedImageAnnotationItems: input.selectedImageAnnotationItems,
   selectedInspectionItem: input.selectedInspectionItem,
   selectInspectionAnnotationItem: input.selectInspectionAnnotationItem,
   setInspectionItemVisibility: input.setInspectionItemVisibility,
