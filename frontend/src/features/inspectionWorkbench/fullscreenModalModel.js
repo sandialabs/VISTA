@@ -3,6 +3,7 @@ import { getMprCrosshairStyle } from './mprGeometry';
 import { getMprAxisImageDimensions } from './volumeDescriptors';
 import { getAnnotationListType } from './annotationListHelpers';
 import { segmentVisibleOnSlice } from './segmentationGeometry';
+import { isInspectionItemForImageEntry } from './partImageRefs';
 
 // Identity of the image shown fullscreen and where its annotations live.
 function resolveFullscreenIdentity(ctx) {
@@ -110,6 +111,10 @@ function buildFullscreenAnnotationItems(ctx) {
     renderedFullscreenBoxAnnotations,
     inspectionAnnotationItems,
     fullscreenAnnotationSourceImageId,
+    fullscreenImageId,
+    fullscreenBaseImageId,
+    isMprFullscreen,
+    projectImageLookup,
     getUnitForImage = () => 'mm',
   } = ctx;
 	    const fullscreenAnnotationUnit = getUnitForImage(fullscreenAnnotationSourceImageId);
@@ -133,8 +138,15 @@ function buildFullscreenAnnotationItems(ctx) {
 	      })),
 	    ];
 	    const fullscreenGeometryIds = new Set(fullscreenGeometryItems.map((item) => String(item.id)));
+	    // Only list items for the opened image (and its base image for overlays).
+	    const fullscreenImageEntries = [fullscreenImageId, fullscreenAnnotationSourceImageId, fullscreenBaseImageId]
+	      .filter(Boolean)
+	      .map((imageId) => ({ imageId }));
 	    const fullscreenUnifiedItems = inspectionAnnotationItems
 	      .filter((item) => !fullscreenGeometryIds.has(String(item.id)))
+	      .filter((item) => isMprFullscreen || fullscreenImageEntries.some(
+	        (entry) => isInspectionItemForImageEntry(item, entry, projectImageLookup),
+	      ))
 	      .map((item) => {
 	        const segment = item.annotation?.geometry?.segment;
 	        return {
