@@ -112,8 +112,21 @@ sense_container_engine() {
 }
 
 sense_compose_mode() {
-  # Prefer integrated compose plugin (docker/podman compose), then legacy binaries.
-  if can_run "$RUNTIME_CMD" compose version; then
+  # COMPOSE_CMD overrides detection, e.g. COMPOSE_CMD="docker compose" or COMPOSE_CMD=podman-compose.
+  if [[ -n "${COMPOSE_CMD:-}" ]]; then
+    read -r -a COMPOSE_BIN <<< "$COMPOSE_CMD"
+    COMPOSE_MODE="override"
+    return
+  fi
+  # Under podman, call podman-compose directly: `podman compose` delegates to
+  # whichever provider it finds first (often /usr/bin/docker-compose), and stacks
+  # created by the two tools cannot share networks or containers.
+  if [[ "$RUNTIME_CMD" == "podman" ]] && command -v podman-compose >/dev/null 2>&1 \
+      && can_run podman-compose version; then
+    COMPOSE_MODE="legacy"
+    COMPOSE_BIN=("podman-compose")
+  # Otherwise prefer the integrated compose plugin, then legacy binaries.
+  elif can_run "$RUNTIME_CMD" compose version; then
     COMPOSE_MODE="plugin"
     COMPOSE_BIN=("$RUNTIME_CMD" "compose")
   elif command -v "${RUNTIME_CMD}-compose" >/dev/null 2>&1; then
