@@ -84,6 +84,20 @@ describe('buildFullscreenModalModel', () => {
     })]);
   });
 
+  test('lists only inspection items for the opened image (and its base image)', () => {
+    const item = (id, imageId) => ({
+      id, kind: 'annotation', label: id, visible: true, source: { resource: 'annotation' }, annotation: { id, image_id: imageId },
+    });
+    const items = [item('own', 'img-1'), item('base', 'base-1'), item('other', 'img-2')];
+    const ids = (model) => model.fullscreenAnnotationItems.map((row) => row.id);
+
+    expect(ids(buildFullscreenModalModel(baseInput({ inspectionAnnotationItems: items })))).toEqual(['own']);
+    expect(ids(buildFullscreenModalModel(baseInput({
+      fullscreenImageModal: { label: 'overlay', baseImageId: 'base-1' },
+      inspectionAnnotationItems: items,
+    })))).toEqual(['own', 'base']);
+  });
+
   test('uses the MPR slice key and slice position for MPR fullscreen', () => {
     const model = buildFullscreenModalModel(baseInput({
       fullscreenImageModal: { label: 'XY', sourceKind: 'mpr', axis: 'axial', sliceIndex: 2 },
