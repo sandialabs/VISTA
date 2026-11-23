@@ -1103,8 +1103,7 @@ describe('InspectionWorkbenchPanel', () => {
     expect(sortButton).toHaveAttribute('aria-expanded', 'true');
     const primarySort = within(menu).getByRole('combobox', { name: 'Primary image sort' });
     expect(within(primarySort).getAllByRole('option').map((item) => item.textContent)).toEqual(expect.arrayContaining([
-      'Filename A-Z',
-      'Filename Z-A',
+      'Filename',
       'Image type',
       'Metadata: camera',
       'Metadata: filename',
@@ -1112,7 +1111,7 @@ describe('InspectionWorkbenchPanel', () => {
     expect(within(menu).getByRole('button', { name: 'Add image sort layer' })).toBeInTheDocument();
     expect(within(menu).queryByRole('button', { name: 'Remove deepest image sort layer' })).not.toBeInTheDocument();
 
-    fireEvent.change(primarySort, { target: { value: 'filename_desc' } });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Primary image sort direction: ascending' }));
     fireEvent.click(within(menu).getByRole('button', { name: 'Apply sort' }));
 
     await waitFor(() => {
@@ -1155,11 +1154,11 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => expect(getViewTileLabels()).toEqual(['sort-a-front.png', 'sort-b-front.png']));
 
     const { menu } = await openSortMenu();
-    fireEvent.change(within(menu).getByRole('combobox', { name: 'Primary image sort' }), { target: { value: 'filename_desc' } });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Primary image sort direction: ascending' }));
     fireEvent.click(within(menu).getByRole('button', { name: 'Apply sort' }));
 
     await waitFor(() => expect(getViewTileLabels()).toEqual(['sort-b-front.png', 'sort-a-front.png']));
-    expect(screen.getByText('Images sorted by Filename Z-A.')).toBeInTheDocument();
+    expect(screen.getByText('Images sorted by Filename (descending).')).toBeInTheDocument();
     expect(getImageOrderSaveCalls()).toHaveLength(0);
   });
 
@@ -1229,9 +1228,7 @@ describe('InspectionWorkbenchPanel', () => {
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
 
     const { menu } = await openSortMenu();
-    fireEvent.change(within(menu).getByRole('combobox', { name: 'Primary image sort' }), {
-      target: { value: 'filename_desc' },
-    });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Primary image sort direction: ascending' }));
     fireEvent.click(within(menu).getByRole('button', { name: 'Apply sort' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -1252,7 +1249,7 @@ describe('InspectionWorkbenchPanel', () => {
       expect(getViewTileLabels()).not.toContain('order-overlay.png');
     });
 
-    const payload = await saveSortAndGetPayload('Filename A-Z');
+    const payload = await saveSortAndGetPayload('Filename');
     expect(payload).toEqual({
       image_refs: ['order-back-id', 'order-front-id'],
     });
@@ -1410,9 +1407,7 @@ describe('InspectionWorkbenchPanel', () => {
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
 
     const { menu } = await openSortMenu();
-    fireEvent.change(within(menu).getByRole('combobox', { name: 'Primary image sort' }), {
-      target: { value: 'filename_desc' },
-    });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Primary image sort direction: ascending' }));
     fireEvent.click(within(menu).getByRole('button', { name: 'Apply sort' }));
     await waitFor(() => {
       expect(resolveSave).toBeDefined();
@@ -1486,9 +1481,7 @@ describe('InspectionWorkbenchPanel', () => {
     render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
 
     const { menu } = await openSortMenu();
-    fireEvent.change(within(menu).getByRole('combobox', { name: 'Primary image sort' }), {
-      target: { value: 'filename_desc' },
-    });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Primary image sort direction: ascending' }));
     fireEvent.click(within(menu).getByRole('button', { name: 'Apply sort' }));
     await waitFor(() => {
       expect(resolveSave).toBeDefined();
@@ -1647,7 +1640,7 @@ describe('InspectionWorkbenchPanel', () => {
     await screen.findByRole('button', { name: 'Sort images' });
     expect(getViewTileLabels()).toEqual(['alive-back.png', 'alive-side.png', 'view-only-legacy.png']);
 
-    const payload = await saveSortAndGetPayload('Filename A-Z');
+    const payload = await saveSortAndGetPayload('Filename');
     expect(payload).toEqual({
       image_refs: ['alive-back-id', 'alive-side-id', 'view-only-legacy.png'],
     });
@@ -1697,7 +1690,7 @@ describe('InspectionWorkbenchPanel', () => {
     await screen.findByRole('button', { name: 'Sort images' });
     expect(getViewTileLabels()).toEqual(['shared.png', 'alive-side.png']);
 
-    const payload = await saveSortAndGetPayload('Filename A-Z');
+    const payload = await saveSortAndGetPayload('Filename');
     expect(payload).toEqual({
       image_refs: ['alive-side-id', 'active-id'],
     });
@@ -1745,7 +1738,7 @@ describe('InspectionWorkbenchPanel', () => {
     await screen.findByRole('button', { name: 'Sort images' });
     expect(getViewTileLabels()).toEqual(['shared.png', 'alive-side.png']);
 
-    const payload = await saveSortAndGetPayload('Filename A-Z');
+    const payload = await saveSortAndGetPayload('Filename');
     expect(payload).toEqual({
       image_refs: ['alive-side-id', 'active-id'],
     });
@@ -1799,7 +1792,7 @@ describe('InspectionWorkbenchPanel', () => {
     await screen.findByRole('button', { name: 'Sort images' });
     expect(getViewTileLabels()).toEqual([collidingDeletedId, 'alive-side.png']);
 
-    const payload = await saveSortAndGetPayload('Filename A-Z');
+    const payload = await saveSortAndGetPayload('Filename');
     expect(payload).toEqual({
       image_refs: ['active-filename-collision-id', 'alive-side-id'],
     });
@@ -6325,9 +6318,7 @@ describe('InspectionWorkbenchPanel', () => {
     ]);
 
     const { menu } = await openSortMenu();
-    fireEvent.change(within(menu).getByRole('combobox', { name: 'Primary image sort' }), {
-      target: { value: 'filename_desc' },
-    });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Primary image sort direction: ascending' }));
     fireEvent.click(within(menu).getByRole('button', { name: 'Apply sort' }));
     await waitFor(() => {
       expect(Array.from(document.querySelectorAll('.inspection-image-part-label')).map((element) => element.textContent)).toEqual([

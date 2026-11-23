@@ -3,16 +3,15 @@ import { act, renderHook } from '@testing-library/react';
 import useInspectionImageSortControls from '../useInspectionImageSortControls';
 
 const sortOptions = [
-  { id: 'filename_asc', label: 'Filename A-Z' },
-  { id: 'filename_desc', label: 'Filename Z-A' },
-  { id: 'view_asc', label: 'View A-Z' },
+  { id: 'filename_asc', label: 'Filename' },
+  { id: 'view_asc', label: 'View' },
 ];
 
 function normalizeSortLayers(sortLayers, options = sortOptions) {
   const ids = new Set(options.map((option) => option.id));
   const normalized = (Array.isArray(sortLayers) ? sortLayers : [sortLayers])
     .map((sortId) => String(sortId || '').trim())
-    .filter((sortId) => ids.has(sortId));
+    .filter((sortId) => ids.has(sortId.replace(/^desc:/, '')));
   return normalized.length > 0 ? normalized : ['filename_asc'];
 }
 
@@ -72,21 +71,21 @@ describe('useInspectionImageSortControls', () => {
     });
 
     act(() => {
-      result.current.updateImageSortLayer(0, 'filename_desc');
+      result.current.updateImageSortLayer(0, 'desc:filename_asc');
     });
-    expect(result.current.imageSortLayers).toEqual(['filename_desc']);
+    expect(result.current.imageSortLayers).toEqual(['desc:filename_asc']);
 
     act(() => {
       result.current.addImageSortLayer();
     });
-    expect(result.current.imageSortLayers).toEqual(['filename_desc', 'filename_asc']);
+    expect(result.current.imageSortLayers).toEqual(['desc:filename_asc', 'view_asc']);
 
     act(() => {
       result.current.removeImageSortLayer();
     });
-    expect(result.current.imageSortLayers).toEqual(['filename_desc']);
+    expect(result.current.imageSortLayers).toEqual(['desc:filename_asc']);
 
-    rerender(buildProps({ imageSortOptions: [sortOptions[0]] }));
+    rerender(buildProps({ imageSortOptions: [sortOptions[1]] }));
     expect(result.current.imageSortLayers).toEqual(['filename_asc']);
   });
 
