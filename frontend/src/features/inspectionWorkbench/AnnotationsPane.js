@@ -155,7 +155,7 @@ export function AnnotationsPane(props) {
                   className={`annotation-entry ${selected ? 'selected' : ''} ${item.visible ? '' : 'annotation-entry-hidden'}`}
                   role="button"
                   tabIndex={0}
-                  title={isAnnotation ? getAnnotationTooltip(annotation) : item.label}
+                  title={isAnnotation ? getAnnotationTooltip(annotation, displayName) : item.label}
                   onClick={() => {
                     selectInspectionAnnotationItem(item);
                   }}

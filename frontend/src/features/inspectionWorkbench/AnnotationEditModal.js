@@ -92,7 +92,7 @@ export function AnnotationEditModal(props) {
           <div className="measurement-fields annotation-style-fields">
             <div className="annotation-details-summary" aria-label="Annotation details">
               <span><strong>Type</strong> {isExternalOverlayConfig ? 'External overlay' : getAnnotationListType(selected)}</span>
-              <span><strong>Display</strong> {isExternalOverlayConfig ? selectedItem?.displayName || selectedItem?.label : getAnnotationListValue(selected)}</span>
+              <span><strong>Display</strong> {isExternalOverlayConfig ? selectedItem?.displayName || selectedItem?.label : selectedItem?.displayName || getAnnotationListValue(selected)}</span>
               {isExternalOverlayConfig && selectedOverlay?.filename && <span><strong>File</strong> {selectedOverlay.filename}</span>}
             </div>
           </div>

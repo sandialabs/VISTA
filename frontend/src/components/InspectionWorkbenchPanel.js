@@ -422,7 +422,7 @@ function InspectionWorkbenchPanel({
     setHiddenModalityImageFilterValues, setHiddenPrimaryImageFilterValues,
     setHiddenSecondaryImageFilterValues, visibleSelectedPartImageRefs,
   } = imageSortFilter;
-  const inspectionAnnotationItems = useInspectionAnnotationItems({ annotations, selectedPartImageRefs });
+  const inspectionAnnotationItems = useInspectionAnnotationItems({ annotations, selectedPartImageRefs, getCalibrationForImage });
   const {
     annotationDraft,
     annotationEditDraft,

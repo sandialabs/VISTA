@@ -92,6 +92,31 @@ describe('inspectionAnnotationAdapter', () => {
     })).toBe('Crack');
   });
 
+  test('formats calibrated display names in the calibration unit', () => {
+    expect(getInspectionAnnotationDisplayName({
+      measurements: { length_mm: 25.4, length_px: 100 },
+    }, { unit: 'inches' })).toBe('1.000"');
+    expect(getInspectionAnnotationDisplayName({
+      measurements: { width_mm: 50.8, height_mm: 12.7 },
+    }, { unit: 'inches' })).toBe('2.000" x 0.500"');
+    expect(getInspectionAnnotationDisplayName({
+      measurements: { length_mm: 25.4 },
+    }, { unit: 'bogus' })).toBe('25.40 mm');
+    expect(getInspectionAnnotationDisplayName({
+      measurements: { length_px: 12.34 },
+    }, { unit: 'inches' })).toBe('12.3 px');
+
+    const items = buildInspectionAnnotationItems(
+      [
+        { id: 'in', image_id: 'img-in', measurements: { length_mm: 25.4 } },
+        { id: 'mm', image_id: 'img-mm', measurements: { length_mm: 25.4 } },
+      ],
+      [],
+      { getUnitForAnnotation: (annotation) => (annotation.image_id === 'img-in' ? 'inches' : 'mm') },
+    );
+    expect(items.map((item) => item.displayName)).toEqual(['1.000"', '25.40 mm']);
+  });
+
   test('trims semantic names and falls back when defect and comment labels are blank', () => {
     const named = buildInspectionAnnotationItems([{
       id: 'named',

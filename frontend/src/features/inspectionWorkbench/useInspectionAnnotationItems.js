@@ -15,10 +15,18 @@ export const findSelectedInspectionItem = (items, selectedAnnotationId, selected
   || null
 );
 
-export default function useInspectionAnnotationItems({ annotations, selectedPartImageRefs }) {
+// Display names follow the calibration unit resolved for each annotation's image.
+export default function useInspectionAnnotationItems({ annotations, selectedPartImageRefs, getCalibrationForImage }) {
   return useMemo(
-    () => buildInspectionAnnotationItems(annotations, selectedPartImageRefs),
-    [annotations, selectedPartImageRefs],
+    () => buildInspectionAnnotationItems(annotations, selectedPartImageRefs, {
+      getUnitForAnnotation: (annotation) => (
+        typeof getCalibrationForImage === 'function'
+        && getCalibrationForImage(annotation?.image_id)?.unit === 'inches'
+          ? 'inches'
+          : 'mm'
+      ),
+    }),
+    [annotations, selectedPartImageRefs, getCalibrationForImage],
   );
 }
 

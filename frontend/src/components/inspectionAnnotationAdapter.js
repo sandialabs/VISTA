@@ -1,4 +1,5 @@
 import { finiteNumber } from '../utils/numbers';
+import { MM_PER_INCH } from '../utils/calibration';
 
 const VALID_ANNOTATION_KINDS = new Set(['annotation', 'measurement', 'vista_segment']);
 const VALID_PT3_AXES = new Set(['axial', 'coronal', 'sagittal']);
@@ -195,7 +196,18 @@ export function getInspectionAnnotationTypeLabel(annotation) {
   return 'Annotation';
 }
 
-export function getInspectionAnnotationDisplayName(annotation) {
+const normalizeDisplayUnit = (unit) => (unit === 'inches' ? 'inches' : 'mm');
+
+const formatCalibratedLength = (mmValue, unit) => (
+  unit === 'inches'
+    ? `${(mmValue / MM_PER_INCH).toFixed(3)}"`
+    : `${mmValue.toFixed(2)} mm`
+);
+
+// `unit` is the calibration unit for the annotation's image ('mm' | 'inches').
+// Calibrated values are stored in millimetres and converted for display only.
+export function getInspectionAnnotationDisplayName(annotation, { unit = 'mm' } = {}) {
+  const displayUnit = normalizeDisplayUnit(unit);
   const kind = getInspectionAnnotationKind(annotation);
   if (kind === 'vista_segment') {
     return firstNonBlankString(annotation?.defect_class, annotation?.comment, 'Segment');
@@ -205,14 +217,16 @@ export function getInspectionAnnotationDisplayName(annotation) {
     ? annotation.measurements
     : {};
   const lengthMm = optionalFiniteNumber(measurements.length_mm);
-  if (lengthMm !== null) return `${lengthMm.toFixed(2)} mm`;
+  if (lengthMm !== null) return formatCalibratedLength(lengthMm, displayUnit);
   const lengthPx = optionalFiniteNumber(measurements.length_px);
   if (lengthPx !== null) return `${lengthPx.toFixed(1)} px`;
 
   const widthMm = optionalFiniteNumber(measurements.width_mm);
   const heightMm = optionalFiniteNumber(measurements.height_mm);
   if (widthMm > 0 && heightMm > 0) {
-    return `${widthMm.toFixed(2)} x ${heightMm.toFixed(2)} mm`;
+    return displayUnit === 'inches'
+      ? `${formatCalibratedLength(widthMm, displayUnit)} x ${formatCalibratedLength(heightMm, displayUnit)}`
+      : `${widthMm.toFixed(2)} x ${heightMm.toFixed(2)} mm`;
   }
   const widthMeasurementPx = optionalFiniteNumber(measurements.width_px);
   const heightMeasurementPx = optionalFiniteNumber(measurements.height_px);
@@ -461,7 +475,7 @@ export function annotationToPt3VectorAnnotation(annotation) {
   return null;
 }
 
-export function annotationToInspectionItem(annotation) {
+export function annotationToInspectionItem(annotation, { unit = 'mm' } = {}) {
   const kind = getInspectionAnnotationKind(annotation);
   const id = String(annotation?.id || '');
   const label = kind === 'vista_segment'
@@ -473,7 +487,7 @@ export function annotationToInspectionItem(annotation) {
     kind,
     label,
     typeLabel: getInspectionAnnotationTypeLabel(annotation),
-    displayName: getInspectionAnnotationDisplayName(annotation),
+    displayName: getInspectionAnnotationDisplayName(annotation, { unit }),
     visible: annotation?.hidden !== true,
     color: String(annotation?.metadata?.annotation_color || annotation?.metadata?.measurement_color || DEFAULT_ANNOTATION_COLOR),
     source: { resource: 'annotation', resourceId: id },
@@ -501,11 +515,12 @@ export function overlayRefToInspectionItem(entry) {
   };
 }
 
-export function buildInspectionAnnotationItems(annotations = [], imageRefs = []) {
+export function buildInspectionAnnotationItems(annotations = [], imageRefs = [], { getUnitForAnnotation } = {}) {
   const annotationKeyOccurrences = new Map();
   const usedAnnotationKeys = new Set();
   const items = (Array.isArray(annotations) ? annotations : []).map((annotation) => {
-    const item = annotationToInspectionItem(annotation);
+    const unit = typeof getUnitForAnnotation === 'function' ? getUnitForAnnotation(annotation) : 'mm';
+    const item = annotationToInspectionItem(annotation, { unit });
     const baseKey = item.id ? item.key : 'annotation:<missing>';
     let occurrence = (annotationKeyOccurrences.get(baseKey) || 0) + 1;
     annotationKeyOccurrences.set(baseKey, occurrence);

@@ -29,11 +29,11 @@ export function getAnnotationListValue(annotation) {
   return getInspectionAnnotationDisplayName(annotation);
 }
 
-export function getAnnotationTooltip(annotation) {
+export function getAnnotationTooltip(annotation, displayValue) {
   if (!annotation || typeof annotation !== 'object') return '';
   const details = [];
   const type = getAnnotationListType(annotation);
-  const value = getAnnotationListValue(annotation);
+  const value = displayValue || getAnnotationListValue(annotation);
   if (type) details.push(type);
   if (value) details.push(value);
   const createdAt = formatAnnotationTimestamp(getAnnotationCreatedAt(annotation));
