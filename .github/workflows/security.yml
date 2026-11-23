@@ -24,11 +24,13 @@ jobs:
           format: "spdx-json"
           output-file: "sbom.spdx.json"
 
-      - name: Scan SBOM for vulnerabilities with Grype
+      # Grype scans the checkout, not the SPDX SBOM: SPDX drops the file
+      # locations Code Scanning requires on every SARIF result.
+      - name: Scan repository for vulnerabilities with Grype
         id: scan
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
-          sbom: "sbom.spdx.json"
+          path: "."
           fail-build: true
           severity-cutoff: "high"
 
