@@ -4,7 +4,7 @@ import {
   makeBoxFromMovedCorner,
   makeBoxFromPoints,
 } from './inspectionAnnotationGeometry';
-import { MEASUREMENT_COLORS } from './inspectionAnnotationDisplay';
+import { NEW_ANNOTATION_COLOR } from './inspectionAnnotationDisplay';
 import { FULLSCREEN_MIN_MEASURE_LENGTH_PX, getDraftLine, isCommittableDraftLine } from './annotationDraftReducer';
 import { safeReleasePointerCapture, safeSetPointerCapture } from '../../utils/annotationGeometry';
 
@@ -15,13 +15,9 @@ export function useFullscreenAnnotationTools({
   getCalibrationForImage,
   getAnnotationSourceImageIdForImage,
   requireCalibrationForAnnotation,
-  storedMprBoxAnnotationsBySlice,
-  storedBoxAnnotationsByImageId,
   createBoxAnnotation,
   classifyMeasurementLine,
   nextMeasurementName,
-  storedMprMeasurementLinesBySlice,
-  storedMeasurementLinesByImageId,
   getLineDistanceMm,
   createMeasurementAnnotation,
   getFullscreenImagePointerPosition,
@@ -40,7 +36,6 @@ export function useFullscreenAnnotationTools({
     fullscreenEditingEndpoint,
     fullscreenImageModal,
     fullscreenMeasureActive,
-    fullscreenMeasurements,
     fullscreenMprSliceKey,
     setFullscreenBoundsEditAnnotationId,
     setFullscreenBoxActive,
@@ -76,7 +71,9 @@ export function useFullscreenAnnotationTools({
 
   const toggleFullscreenBox = () => {
     if (readOnly) return;
-    if (fullscreenBoxActive || fullscreenCropActive) {
+    // Only a second click on Draw box turns it off; clicking it while New Crop is
+    // active switches tools (the code below turns crop off).
+    if (fullscreenBoxActive) {
       setFullscreenBoxActive(false);
       cancelAnnotationDraft('fullscreen', ['drag']);
       setFullscreenEditingBoxCorner(null);
@@ -120,10 +117,6 @@ export function useFullscreenAnnotationTools({
         cancelAnnotationDraft('fullscreen', ['drag', 'preview']);
         return;
       }
-      const annotationSourceImageId = getAnnotationSourceImageIdForImage(fullscreenBackingImageId);
-      const existingBoxCount = fullscreenMprSliceKey
-        ? (storedMprBoxAnnotationsBySlice[fullscreenMprSliceKey] || []).length
-        : (storedBoxAnnotationsByImageId[String(annotationSourceImageId || '')] || []).length;
       const mprGeometryPatch = fullscreenMprSliceKey
         ? {
           axis: fullscreenImageModal.axis,
@@ -135,13 +128,12 @@ export function useFullscreenAnnotationTools({
         imageId: fullscreenBackingImageId,
         box,
         name: 'Drawn bounding box',
-        color: MEASUREMENT_COLORS[existingBoxCount % MEASUREMENT_COLORS.length],
+        color: NEW_ANNOTATION_COLOR,
         modality: fullscreenMprSliceKey ? 'volume' : undefined,
         geometryPatch: mprGeometryPatch,
       });
       if (created?.id) setFullscreenBoundsEditAnnotationId(created.id);
     }
-    cancelAnnotationDraft('fullscreen', ['drag', 'preview']);
   };
 
   const commitFullscreenMeasureLine = async (line) => {
@@ -157,11 +149,7 @@ export function useFullscreenAnnotationTools({
     const name = nextMeasurementName(kind);
     const annotationSourceImageId = getAnnotationSourceImageIdForImage(fullscreenBackingImageId);
     const annotationLookupKey = fullscreenMprSliceKey || String(annotationSourceImageId || '');
-    const existingLineCount = ((fullscreenMprSliceKey
-      ? storedMprMeasurementLinesBySlice[fullscreenMprSliceKey]
-      : storedMeasurementLinesByImageId[String(annotationSourceImageId || '')]) || []).length
-      + fullscreenMeasurements.filter((item) => String(item.imageId || '') === annotationLookupKey).length;
-    const color = MEASUREMENT_COLORS[existingLineCount % MEASUREMENT_COLORS.length];
+    const color = NEW_ANNOTATION_COLOR;
     const distancePx = Math.hypot(line.x2 - line.x1, line.y2 - line.y1);
     const distanceMm = getLineDistanceMm(line, annotationSourceImageId);
     const mprLine = fullscreenMprSliceKey
@@ -182,7 +170,6 @@ export function useFullscreenAnnotationTools({
       setFullscreenMeasurements((prev) => [...prev, { ...mprLine, id: created.id, imageId: annotationLookupKey, name, kind, color, distanceMm, distancePx }]);
     }
     if (created?.id) setFullscreenBoundsEditAnnotationId(created.id);
-    cancelAnnotationDraft('fullscreen', ['measure', 'preview']);
   };
 
   const handleFullscreenMeasurePointerDown = async (event) => {
@@ -295,33 +282,32 @@ export function useFullscreenAnnotationTools({
     event.preventDefault();
     event.stopPropagation();
     const firstPoint = annotationDraftsRef.current.fullscreen.drag;
-    if (firstPoint && position) {
-      const box = makeBoxFromPoints(firstPoint, {
-        x: position.x,
-        y: position.y,
-        imageWidth: position.naturalWidth,
-        imageHeight: position.naturalHeight,
-      });
-      if (fullscreenCropActive) {
-        await createCropChildImage({ parentImageId: getAnnotationSourceImageIdForImage(fullscreenBackingImageId), cropBox: box });
-      } else {
-        await commitFullscreenBox(box);
-      }
-    } else {
-      cancelAnnotationDraft('fullscreen', ['drag', 'preview']);
-      setFullscreenBoxActive(false);
-    }
-        setFullscreenBoxActive(false);
-        setFullscreenCropActive(false);
+    // Draw box and New Crop stay selected so the user can draw the next shape;
+    // they are turned off by clicking the tool button again or pressing Escape.
+    // The draft is cleared before the async save so a quick next drag is not
+    // wiped when this save finishes.
+    cancelAnnotationDraft('fullscreen', ['drag', 'preview']);
     safeReleasePointerCapture(event.currentTarget, event.pointerId);
+    if (!firstPoint || !position) return;
+    const box = makeBoxFromPoints(firstPoint, {
+      x: position.x,
+      y: position.y,
+      imageWidth: position.naturalWidth,
+      imageHeight: position.naturalHeight,
+    });
+    if (fullscreenCropActive) {
+      await createCropChildImage({ parentImageId: getAnnotationSourceImageIdForImage(fullscreenBackingImageId), cropBox: box });
+    } else {
+      await commitFullscreenBox(box);
+    }
   };
 
   const handleFullscreenBoxPointerCancel = (event) => {
     if (!fullscreenBoxActive && !fullscreenCropActive && !annotationDraftsRef.current.fullscreen.drag) return;
     event.preventDefault();
     event.stopPropagation();
+    // Leaving the image discards the box in progress but keeps the tool selected.
     cancelAnnotationDraft('fullscreen', ['drag', 'preview']);
-    setFullscreenBoxActive(false);
     safeReleasePointerCapture(event.currentTarget, event.pointerId);
   };
 

@@ -28,11 +28,15 @@ export function FullscreenAnnotationList({ readOnly, projectType, model, tools, 
 	                    {fullscreenAnnotationItems.map((annotation, index) => {
 	                      const inspectionItem = annotation.inspectionItem;
 	                      const itemVisible = inspectionItem?.visible !== false;
+	                      // Ids can arrive as numbers or strings, so compare them as strings.
+	                      const itemSelected = selectedAnnotationId != null && selectedAnnotationId !== ''
+	                        && String(selectedAnnotationId) === String(annotation.id);
 	                      return (
 	                        <li
 	                          key={`${annotation.annotationType}-${annotation.id}`}
-	                          className={`inspection-fullscreen-annotation ${selectedAnnotationId === annotation.id ? 'selected' : ''} ${itemVisible ? '' : 'annotation-entry-hidden'}`}
-	                          style={{ borderColor: annotation.color }}
+	                          className={`inspection-fullscreen-annotation ${itemSelected ? 'selected' : ''} ${itemVisible ? '' : 'annotation-entry-hidden'}`}
+	                          style={{ borderColor: annotation.color, '--annotation-entry-color': annotation.color }}
+	                          aria-current={itemSelected ? 'true' : undefined}
 	                        >
 	                        <button
 	                          type="button"

@@ -16,7 +16,7 @@ import {
   isCommittableDraftBox,
   isCommittableDraftLine,
 } from './annotationDraftReducer';
-import { MEASUREMENT_COLORS } from './inspectionAnnotationDisplay';
+import { NEW_ANNOTATION_COLOR } from './inspectionAnnotationDisplay';
 import { commitDraggedGeometry } from './annotationDragCommit';
 
 export function useTileAnnotationPointer({
@@ -37,15 +37,12 @@ export function useTileAnnotationPointer({
   requireCalibrationForAnnotation,
   annotationDraftsRef,
   startAnnotationDraft,
-  storedMeasurementLinesByImageId,
   createMeasurementAnnotation,
   nextMeasurementName,
   classifyMeasurementLine,
   finishAnnotationDraft,
   createCropChildImage,
-  storedBoxAnnotationsByImageId,
   createBoxAnnotation,
-  deactivateFullscreenBoxTools,
   moveAnnotationDraft,
 }) {
   const getAnnotationSurfacePointerPosition = (event) => {
@@ -190,12 +187,11 @@ export function useTileAnnotationPointer({
   const commitTileMeasureLine = (firstPoint, position, annotationImageId) => {
     const line = getDraftLine(firstPoint, position);
     if (!isCommittableDraftLine(line, { minLength: FULLSCREEN_MIN_MEASURE_LENGTH_PX })) return false;
-    const existingLineCount = (storedMeasurementLinesByImageId[String(annotationImageId || '')] || []).length;
     createMeasurementAnnotation({
       imageId: annotationImageId,
       line,
       name: nextMeasurementName(classifyMeasurementLine(line)),
-      color: MEASUREMENT_COLORS[existingLineCount % MEASUREMENT_COLORS.length],
+      color: NEW_ANNOTATION_COLOR,
       distanceMm: getLineDistanceMm(line, annotationImageId),
     });
     return true;
@@ -237,10 +233,9 @@ export function useTileAnnotationPointer({
       safeReleasePointerCapture(event.currentTarget, event.pointerId);
       const annotationImageId = getAnnotationSourceImageIdForImage(imageId);
       const sameImage = String(measurePoint.imageId || '') === String(annotationImageId || '');
-      // A press-release without a drag keeps the tool armed so the user can retry.
-      if (position && sameImage && commitTileMeasureLine(measurePoint, position, annotationImageId)) {
-        setAnnotationToolMode('');
-      }
+      // The tool stays armed after a commit so the user can draw the next line;
+      // it is turned off by clicking the tool button again or pressing Escape.
+      if (position && sameImage) commitTileMeasureLine(measurePoint, position, annotationImageId);
       return true;
     }
     const firstPoint = annotationDraftsRef.current.tile.drag;
@@ -251,31 +246,30 @@ export function useTileAnnotationPointer({
         if (annotationToolMode === 'crop') {
           createCropChildImage({ parentImageId: annotationImageId, cropBox: box });
         } else {
-        const existingBoxCount = (storedBoxAnnotationsByImageId[String(annotationImageId || '')] || []).length;
-        createBoxAnnotation({
-          imageId: annotationImageId,
-          box,
-          name: 'Drawn bounding box',
-          color: MEASUREMENT_COLORS[existingBoxCount % MEASUREMENT_COLORS.length],
-        });
+          createBoxAnnotation({
+            imageId: annotationImageId,
+            box,
+            name: 'Drawn bounding box',
+            color: NEW_ANNOTATION_COLOR,
+          });
         }
       }
     }
+    // Box and crop stay armed too; only the draft is cleared.
     finishAnnotationDraft('tile');
-    setAnnotationToolMode('');
     safeReleasePointerCapture(event.currentTarget, event.pointerId);
     return true;
   };
 
+  // A cancelled pointer (for example a lost touch) discards the shape in progress
+  // but leaves the active tool selected.
   const handleTileBoxPointerCancel = (event) => {
     const { drag, measure } = annotationDraftsRef.current.tile;
     if (!drag && !measure) return;
     event.preventDefault();
     event.stopPropagation();
     cancelAnnotationDraft('tile');
-    setAnnotationToolMode('');
     suppressNextTileClickRef.current = true;
-    deactivateFullscreenBoxTools();
     safeReleasePointerCapture(event.currentTarget, event.pointerId);
   };
 
@@ -288,7 +282,7 @@ export function useTileAnnotationPointer({
       const line = getDraftLine(measurePoint, position, {
         id: 'tile-measure-preview',
         imageId: String(annotationImageId || ''),
-        color: '#f97316',
+        color: NEW_ANNOTATION_COLOR,
         distancePx: Math.hypot(position.x - measurePoint.x, position.y - measurePoint.y),
         distanceMm: getLineDistanceMm(
           { x1: measurePoint.x, y1: measurePoint.y, x2: position.x, y2: position.y },
@@ -302,7 +296,7 @@ export function useTileAnnotationPointer({
       const box = getDraftBox(firstPoint, position, {
         id: 'tile-box-preview',
         imageId: String(annotationImageId || ''),
-        color: '#f97316',
+        color: NEW_ANNOTATION_COLOR,
       });
       moveAnnotationDraft('tile', { mode: annotationToolMode, imageId: String(annotationImageId || ''), box });
     }

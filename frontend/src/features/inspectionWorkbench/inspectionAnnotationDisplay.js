@@ -1,5 +1,9 @@
 export const MEASUREMENT_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
 export const DEFAULT_ANNOTATION_COLOR = '#f97316';
+// Every new measurement line and bounding box drawn in the inspection views uses this
+// color, as does the in-progress draft preview, so a drawing never changes color when
+// it is committed. Saved annotations keep the color stored in their metadata.
+export const NEW_ANNOTATION_COLOR = MEASUREMENT_COLORS[0];
 export const DEFAULT_ANNOTATION_FILL_OPACITY = 0.5;
 export const DEFAULT_ANNOTATION_TRANSPARENCY_PERCENT = 0;
 

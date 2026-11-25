@@ -111,6 +111,11 @@ export function AnnotationsPane(props) {
             Drag around part of a parent image to create a child crop tile.
           </p>
         )}
+        {['measure', 'box', 'crop'].includes(annotationToolMode) && projectType !== 'PT3' && (
+          <p className="muted annotation-tool-hint">
+            The tool stays on for the next drawing. Press Esc or click the button again to stop.
+          </p>
+        )}
 	        {annotationToolMode === 'cube' && (
 	          <p className="muted annotation-tool-hint">
 	            Draw one box, move to another slice on the same axis, then draw the second box.

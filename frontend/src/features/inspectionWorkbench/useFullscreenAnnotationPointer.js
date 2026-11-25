@@ -14,6 +14,7 @@ import useFullscreenImageViewport from './useFullscreenImageViewport';
 import { isMiddleMousePanEvent, stopMiddleMouseDefault } from './inspectionUtils';
 import { FULLSCREEN_IMAGE_ZOOM_MAX, FULLSCREEN_IMAGE_ZOOM_MIN, MIDDLE_MOUSE_BUTTON } from './inspectionConstants';
 import { makeBoxFromPoints } from './inspectionAnnotationGeometry';
+import { NEW_ANNOTATION_COLOR } from './inspectionAnnotationDisplay';
 import { commitDraggedGeometry } from './annotationDragCommit';
 
 export function useFullscreenAnnotationPointer({
@@ -157,7 +158,7 @@ export function useFullscreenAnnotationPointer({
             imageHeight: position.naturalHeight,
           }),
           id: 'fullscreen-box-preview',
-          color: '#f97316',
+          color: NEW_ANNOTATION_COLOR,
         };
         moveAnnotationDraft('fullscreen', { mode: fullscreenCropActive ? 'crop' : 'box', box });
       }
@@ -173,7 +174,7 @@ export function useFullscreenAnnotationPointer({
         y2: position.y,
         imageWidth: position.naturalWidth,
         imageHeight: position.naturalHeight,
-        color: '#f97316',
+        color: NEW_ANNOTATION_COLOR,
         distancePx: Math.hypot(position.x - firstMeasurePoint.x, position.y - firstMeasurePoint.y),
         distanceMm: getLineDistanceMm(
           { x1: firstMeasurePoint.x, y1: firstMeasurePoint.y, x2: position.x, y2: position.y },

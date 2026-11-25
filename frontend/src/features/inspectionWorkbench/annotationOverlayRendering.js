@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import {
   getAnnotationBoxCornerViewBoxPosition,
   getAnnotationBoxHeightLabel,
@@ -15,6 +16,16 @@ import {
   projectAnnotationLine,
 } from './annotationOverlayFrame';
 import { DEFAULT_ANNOTATION_FILL_OPACITY } from './inspectionAnnotationDisplay';
+import { AnchorCenterDot, anchorRingProps } from './annotationAnchorHandle';
+
+// White outline drawn behind the label text so it stays readable over the
+// image and any nearby annotation strokes.
+export const measurementLabelHaloProps = (fontSize) => ({
+  stroke: '#ffffff',
+  strokeWidth: String(Math.max(3, Number(fontSize) * 0.18)),
+  strokeLinejoin: 'round',
+  paintOrder: 'stroke',
+});
 
 export function renderAnnotationOverlay({
   measurementLines = [],
@@ -29,7 +40,8 @@ export function renderAnnotationOverlay({
   return (
     <>
       {measurementLines.filter(isFiniteMeasurementLine).map((line) => {
-        const labelPosition = getMeasurementLabelViewBoxPosition(line, fontSize, frame);
+        const labelText = getMeasurementLineLabel(line, unit);
+        const labelPosition = getMeasurementLabelViewBoxPosition(line, fontSize, frame, labelText);
         const projected = projectAnnotationLine(line, frame);
         const isSelected = String(selectedAnnotationId || '') === String(line.id || '');
         const lineOpacity = Number.isFinite(Number(line.opacity)) ? Math.min(1, Math.max(0, Number(line.opacity))) : 1;
@@ -37,8 +49,17 @@ export function renderAnnotationOverlay({
           <g key={`line-${line.id}`} className={isSelected ? 'inspection-annotation-selected' : ''} opacity={visualOpacity * lineOpacity}>
             {isSelected && <line {...projected} stroke="#ffffff" strokeWidth="10" />}
             <line {...projected} stroke={line.color} strokeWidth={isSelected ? '6' : '3'} />
-            <text x={labelPosition.x} y={labelPosition.y} fill={line.color} fontSize={fontSize} fontWeight={isSelected ? '800' : '400'}>
-              {getMeasurementLineLabel(line, unit)}
+            <text
+              className="inspection-measurement-label"
+              x={labelPosition.x}
+              y={labelPosition.y}
+              textAnchor={labelPosition.textAnchor}
+              fill={line.color}
+              fontSize={fontSize}
+              fontWeight={isSelected ? '800' : '400'}
+              {...measurementLabelHaloProps(fontSize)}
+            >
+              {labelText}
             </text>
           </g>
         );
@@ -110,15 +131,12 @@ export function renderTileAnnotationEditingTargets({
               onClick={stopSyntheticClick}
             />
             {selected && ['start', 'end'].map((endpoint) => (
+              <Fragment key={endpoint}>
               <circle
-                key={endpoint}
                 className="inspection-measurement-endpoint-dot"
                 cx={endpoints[endpoint].x}
                 cy={endpoints[endpoint].y}
-                r="11"
-                fill="#ffffff"
-                stroke={line.color}
-                strokeWidth="5"
+                {...anchorRingProps(line.color)}
                 role="button"
                 aria-label={`Reposition tile ${endpoint} endpoint for ${line.name || 'measurement'}`}
                 onPointerDown={(event) => onStartDrag(event, 'line', endpoint, line)}
@@ -127,6 +145,8 @@ export function renderTileAnnotationEditingTargets({
                 onPointerCancel={onDragCancel}
                 onClick={stopSyntheticClick}
               />
+              <AnchorCenterDot x={endpoints[endpoint].x} y={endpoints[endpoint].y} color={line.color} />
+              </Fragment>
             ))}
           </g>
         );
@@ -149,15 +169,12 @@ export function renderTileAnnotationEditingTargets({
               onClick={stopSyntheticClick}
             />
             {selected && Object.entries(corners).map(([corner, point]) => (
+              <Fragment key={corner}>
               <circle
-                key={corner}
                 className="inspection-box-corner-dot"
                 cx={point.x}
                 cy={point.y}
-                r="11"
-                fill="#ffffff"
-                stroke={box.color}
-                strokeWidth="5"
+                {...anchorRingProps(box.color)}
                 role="button"
                 aria-label={`Reposition tile ${corner} corner for ${box.name || 'bounding box'}`}
                 onPointerDown={(event) => onStartDrag(event, 'box', corner, box)}
@@ -166,6 +183,8 @@ export function renderTileAnnotationEditingTargets({
                 onPointerCancel={onDragCancel}
                 onClick={stopSyntheticClick}
               />
+              <AnchorCenterDot x={point.x} y={point.y} color={box.color} />
+              </Fragment>
             ))}
           </g>
         );

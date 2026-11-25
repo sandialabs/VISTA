@@ -1,9 +1,12 @@
+import { Fragment } from 'react';
 import { getAnnotationBoxCornerViewBoxPosition, getMeasurementEndpointViewBoxPosition, getMeasurementLabelViewBoxPosition, getMeasurementLineLabel } from './inspectionAnnotationGeometry';
 import { DEFAULT_ANNOTATION_FRAME, projectAnnotationBox, projectAnnotationLine } from './annotationOverlayFrame';
+import { AnchorCenterDot, anchorRingProps } from './annotationAnchorHandle';
+import { measurementLabelHaloProps } from './annotationOverlayRendering';
 
 // While Draw Box, Measure, or Crop is active the tool owns the pointer:
-// existing shapes render without hit targets, so hovering or pressing on them
-// neither leaves the drawing surface (which cancels the tool) nor grabs them.
+// existing shapes render without hit targets, so a new shape can be drawn over
+// them without grabbing them. Press Escape or click the tool again to edit.
 function isFullscreenDrawToolActive(tools) {
   return Boolean(tools.fullscreenMeasureActive || tools.fullscreenBoxActive || tools.fullscreenCropActive);
 }
@@ -31,7 +34,8 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
   return (
     <>
 	                    {[...renderedFullscreenMeasurementLines, ...fullscreenPreviewLines].map((line) => {
-                      const labelPosition = getMeasurementLabelViewBoxPosition(line, 20, frame);
+                      const labelText = getMeasurementLineLabel(line, fullscreenAnnotationUnit);
+                      const labelPosition = getMeasurementLabelViewBoxPosition(line, 20, frame, labelText);
                       const endpointPositions = getMeasurementEndpointViewBoxPosition(line, frame);
                       const endpointActive = fullscreenEditingEndpoint?.lineId === String(line.id)
                         || String(fullscreenBoundsEditAnnotationId || '') === String(line.id);
@@ -45,14 +49,17 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
                             opacity={annotationOpacityMultiplier}
                           />
                           <text
+                            className="inspection-measurement-label"
                             x={labelPosition.x}
                             y={labelPosition.y}
+                            textAnchor={labelPosition.textAnchor}
                             fill={line.color}
                             fontSize="20"
                             pointerEvents="none"
                             opacity={annotationOpacityMultiplier}
+                            {...measurementLabelHaloProps(20)}
                           >
-                            {getMeasurementLineLabel(line, fullscreenAnnotationUnit)}
+                            {labelText}
                           </text>
 	                          {editTargetsEnabled && line.id !== 'fullscreen-measure-preview' && (
                             <line
@@ -68,15 +75,12 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
                             />
                           )}
                           {editTargetsEnabled && endpointActive && ['start', 'end'].map((endpoint) => (
+                            <Fragment key={endpoint}>
                             <circle
-                              key={endpoint}
                               className="inspection-measurement-endpoint-dot"
                               cx={endpointPositions[endpoint].x}
                               cy={endpointPositions[endpoint].y}
-                              r="11"
-                              fill="#ffffff"
-                              stroke={line.color}
-                              strokeWidth="5"
+                              {...anchorRingProps(line.color)}
                               role="button"
                               tabIndex={0}
                               aria-label={`Reposition ${endpoint} endpoint for ${line.name || 'measurement'}`}
@@ -95,6 +99,8 @@ export function FullscreenMeasurementLines({ readOnly, model, tools, display, fu
                                 }
                               }}
                             />
+                            <AnchorCenterDot x={endpointPositions[endpoint].x} y={endpointPositions[endpoint].y} color={line.color} />
+                            </Fragment>
                           ))}
                         </g>
 	                      );
@@ -137,15 +143,12 @@ export function FullscreenBoxHandles({ readOnly, model, tools, fullscreenHandler
                             onPointerCancel={(event) => finishFullscreenAnnotationDrag(event, { cancel: true })}
                           />
                           {!readOnly && cornerActive && Object.entries(cornerPositions).map(([corner, point]) => (
+                            <Fragment key={corner}>
                             <circle
-                              key={corner}
                               className="inspection-box-corner-dot"
                               cx={point.x}
                               cy={point.y}
-                              r="11"
-                              fill="#ffffff"
-                              stroke={box.color}
-                              strokeWidth="5"
+                              {...anchorRingProps(box.color)}
                               role="button"
                               tabIndex={0}
                               aria-label={`Reposition ${corner} corner for ${box.name || 'bounding box'}`}
@@ -164,6 +167,8 @@ export function FullscreenBoxHandles({ readOnly, model, tools, fullscreenHandler
                                 }
                               }}
                             />
+                            <AnchorCenterDot x={point.x} y={point.y} color={box.color} />
+                            </Fragment>
                           ))}
                         </g>
                       );

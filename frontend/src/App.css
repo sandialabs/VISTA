@@ -6190,21 +6190,6 @@ ul li:hover {
   overflow: hidden;
 }
 
-.inspection-fullscreen-tool-notice {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  z-index: 4;
-  pointer-events: none;
-}
-
-.inspection-fullscreen-tool-notice .workbench-notice {
-  max-width: min(560px, calc(100% - 24px));
-  margin: 0;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.28);
-}
-
 .inspection-fullscreen-workspace {
   flex: 1;
   min-height: 0;
@@ -6289,12 +6274,16 @@ ul li:hover {
   pointer-events: none;
 }
 
+/* Anchor handles: transparent ring with no shadow so the image under the anchor
+   stays visible; .inspection-anchor-center-dot marks the exact point. */
 .inspection-measurement-endpoint-dot,
 .inspection-box-corner-dot {
-  pointer-events: auto;
+  pointer-events: all;
   cursor: pointer;
-  paint-order: stroke;
-  filter: drop-shadow(0 0 4px rgba(15, 23, 42, 0.95));
+}
+
+.inspection-anchor-center-dot {
+  pointer-events: none;
 }
 
 .inspection-annotation-drag-target {
@@ -6365,8 +6354,33 @@ ul li:hover {
   overflow: hidden;
 }
 
+/* Selected entry: the inset shadow thickens the border to 4px without moving the
+   layout, the outer ring and tint use the annotation's own color, and the
+   title gets heavier. */
 .inspection-fullscreen-annotation.selected {
-  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.18);
+  --annotation-entry-selected-color: var(--annotation-entry-color, #3b82f6);
+  background: #eff6ff;
+  box-shadow:
+    inset 0 0 0 2px var(--annotation-entry-selected-color),
+    0 0 0 3px rgba(15, 23, 42, 0.3);
+}
+
+@supports (background: color-mix(in srgb, red 50%, white)) {
+  .inspection-fullscreen-annotation.selected {
+    background: color-mix(in srgb, var(--annotation-entry-selected-color) 14%, #ffffff);
+    box-shadow:
+      inset 0 0 0 2px var(--annotation-entry-selected-color),
+      0 0 0 3px color-mix(in srgb, var(--annotation-entry-selected-color) 40%, transparent);
+  }
+}
+
+.inspection-fullscreen-annotation.selected .inspection-fullscreen-annotation-title {
+  font-weight: 900;
+}
+
+.inspection-fullscreen-annotation.selected .inspection-fullscreen-annotation-length {
+  color: #0f172a;
+  font-weight: 600;
 }
 
 .inspection-fullscreen-annotation-body,

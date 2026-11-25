@@ -3432,8 +3432,9 @@ describe('InspectionWorkbenchPanel', () => {
     fireEvent.mouseDown(fullscreenCanvas, { clientX: 20, clientY: 100, button: 0 });
     fireEvent.mouseUp(fullscreenCanvas, { clientX: 225, clientY: 300, button: 0 });
     expect(global.fetch.mock.calls.some((call) => call[0].includes('/annotations') && call[1]?.method === 'POST')).toBe(false);
+    // The missed press leaves Draw box selected, so the next drag draws directly.
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
     fireEvent.mouseDown(fullscreenCanvas, { clientX: 100, clientY: 100, button: 0 });
     fireEvent.mouseUp(fullscreenCanvas, { clientX: 225, clientY: 300, button: 0 });
 
@@ -4448,7 +4449,8 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => expect(screen.getByAltText('front-basic.png view')).toBeInTheDocument());
     fireEvent.click(screen.getByAltText('front-basic.png view'));
     fireEvent.click(screen.getByRole('button', { name: 'Measure' }));
-    expect(screen.getByText(/Click and drag to draw a measurement line/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Done Measuring' })).toHaveClass('active');
+    expect(document.querySelector('.inspection-fullscreen-stage .workbench-notice')).not.toBeInTheDocument();
 
     const fullscreenImage = screen.getByAltText(/fullscreen$/i);
     expect(fullscreenImage.tagName).toBe('IMG');
@@ -4503,6 +4505,8 @@ describe('InspectionWorkbenchPanel', () => {
     dragTilePointer(tileImage, { clientX: 40, clientY: 20 }, { clientX: 140, clientY: 70 });
     await waitFor(() => expect(linePosts()).toHaveLength(1));
 
+    // Measure stays selected after the line; turn it off to open the single image view.
+    fireEvent.click(screen.getByRole('button', { name: 'Measure on tiles' }));
     fireEvent.click(tileImage);
     const fullscreenImage = screen.getByAltText(/fullscreen$/i);
     Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 1000 });
@@ -4552,9 +4556,10 @@ describe('InspectionWorkbenchPanel', () => {
       }));
     });
 	    await waitFor(() => expect(screen.getByLabelText('tile measurement overlay')).toHaveTextContent('5.59 mm'));
-	    expect(screen.getByRole('button', { name: 'Measure on tiles' })).not.toHaveClass('active');
+	    expect(screen.getByRole('button', { name: 'Measure on tiles' })).toHaveClass('active');
 
 	    fireEvent.click(screen.getByRole('button', { name: 'Draw box on tiles' }));
+	    expect(screen.getByRole('button', { name: 'Measure on tiles' })).not.toHaveClass('active');
 	    fireCoordinatePointerEvent(tileImage, 'pointerdown', { clientX: 50, clientY: 30, button: 0, pointerId: 2 });
 	    fireCoordinatePointerEvent(tileImage, 'pointermove', { clientX: 170, clientY: 90, pointerId: 2 });
 	    await waitFor(() => expect(screen.getByLabelText('tile measurement overlay')).toHaveTextContent('Width 6.00 mm'));
@@ -4579,7 +4584,7 @@ describe('InspectionWorkbenchPanel', () => {
 	    });
 	    await waitFor(() => expect(screen.getByLabelText('tile measurement overlay')).toHaveTextContent('Width 8.00 mm'));
 	    expect(screen.getByLabelText('tile measurement overlay')).toHaveTextContent('Height 5.00 mm');
-	    expect(screen.getByRole('button', { name: 'Draw box on tiles' })).not.toHaveClass('active');
+	    expect(screen.getByRole('button', { name: 'Draw box on tiles' })).toHaveClass('active');
 	  });
 
   test('anchors source tile annotations to the rendered image bounds', async () => {
@@ -4675,7 +4680,7 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Measurement calibration required' })).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/draw a measurement line/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Done Measuring' })).toHaveClass('active');
     const metadataPost = global.fetch.mock.calls.find(([url, options = {}]) => url.includes('/metadata') && options.method === 'POST');
     expect(JSON.parse(metadataPost[1].body)).toEqual(expect.objectContaining({ key: 'calibration_default' }));
   });
@@ -5664,17 +5669,18 @@ describe('InspectionWorkbenchPanel', () => {
     const measureButton = screen.getByRole('button', { name: 'Measure' });
     fireEvent.click(measureButton);
     expect(measureButton).toHaveClass('active');
-    expect(screen.getByText(/Click and drag to draw a measurement line/i).closest('.inspection-fullscreen-tool-notice')).toBeInTheDocument();
-    expect(document.querySelector('.inspection-fullscreen-stage')?.firstElementChild).toHaveClass('inspection-fullscreen-tool-notice');
+    // No instruction notice is drawn over the image.
+    expect(document.querySelector('.inspection-fullscreen-stage .workbench-notice')).not.toBeInTheDocument();
+    expect(document.querySelector('.inspection-fullscreen-stage')?.firstElementChild).toHaveClass('inspection-fullscreen-workspace');
     expect(document.querySelector('.inspection-fullscreen-workspace')).toBeInTheDocument();
     expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
     fireEvent.click(measureButton);
     expect(measureButton).not.toHaveClass('active');
-    expect(document.querySelector('.inspection-fullscreen-tool-notice')).not.toBeInTheDocument();
+    expect(document.querySelector('.inspection-fullscreen-stage .workbench-notice')).not.toBeInTheDocument();
     expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
 
     fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
-    expect(screen.getByText(/Press and drag to draw a bounding box/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
     expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
     expect(zoomLayer.style.transformOrigin).toBe('50% 50%');
 
@@ -5697,11 +5703,10 @@ describe('InspectionWorkbenchPanel', () => {
     await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 7.50 mm'));
     expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Height 4.00 mm');
     expect(screen.getByTestId('fullscreen-annotation-list')).toHaveTextContent('Width 7.50 mm');
-    expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active');
+    // Draw box stays selected, so the second box is drawn without re-clicking it.
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
     expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
-    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
     fireEvent.mouseDown(fullscreenImage, { clientX: 260, clientY: 130, button: 0 });
     fireEvent.mouseMove(fullscreenImage, { clientX: 320, clientY: 170 });
     await waitFor(() => expect(screen.getByLabelText('fullscreen measurement overlay')).toHaveTextContent('Width 3.00 mm'));
@@ -5719,7 +5724,9 @@ describe('InspectionWorkbenchPanel', () => {
     });
     expect(zoomLayer.style.transform).toBe('translate(0px, 0px) scale(1.15)');
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active'));
+    expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
+    fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+    expect(screen.getByRole('button', { name: 'Draw box' })).not.toHaveClass('active');
   });
 
 
@@ -9093,4 +9100,243 @@ describe('InspectionWorkbenchPanel', () => {
     expect(document.querySelector('.view-board img.inspection-view-image')).toBeNull();
   });
 
+  describe('annotation tool usability fixes', () => {
+    const annotationPosts = (kind) => global.fetch.mock.calls
+      .filter((call) => call[0].includes('/annotations') && call[1]?.method === 'POST')
+      .map((call) => JSON.parse(call[1].body))
+      .filter((body) => Boolean(body.geometry?.[kind]));
+
+    const setupTile = async () => {
+      mockWorkbenchFetch(scenarioByUser[0]);
+      render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+      const tileImage = await screen.findByAltText('front-basic.png view');
+      Object.defineProperty(tileImage, 'naturalWidth', { configurable: true, value: 400 });
+      Object.defineProperty(tileImage, 'naturalHeight', { configurable: true, value: 200 });
+      tileImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
+      return tileImage;
+    };
+
+    const setupFullscreen = async () => {
+      const tileImage = await setupTile();
+      fireEvent.click(tileImage);
+      const fullscreenImage = screen.getByAltText(/fullscreen$/i);
+      Object.defineProperty(fullscreenImage, 'naturalWidth', { configurable: true, value: 400 });
+      Object.defineProperty(fullscreenImage, 'naturalHeight', { configurable: true, value: 200 });
+      fullscreenImage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200, right: 400, bottom: 200 });
+      return fullscreenImage;
+    };
+
+    test('tile Measure and Draw box stay selected and every new shape uses the same color', async () => {
+      const tileImage = await setupTile();
+      const measureButton = screen.getByRole('button', { name: 'Measure on tiles' });
+      fireEvent.click(measureButton);
+      dragTilePointer(tileImage, { clientX: 20, clientY: 20 }, { clientX: 120, clientY: 60 });
+      await waitFor(() => expect(annotationPosts('line')).toHaveLength(1));
+      expect(measureButton).toHaveClass('active');
+      dragTilePointer(tileImage, { clientX: 30, clientY: 120 }, { clientX: 200, clientY: 150 });
+      dragTilePointer(tileImage, { clientX: 250, clientY: 20 }, { clientX: 350, clientY: 180 });
+      await waitFor(() => expect(annotationPosts('line')).toHaveLength(3));
+      expect(measureButton).toHaveClass('active');
+
+      const boxButton = screen.getByRole('button', { name: 'Draw box on tiles' });
+      fireEvent.click(boxButton);
+      dragTilePointer(tileImage, { clientX: 10, clientY: 10 }, { clientX: 60, clientY: 50 });
+      dragTilePointer(tileImage, { clientX: 100, clientY: 100 }, { clientX: 180, clientY: 160 });
+      await waitFor(() => expect(annotationPosts('box')).toHaveLength(2));
+      expect(boxButton).toHaveClass('active');
+
+      const colors = [...annotationPosts('line'), ...annotationPosts('box')]
+        .map((body) => body.metadata.annotation_color);
+      expect(new Set(colors)).toEqual(new Set(['#3b82f6']));
+    });
+
+    test('Escape cancels a tile shape in progress first, then turns the tool off', async () => {
+      const tileImage = await setupTile();
+      const boxButton = screen.getByRole('button', { name: 'Draw box on tiles' });
+      fireEvent.click(boxButton);
+      fireCoordinatePointerEvent(tileImage, 'pointerdown', { clientX: 10, clientY: 10, button: 0, pointerId: 1 });
+      fireCoordinatePointerEvent(tileImage, 'pointermove', { clientX: 90, clientY: 90, pointerId: 1 });
+      await waitFor(() => expect(screen.getByLabelText('tile measurement overlay')).toHaveTextContent('Width'));
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await waitFor(() => expect(screen.getByLabelText('tile measurement overlay')).not.toHaveTextContent('Width'));
+      expect(boxButton).toHaveClass('active');
+      fireCoordinatePointerEvent(tileImage, 'pointerup', { clientX: 90, clientY: 90, button: 0, pointerId: 1 });
+      expect(annotationPosts('box')).toHaveLength(0);
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(boxButton).not.toHaveClass('active');
+    });
+
+    test('a cancelled tile pointer keeps the tool selected', async () => {
+      const tileImage = await setupTile();
+      const measureButton = screen.getByRole('button', { name: 'Measure on tiles' });
+      fireEvent.click(measureButton);
+      fireCoordinatePointerEvent(tileImage, 'pointerdown', { clientX: 10, clientY: 10, button: 0, pointerId: 1 });
+      fireCoordinatePointerEvent(tileImage, 'pointercancel', { clientX: 10, clientY: 10, pointerId: 1 });
+      expect(measureButton).toHaveClass('active');
+      dragTilePointer(tileImage, { clientX: 20, clientY: 20 }, { clientX: 120, clientY: 60 });
+      await waitFor(() => expect(annotationPosts('line')).toHaveLength(1));
+    });
+
+    test('Escape typed into a text field does not turn the tool off', async () => {
+      await setupTile();
+      const measureButton = screen.getByRole('button', { name: 'Measure on tiles' });
+      fireEvent.click(measureButton);
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(measureButton).toHaveClass('active');
+      input.remove();
+    });
+
+    test('single image view Measure and Draw box stay selected across drawings and Escape turns them off', async () => {
+      const fullscreenImage = await setupFullscreen();
+      const measureButton = screen.getByRole('button', { name: 'Measure' });
+      fireEvent.click(measureButton);
+      dragFullscreenMouse(fullscreenImage, { clientX: 20, clientY: 20 }, { clientX: 120, clientY: 60 });
+      await waitFor(() => expect(annotationPosts('line')).toHaveLength(1));
+      dragFullscreenMouse(fullscreenImage, { clientX: 40, clientY: 140 }, { clientX: 220, clientY: 160 });
+      await waitFor(() => expect(annotationPosts('line')).toHaveLength(2));
+      expect(screen.getByRole('button', { name: 'Done Measuring' })).toHaveClass('active');
+
+      const boxButton = screen.getByRole('button', { name: 'Draw box' });
+      fireEvent.click(boxButton);
+      expect(screen.getByRole('button', { name: 'Measure' })).not.toHaveClass('active');
+      dragFullscreenMouse(fullscreenImage, { clientX: 10, clientY: 10 }, { clientX: 60, clientY: 50 });
+      await waitFor(() => expect(annotationPosts('box')).toHaveLength(1));
+      expect(boxButton).toHaveClass('active');
+      // Leaving the image mid-drag discards the box but keeps the tool.
+      fireEvent.mouseDown(fullscreenImage, { clientX: 100, clientY: 100, button: 0 });
+      fireEvent.mouseLeave(fullscreenImage);
+      expect(boxButton).toHaveClass('active');
+      dragFullscreenMouse(fullscreenImage, { clientX: 200, clientY: 100 }, { clientX: 300, clientY: 180 });
+      await waitFor(() => expect(annotationPosts('box')).toHaveLength(2));
+      expect(boxButton).toHaveClass('active');
+
+      const colors = [...annotationPosts('line'), ...annotationPosts('box')]
+        .map((body) => body.metadata.annotation_color);
+      expect(new Set(colors)).toEqual(new Set(['#3b82f6']));
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(boxButton).not.toHaveClass('active');
+      // The single image view itself stays open.
+      expect(screen.getByAltText(/fullscreen$/i)).toBeInTheDocument();
+    });
+
+    test('single image view New Crop stays selected after a crop', async () => {
+      const originalImage = global.Image;
+      const originalCreateElement = document.createElement.bind(document);
+      global.Image = class MockImage {
+        constructor() { this.naturalWidth = 400; this.naturalHeight = 200; this.width = 400; this.height = 200; }
+
+        set src(value) { this._src = value; setTimeout(() => this.onload?.(), 0); }
+
+        get src() { return this._src; }
+      };
+      jest.spyOn(document, 'createElement').mockImplementation((tagName, ...args) => {
+        if (tagName === 'canvas') {
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({ drawImage: jest.fn() }),
+            toBlob: (callback) => callback(new Blob(['crop-bytes'], { type: 'image/png' })),
+          };
+        }
+        return originalCreateElement(tagName, ...args);
+      });
+      try {
+        const fullscreenImage = await setupFullscreen();
+        const cropButton = screen.getByRole('button', { name: 'New Crop' });
+        fireEvent.click(cropButton);
+        dragFullscreenMouse(fullscreenImage, { clientX: 20, clientY: 20 }, { clientX: 120, clientY: 90 });
+        const uploads = () => global.fetch.mock.calls.filter((call) => call[0].includes('/projects/proj-1/images') && call[1]?.method === 'POST');
+        await waitFor(() => expect(uploads()).toHaveLength(1));
+        expect(screen.getByRole('button', { name: 'New Crop' })).toHaveClass('active');
+        // The view stays on the parent image.
+        expect(screen.getByAltText(/fullscreen$/i)).toBe(fullscreenImage);
+        dragFullscreenMouse(fullscreenImage, { clientX: 200, clientY: 50 }, { clientX: 300, clientY: 150 });
+        await waitFor(() => expect(uploads()).toHaveLength(2));
+        expect(screen.getByRole('button', { name: 'New Crop' })).toHaveClass('active');
+      } finally {
+        document.createElement.mockRestore();
+        global.Image = originalImage;
+      }
+    });
+
+    test('Draw box can be picked directly while New Crop is active in the single image view', async () => {
+      await setupFullscreen();
+      fireEvent.click(screen.getByRole('button', { name: 'New Crop' }));
+      expect(screen.getByRole('button', { name: 'New Crop' })).toHaveClass('active');
+      fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
+      expect(screen.getByRole('button', { name: 'Draw box' })).toHaveClass('active');
+      expect(screen.getByRole('button', { name: 'New Crop' })).not.toHaveClass('active');
+    });
+
+    test('Escape is left to another open dialog', async () => {
+      await setupTile();
+      const measureButton = screen.getByRole('button', { name: 'Measure on tiles' });
+      fireEvent.click(measureButton);
+      const dialog = document.createElement('div');
+      dialog.setAttribute('role', 'dialog');
+      document.body.appendChild(dialog);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(measureButton).toHaveClass('active');
+      dialog.remove();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(measureButton).not.toHaveClass('active');
+    });
+
+    test('anchor handles are transparent rings with a center dot and no shadow', async () => {
+      mockWorkbenchFetch({
+        ...scenarioByUser[0],
+        parts: [{
+          ...scenarioByUser[0].parts[0],
+          metadata: {
+            ...scenarioByUser[0].parts[0].metadata,
+            annotations: [{
+              id: 'anchor-line',
+              image_id: 'part-basic-1-image-1',
+              comment: 'Anchor check',
+              geometry: { line: { x1: 100, y1: 80, x2: 280, y2: 160, imageWidth: 400, imageHeight: 200 } },
+              measurements: { length_mm: 4.2, length_px: 196.98 },
+              metadata: { measurement_color: '#ef4444' },
+            }],
+          },
+        }],
+      });
+      render(<InspectionWorkbenchPanel projectId="proj-1" projectType="PT1" />);
+      await waitFor(() => expect(screen.getByAltText('front-basic.png view')).toBeInTheDocument());
+      fireEvent.click(screen.getByAltText('front-basic.png view'));
+      fireEvent.click(screen.getByText('Anchor check'));
+      const endpointDot = await screen.findByLabelText('Reposition end endpoint for Anchor check');
+      expect(endpointDot).toHaveAttribute('fill', 'transparent');
+      expect(endpointDot).toHaveAttribute('pointer-events', 'all');
+      // A saved annotation keeps its stored color.
+      expect(endpointDot).toHaveAttribute('stroke', '#ef4444');
+      expect(endpointDot.getAttribute('filter')).toBeNull();
+      const centerDot = endpointDot.nextElementSibling;
+      expect(centerDot).toHaveClass('inspection-anchor-center-dot');
+      expect(centerDot).toHaveAttribute('cx', endpointDot.getAttribute('cx'));
+      expect(centerDot).toHaveAttribute('cy', endpointDot.getAttribute('cy'));
+      expect(centerDot).toHaveAttribute('pointer-events', 'none');
+
+      // The selected entry in the single image view list is marked and highlighted.
+      const entry = screen.getByText('Anchor check').closest('li');
+      expect(entry).toHaveClass('selected');
+      expect(entry).toHaveAttribute('aria-current', 'true');
+      expect(entry.style.getPropertyValue('--annotation-entry-color')).toBe('#ef4444');
+    });
+
+    test('measurement labels carry a text halo and an anchor', async () => {
+      const tileImage = await setupTile();
+      fireEvent.click(screen.getByRole('button', { name: 'Measure on tiles' }));
+      dragTilePointer(tileImage, { clientX: 40, clientY: 180 }, { clientX: 360, clientY: 20 });
+      await waitFor(() => expect(annotationPosts('line')).toHaveLength(1));
+      await waitFor(() => expect(document.querySelector('.inspection-measurement-label')).toBeInTheDocument());
+      const label = document.querySelector('.inspection-measurement-label');
+      expect(label).toHaveAttribute('stroke', '#ffffff');
+      expect(label).toHaveAttribute('paint-order', 'stroke');
+      expect(['start', 'middle', 'end']).toContain(label.getAttribute('text-anchor'));
+    });
+  });
 });

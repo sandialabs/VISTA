@@ -76,6 +76,7 @@ import { useFullscreenAnnotationPointer } from '../features/inspectionWorkbench/
 import { useFullscreenAnnotationTools } from '../features/inspectionWorkbench/useFullscreenAnnotationTools';
 import { useMprAnnotationPointer } from '../features/inspectionWorkbench/useMprAnnotationPointer';
 import { useTileAnnotationPointer } from '../features/inspectionWorkbench/useTileAnnotationPointer';
+import useAnnotationToolEscape from '../features/inspectionWorkbench/useAnnotationToolEscape';
 import { useInspectionViewportZoom } from '../features/inspectionWorkbench/useInspectionViewportZoom';
 import { useInspectionAnnotationActions } from '../features/inspectionWorkbench/useInspectionAnnotationActions';
 import { useInspectionCropActions } from '../features/inspectionWorkbench/useInspectionCropActions';
@@ -221,7 +222,7 @@ function InspectionWorkbenchPanel({
   const [sessionCalibrationByImageId, setSessionCalibrationByImageId] = useState({});
   const annotationLayers = useInspectionAnnotationLayers({ annotationLayerVisible, annotations });
   const {
-    pt3RenderableAnnotations, storedBoxAnnotationsByImageId, storedMeasurementLinesByImageId,
+    pt3RenderableAnnotations,
     storedMprBoxAnnotationsBySlice, storedMprMeasurementLinesBySlice,
   } = annotationLayers;
   const [mprGeometryDragPreview, setMprGeometryDragPreview] = useState(null);
@@ -598,7 +599,7 @@ function InspectionWorkbenchPanel({
   const {
     classifyMeasurementLine, createAnnotation, createBoxAnnotation, createCubeAnnotation,
     createMeasurementAnnotation, deleteAnalyzeOverlay, deleteMeasurementAnnotation, nextMeasurementName,
-    setTileAnnotationMode, updateAnnotationFromModal, updateBoxAnnotationGeometry,
+    setTileAnnotationMode, turnOffTileAnnotationTool, updateAnnotationFromModal, updateBoxAnnotationGeometry,
     updateMeasurementAnnotationLine,
   } = useInspectionAnnotationActions({
     readOnly,
@@ -724,16 +725,21 @@ function InspectionWorkbenchPanel({
     requireCalibrationForAnnotation,
     annotationDraftsRef,
     startAnnotationDraft,
-    storedMeasurementLinesByImageId,
     createMeasurementAnnotation,
     nextMeasurementName,
     classifyMeasurementLine,
     finishAnnotationDraft,
     createCropChildImage,
-    storedBoxAnnotationsByImageId,
     createBoxAnnotation,
-    deactivateFullscreenBoxTools: fullscreenSession.deactivateFullscreenBoxTools,
     moveAnnotationDraft,
+  });
+
+  useAnnotationToolEscape({
+    annotationToolMode,
+    turnOffTileTool: turnOffTileAnnotationTool,
+    annotationDraftsRef,
+    cancelAnnotationDraft,
+    fullscreenSession,
   });
 
   const mprPointer = useMprAnnotationPointer({
@@ -788,13 +794,9 @@ function InspectionWorkbenchPanel({
     getCalibrationForImage,
     getAnnotationSourceImageIdForImage,
     requireCalibrationForAnnotation,
-    storedMprBoxAnnotationsBySlice,
-    storedBoxAnnotationsByImageId,
     createBoxAnnotation,
     classifyMeasurementLine,
     nextMeasurementName,
-    storedMprMeasurementLinesBySlice,
-    storedMeasurementLinesByImageId,
     getLineDistanceMm,
     createMeasurementAnnotation,
     getFullscreenImagePointerPosition: fullscreenPointer.getFullscreenImagePointerPosition,

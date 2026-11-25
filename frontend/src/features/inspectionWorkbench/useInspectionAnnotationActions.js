@@ -88,6 +88,14 @@ export function useInspectionAnnotationActions({
     cancelAnnotationDraft('mpr');
   };
 
+  // Turns the active tile tool off with the same cleanup as clicking its button again.
+  const turnOffTileAnnotationTool = () => {
+    setAnnotationToolMode('');
+    cancelAnnotationDraft('tile');
+    setTileCalibrationPromptImageId(null);
+    cancelAnnotationDraft('mpr');
+  };
+
   const selectCreatedAnnotation = (created) => {
     setAnnotations((prev) => [created, ...prev]);
     setSelectedAnnotationId(created.id);
@@ -296,6 +304,7 @@ export function useInspectionAnnotationActions({
   return {
     deleteAnalyzeOverlay,
     setTileAnnotationMode,
+    turnOffTileAnnotationTool,
     createAnnotation,
     createMeasurementAnnotation,
     createBoxAnnotation,

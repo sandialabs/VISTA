@@ -22,13 +22,6 @@ export function FullscreenImageModal({ readOnly, projectId, projectType, modal, 
     fullscreenCalibrationPromptVisible,
   } = modal;
   const {
-    fullscreenMeasureActive,
-    fullscreenBoxActive,
-    fullscreenCropActive,
-    fullscreenEditingEndpoint,
-    fullscreenEditingBoxCorner,
-  } = tools;
-  const {
     closeFullscreenImageModal,
   } = fullscreenHandlers;
   return (
@@ -52,14 +45,6 @@ export function FullscreenImageModal({ readOnly, projectId, projectType, modal, 
             />
           )}
 	          <div className="inspection-fullscreen-stage">
-            {(fullscreenMeasureActive || fullscreenBoxActive || fullscreenCropActive || fullscreenEditingEndpoint || fullscreenEditingBoxCorner) && (
-              <div className="inspection-fullscreen-tool-notice" aria-live="polite">
-                {fullscreenMeasureActive && <div className="workbench-notice">Click and drag to draw a measurement line.</div>}
-                {fullscreenBoxActive && <div className="workbench-notice">Press and drag to draw a bounding box.</div>}
-                {fullscreenCropActive && <div className="workbench-notice">Press and drag around the parent image feature to create a child crop.</div>}
-                {(fullscreenEditingEndpoint || fullscreenEditingBoxCorner) && <div className="workbench-notice">Click the new endpoint or corner position to update the selected annotation.</div>}
-              </div>
-            )}
             <div className="inspection-fullscreen-workspace">
               <FullscreenImageStage
                 readOnly={readOnly}
